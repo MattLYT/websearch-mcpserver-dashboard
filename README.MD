@@ -37,7 +37,7 @@
 | **接入** | Claude Code / Qwen Code / Cursor / HTTP API / 嵌入 Go 模块 |
 | **协议** | `/mcp` 四个工具 · `/searxng/search` 兼容 LiteLLM · `/__admin` 进程管理 |
 | **编排** | `factory` 按 mode 组装 · `hybrid` 并发去重合并 · RRF / Boost / MMR 评分 |
-| **引擎** | 通用：百度网页 / 千帆 / Bing / DDG / Tavily / Exa / AnySearch；学术 9 源并行 |
+| **引擎** | 通用：百度网页 / 千帆 / Bing / DDG / Tavily / Exa / AnySearch / 豆包；学术 9 源并行 |
 | **支撑** | SQLite 缓存、系统代理自动检测、webfetch（SSRF 防护）、MinerU、LLM 流式摘要 |
 
 更完整的回退链、代理检测与嵌入方式见 [docs/architecture.md](docs/architecture.md)。
@@ -59,7 +59,7 @@
 | 能力 | 说明 |
 |------|------|
 | 零 Key 搜索 | `engine` 模式内置百度网页搜索 + Bing 并发，无需任何 API Key |
-| 多引擎融合 | 多种搜索模式、7 个通用引擎 + 9 个学术引擎，主引擎失败自动回退 |
+| 多引擎融合 | 多种搜索模式、8 个通用引擎 + 9 个学术引擎，主引擎失败自动回退 |
 | 相关性评分 | RRF 融合排名 + 词汇对齐 / 域名品质 / 共识 / 权威 / 时效加分，低分自动裁剪；MMR 打散转载 / 镜像 |
 | 学术搜索 | 9 大学术引擎并行，按引用数 / 期刊权威 / PDF 可用性 / 新鲜度评分；DOI 跨引擎去重 |
 | 网页抓取 | `cleanfetch` 内置 SSRF / DNS rebinding 防护与超大文件预检，失败回退 Jina Reader |

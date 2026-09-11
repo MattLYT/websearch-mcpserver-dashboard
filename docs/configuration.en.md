@@ -19,6 +19,8 @@ Priority (high to low):
 2. CLI flag `-c / --config`
 3. Current directory `config.yaml`
 
+> For local integration tests, put API keys in gitignored `config.test.yaml` at the repo root and load it via `WEBSEARCH_CONFIG`. **Do not commit that file.**
+
 > HTTP daemon: with `-c`, the PID file and log file are written under the config file's directory.
 > stdio CLI: no PID file; logs go to `websearch.log` in the config directory (console logs on **stderr** so they do not corrupt JSON-RPC on stdout).
 
@@ -48,7 +50,7 @@ mode: engine
 # port may be omitted; it has no effect for stdio
 ```
 
-Key env vars work the same as HTTP: `BAIDU_SK`, `TAVILY_SK`, `EXA_API_KEY`, `LLM_BASE_URL`, `LLM_API_KEY`, `MINERU_TOKEN`, etc. When running with in-memory defaults (no config file), those key-related env vars are still applied; full field defaults still follow the "load file + Viper" path when a file is present.
+Key env vars work the same as HTTP: `BAIDU_SK`, `TAVILY_SK`, `EXA_API_KEY`, `ANYSEARCH_API_KEY`, `DOUBAO_SEARCH_API_KEY` (also `ASK_ECHO_SEARCH_INFINITY_API_KEY`), `LLM_BASE_URL`, `LLM_API_KEY`, `MINERU_TOKEN`, etc. When running with in-memory defaults (no config file), those key-related env vars are still applied; full field defaults still follow the "load file + Viper" path when a file is present.
 
 Write an example file:
 
@@ -125,7 +127,7 @@ doubao:
   max_snippet_length: 500   # Global: max tokens per snippet, maximum 3000
   max_image_count_per_doc: 0 # Global: images per document, default 0
   icp_host_only: false      # Global: restrict search to ICP-filed China sites
-  time_range: ""            # Custom default; MCP request-level time_range takes precedence
+  time_range: ""            # Custom default; MCP request-level time_range wins (mapped to OneDay/OneWeek/OneMonth/OneYear; Global ignores it)
   auth_level: 0             # Custom: 0=default, 1=highly authoritative sources only
   query_rewrite: false      # Custom: enable query rewriting
   need_content: false       # Custom: request full page content
@@ -219,7 +221,7 @@ pdf_parser:
 #     enabled: true            # Master switch (default true)
 #     lambda: 0.7              # Relevance-diversity tradeoff [0,1], higher = more relevance (default 0.7)
 #     target_count: 0          # Target count after MMR, 0 = no extra truncation
-#   engines:              # Per-engine config (names: tavily_api, exa, baidu_api, baidu, bing, google, duckduckgo)
+#   engines:              # Per-engine config (names: tavily_api, exa, baidu_api, baidu, bing, google, duckduckgo, anysearch, doubao)
 #     tavily_api:
 #       min_score: 0.5    # Tavily API minimum relevance score threshold (0 = no filter)
 #       max_size: 6       # Tavily API per-engine max results (default 4)
@@ -248,6 +250,14 @@ pdf_parser:
 #       min_score: 0      # DuckDuckGo doesn't return score, this field is ignored
 #       max_size: 4       # DuckDuckGo per-engine max results
 #       weight: 1.0
+#     anysearch:
+#       min_score: 0      # AnySearch doesn't return score, this field is ignored
+#       max_size: 4
+#       weight: 1.0
+#     doubao:
+#       min_score: 0      # Custom returns score; Global does not
+#       max_size: 4
+#       weight: 1.0
 
 # Apipool mode config (optional, effective when mode=apipool)
 # apipool:
@@ -255,10 +265,12 @@ pdf_parser:
 #                         # priority: always start from first provider
 #                         # weighted: weighted-random starting provider (see weights)
 #   engines:              # Provider priority order (default [anysearch, baidu, tavily, exa], Baidu web search fallback always last)
+#                         # Doubao is not in the default list; add it explicitly when you have a key
 #     - anysearch
 #     - baidu
 #     - tavily
 #     - exa
+#     # - doubao
 #   weights:              # weighted strategy weights (per-key, accumulated by available key count)
 #     anysearch: 30000    # defaults: anysearch=30000, baidu=1500, tavily=1200, exa=1200, doubao=500 (monthly free-tier credits)
 #     baidu: 1500
@@ -305,10 +317,11 @@ log:
 | `rate_limit.per_sec` | 3 | Global rate limit |
 | `rate_limit.per_min` | 60 | Global rate limit |
 | `apipool.strategy` | round-robin | `round-robin` rotates provider across requests / `priority` fixed order / `weighted` weighted-random |
-| `apipool.engines` | [anysearch, baidu, tavily, exa] | Provider priority order, Baidu web search fallback always last |
+| `apipool.engines` | [anysearch, baidu, tavily, exa] | Provider priority order, Baidu web search fallback always last; `doubao` is not in the default list — add it explicitly when you have a key |
 | `apipool.weights` | anysearch=30000, baidu=1500, tavily=1200, exa=1200, doubao=500 | weighted per-key weights, accumulated by available key count; doubao 500 matches the free-tier monthly credits |
 | `doubao.version` | global | Global / Custom; concurrent both goes through hybrid, not inside the adapter |
 | `doubao.num_results` | 10 | Global max 20; Custom max 50 |
+| `doubao.time_range` | "" | Custom default; MCP request-level `time_range` wins (mapped to OneDay/OneWeek/OneMonth/OneYear) |
 | `baidu.enable_ai_search` | true | true=AI search chat/completions, false=web search web_search; no LLM cost when model is empty |
 | `bing.enabled` | true | |
 | `duckduckgo.enabled` | true | Needs proxy; auto-joins when proxy is available |

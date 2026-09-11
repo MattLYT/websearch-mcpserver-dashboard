@@ -3,7 +3,7 @@
 # 发布矩阵拆分：本工作流只构建容器 linux/amd64 + linux/arm64（closes #4）。
 # GitHub Release 不含 linux-arm64 / windows-arm64 二进制；MCP mcpb 跟 Release 四平台。
 #
-# Trigger: 普通 semver tag（v3.4.0）；-registry 后缀不重复推镜像
+# Trigger: 普通 semver tag（v3.4.0）同时推 GHCR；-registry 后缀不重复推镜像
 #   - Go 交叉编译在 Dockerfile BUILDPLATFORM 阶段完成，不装 QEMU
 #   - 失败不影响 GitHub Release / MCP Registry 工作流
 

@@ -37,7 +37,7 @@ Layered design: clients see four MCP tools; the engine group is assembled by `mo
 | **Client** | Claude Code / Qwen Code / Cursor / HTTP API / embed as a Go module |
 | **Protocol** | `/mcp` four tools · `/searxng/search` for LiteLLM · `/__admin` process management |
 | **Orchestration** | `factory` by mode · `hybrid` concurrent dedup/merge · RRF / boost / MMR scoring |
-| **Engines** | General: Baidu web / Qianfan / Bing / DDG / Tavily / Exa / AnySearch; 9 academic sources in parallel |
+| **Engines** | General: Baidu web / Qianfan / Bing / DDG / Tavily / Exa / AnySearch / Doubao; 9 academic sources in parallel |
 | **Support** | SQLite cache, system-proxy auto-detect, webfetch (SSRF), MinerU, streaming LLM summary |
 
 Fallback chain, proxy detection, and embedding details: [docs/architecture.en.md](docs/architecture.en.md).
@@ -59,7 +59,7 @@ Four tools cover the web workflow. Results feed into each other — one config e
 | Capability | Description |
 |------------|-------------|
 | Zero-key search | `engine` mode runs Baidu web search + Bing concurrently, no API keys required |
-| Multi-engine fusion | Multiple search modes, 7 general engines + 9 academic engines, auto-fallback on primary failure |
+| Multi-engine fusion | Multiple search modes, 8 general engines + 9 academic engines, auto-fallback on primary failure |
 | Relevance scoring | RRF fusion ranking + lexical alignment / domain quality / consensus / authority / recency boosts, low-score results pruned; MMR breaks up mirrors / reposts |
 | Academic search | 9 academic engines in parallel, scored by citation count / journal authority / PDF availability / recency; cross-engine DOI dedup |
 | Web fetching | `cleanfetch` with built-in SSRF / DNS-rebinding protection and oversized-file pre-check; fallback to Jina Reader |

@@ -284,7 +284,7 @@ log:
 #     enabled: true            # 总开关（默认 true）
 #     lambda: 0.7              # 相关性-多样性权衡系数 [0,1]，越高越偏相关性，越低越偏多样性（默认 0.7）
 #     target_count: 0          # MMR 后目标条数，0 = 不额外截断（由 max_size 统一截断）
-#   engines:              # 按引擎名配置（引擎名: tavily_api, exa, baidu_api, baidu, bing, google, duckduckgo）
+#   engines:              # 按引擎名配置（引擎名: tavily_api, exa, baidu_api, baidu, bing, google, duckduckgo, anysearch, doubao）
 #     tavily_api:
 #       min_score: 0.5    # Tavily API 最低相关性分数阈值（0 = 不过滤）
 #       max_size: 6       # Tavily API 单引擎最大结果数（默认 4）
@@ -313,6 +313,14 @@ log:
 #       min_score: 0      # DuckDuckGo 不回传 score，此字段无效
 #       max_size: 4       # DuckDuckGo 单引擎最大结果数
 #       weight: 1.0       # 引擎权重，影响 RRF 融合分，0 = 默认 1.0
+#     anysearch:
+#       min_score: 0      # AnySearch 不回传 score，此字段无效
+#       max_size: 4
+#       weight: 1.0
+#     doubao:
+#       min_score: 0      # Custom 回传 score；Global 不回传
+#       max_size: 4
+#       weight: 1.0
 
 # ==============================================
 # Apipool 模式配置（可选，mode=apipool 时生效）
@@ -328,6 +336,7 @@ log:
 #     - baidu
 #     - tavily
 #     - exa
+#     # - doubao          # 不在默认列表；有 Key 时显式加入
 #   weights:              # weighted 策略的供应商权重（单 Key 权重，实际权重 = 配置权重 × 当前可用 Key 数累加）
 #                         # 默认值: anysearch=30000, baidu=1500, tavily=1200, exa=1200, doubao=500（每月默认积分）；显式 0 = 不参与加权起始选择
 #     anysearch: 30000

@@ -19,6 +19,8 @@
 2. CLI 参数 `-c / --config`
 3. 当前目录 `config.yaml`
 
+> 本地集成测试可把 API Key 写在仓库根目录、已被 `.gitignore` 的 `config.test.yaml`，测试通过环境变量 `WEBSEARCH_CONFIG` 加载。**不要提交该文件。**
+
 > HTTP daemon：通过 `-c` 指定后，PID 文件和日志文件写到配置文件所在目录。
 > stdio CLI：无 PID；日志写到配置目录下的 `websearch.log`（控制台日志在 **stderr**，避免污染 stdout 上的 JSON-RPC）。
 
@@ -48,7 +50,7 @@ mode: engine
 # port 可省略；写了也不生效
 ```
 
-也可用环境变量注入 Key（与 HTTP 相同）：`BAIDU_SK`、`TAVILY_SK`、`EXA_API_KEY`、`LLM_BASE_URL`、`LLM_API_KEY`、`MINERU_TOKEN` 等。无配置文件走内存默认时，上述 Key 类环境变量仍会被读取；完整字段默认值仍以「读配置文件 + Viper」路径为准。
+也可用环境变量注入 Key（与 HTTP 相同）：`BAIDU_SK`、`TAVILY_SK`、`EXA_API_KEY`、`ANYSEARCH_API_KEY`、`DOUBAO_SEARCH_API_KEY`（兼容 `ASK_ECHO_SEARCH_INFINITY_API_KEY`）、`LLM_BASE_URL`、`LLM_API_KEY`、`MINERU_TOKEN` 等。无配置文件走内存默认时，上述 Key 类环境变量仍会被读取；完整字段默认值仍以「读配置文件 + Viper」路径为准。
 
 生成示例文件：
 
@@ -124,7 +126,7 @@ doubao:
   max_snippet_length: 500   # Global: 单片段最大 tokens，最大 3000
   max_image_count_per_doc: 0 # Global: 图片数，默认 0
   icp_host_only: false      # Global: 仅搜索国内 ICP 备案网站
-  time_range: ""            # Custom 默认时间范围；MCP 请求级 time_range 优先
+  time_range: ""            # Custom 默认时间范围；MCP 请求级 time_range 优先（映射 OneDay/OneWeek/OneMonth/OneYear；Global 忽略）
   auth_level: 0             # Custom: 0=默认，1=仅非常权威来源
   query_rewrite: false      # Custom: 是否启用查询改写
   need_content: false       # Custom: 是否请求网页正文
@@ -218,7 +220,7 @@ pdf_parser:
 #     enabled: true            # 总开关（默认 true）
 #     lambda: 0.7              # 相关性-多样性权衡系数 [0,1]，越高越偏相关性（默认 0.7）
 #     target_count: 0          # MMR 后目标条数，0 = 不额外截断
-#   engines:              # 按引擎名配置（引擎名: tavily_api, exa, baidu_api, baidu, bing, google, duckduckgo）
+#   engines:              # 按引擎名配置（引擎名: tavily_api, exa, baidu_api, baidu, bing, google, duckduckgo, anysearch, doubao）
 #     tavily_api:
 #       min_score: 0.5    # Tavily API 最低相关性分数阈值（0 = 不过滤）
 #       max_size: 6       # Tavily API 单引擎最大结果数（默认 4）
@@ -247,6 +249,14 @@ pdf_parser:
 #       min_score: 0      # DuckDuckGo 不回传 score，此字段无效
 #       max_size: 4
 #       weight: 1.0
+#     anysearch:
+#       min_score: 0      # AnySearch 不回传 score，此字段无效
+#       max_size: 4
+#       weight: 1.0
+#     doubao:
+#       min_score: 0      # Custom 回传 score；Global 不回传
+#       max_size: 4
+#       weight: 1.0
 
 # Apipool 模式配置（可选，mode=apipool 时生效）
 # apipool:
@@ -254,10 +264,12 @@ pdf_parser:
 #                         # priority: 始终从第一个供应商开始
 #                         # weighted: 按权重加权随机选起始供应商（见 weights）
 #   engines:              # 供应商优先级顺序（默认 [anysearch, baidu, tavily, exa]，百度网页搜索兜底始终在末尾）
+#                         # 豆包不在默认列表；有 Key 时请显式加入
 #     - anysearch
 #     - baidu
 #     - tavily
 #     - exa
+#     # - doubao
 #   weights:              # weighted 策略权重（单 Key 权重，实际权重按可用 Key 数累加）
 #     anysearch: 30000    # 默认值: anysearch=30000, baidu=1500, tavily=1200, exa=1200, doubao=500（每月默认积分）
 #     baidu: 1500
@@ -304,10 +316,11 @@ log:
 | `rate_limit.per_sec` | 3 | 全局限流 |
 | `rate_limit.per_min` | 60 | 全局限流 |
 | `apipool.strategy` | round-robin | `round-robin` 跨请求轮转供应商 / `priority` 固定优先级顺序 / `weighted` 加权随机 |
-| `apipool.engines` | [anysearch, baidu, tavily, exa] | 供应商优先级顺序，百度网页搜索兜底始终在末尾 |
+| `apipool.engines` | [anysearch, baidu, tavily, exa] | 供应商优先级顺序，百度网页搜索兜底始终在末尾；`doubao` 不在默认列表，有 Key 时显式加入 |
 | `apipool.weights` | anysearch=30000, baidu=1500, tavily=1200, exa=1200, doubao=500 | weighted 策略单 Key 权重，实际权重按可用 Key 数累加；豆包 500 对齐免费档每月积分
 | `doubao.version` | global | Global / Custom；两版并发走 hybrid，适配器内不提供 both |
 | `doubao.num_results` | 10 | Global 最大 20；Custom 最大 50 |
+| `doubao.time_range` | "" | Custom 默认时间范围；MCP 请求级 `time_range` 优先（映射 OneDay/OneWeek/OneMonth/OneYear） |
 | `baidu.enable_ai_search` | true | true=智能搜索 chat/completions，false=网页搜索 web_search；不传 model 不产生 LLM 费用 |
 | `bing.enabled` | true | |
 | `duckduckgo.enabled` | true | 需代理，代理可用时自动参与 |
