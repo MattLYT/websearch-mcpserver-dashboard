@@ -7,8 +7,7 @@
 #   - release notes = the annotated tag message (read via GitHub API)
 #   - attaches every binary with its own .sha256 checksum
 #   - plain tags (v3.1.1) only build the release: no MCPB packaging, no CLI download
-#   - plain tags additionally build & push a linux/amd64 Docker image
-#     to ghcr.io/<owner>/websearch-mcpserver, tagged with semver + latest
+#   - GHCR 镜像在独立工作流 docker.yml 中发布，不与本流程互相阻塞
 #   - a tag with the "-registry" suffix (e.g. v3.1.1-registry) additionally:
 #     downloads the base release binaries, packages them as .mcpb bundles
 #     (MCP Bundle, zip + manifest.json) via mcpb-tool-cli, uploads the bundles
@@ -111,7 +110,7 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-          pattern: websearch-* # 只拉二进制产物，排除 buildx 的 *.dockerbuild 构建记录（曾因瞬时下载失败拖垮 release）
+          pattern: websearch-*
 
       - name: Generate checksums
         run: |
@@ -131,55 +130,6 @@ jobs:
             dist/websearch-mcpserver-* dist/websearch-mcp-cli-* \
             --title "${{ github.ref_name }}" \
             --notes-file notes.md
-
-  docker:
-    name: Build & push GHCR image
-    # 与 build/release 并行（镜像从源码构建，不依赖二进制产物）；
-    # -registry tag 不重复构建镜像
-    if: ${{ !endsWith(github.ref_name, '-registry') }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          # metadata-action 会自动转小写（GHCR 仓库名不含大写字母）
-          images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-          # 仅非预发布版本追加 latest
-          flavor: |
-            latest=auto
-
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/amd64
-          push: true
-          build-args: |
-            VERSION=${{ github.ref_name }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
   publish-registry:
     name: Publish to MCP Registry
@@ -282,4 +232,6 @@ jobs:
             | jq -e --arg v "$VERSION" \
               '.servers[] | select(.server.name == "io.github.daidaiJ/websearch-mcpserver" and .server.version == $v)' \
             > /dev/null
-          echo "✅ registered: io.github.daidaiJ/websearch-mcpserver $VERSION"
+          echo "✅ registered: io.github.daidaiJ/websearch-mcpserver $VERSION"
+
+
