@@ -165,11 +165,14 @@ jobs:
           go install github.com/daidaiJ/mcpb-tool-cli@latest
           # go install 产物在 GOPATH/bin（不在 runner PATH），且二进制名为 mcpb-tool-cli
           MCPB="$(go env GOPATH)/bin/mcpb-tool-cli"
+          # 与 build 矩阵对齐：linux/windows 仅 amd64，darwin amd64+arm64（缺文件跳过）
           for os in linux darwin windows; do
             for arch in amd64 arm64; do
               ext=""; [ "$os" = "windows" ] && ext=".exe"
+              bin="dist/websearch-mcpserver-$os-$arch$ext"
+              [ -f "$bin" ] || continue
               "$MCPB" pack \
-                --binary "dist/websearch-mcpserver-$os-$arch$ext" \
+                --binary "$bin" \
                 --name websearch-mcpserver \
                 --display "WebSearch MCP Server" \
                 --version "$BASE_TAG" \
@@ -212,7 +215,7 @@ jobs:
             --version "$VERSION" \
             --repo-url https://github.com/daidaiJ/websearch-mcpserver \
             --base-tag "$BASE_TAG" \
-            --expect-packages 6 \
+            --expect-packages 4 \
             --out server.json
           echo "--- server.json ---"
           cat server.json
