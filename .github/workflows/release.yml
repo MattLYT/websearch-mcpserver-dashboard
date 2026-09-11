@@ -6,10 +6,10 @@
 #   MCP Registry mcpb：跟 Release 四平台封包（--expect-packages 4）
 # linux-arm64 容器走 GHCR；不要为了「对齐 MCP/Docker」把 linux-arm64 / windows-arm64 加回本矩阵。
 #
-# 打 tag 约定：
-#   普通 tag v3.x.y → 本工作流发 GitHub Release；docker.yml 同时推 GHCR 镜像
-#   v3.x.y-registry → 只跑本文件的 publish-registry（MCP Registry），不发 Release、不推镜像
-#   v3.x.y 与 v3.x.y-registry 钉同一 commit（registry 只多跑封包/发布 job）
+# 打 tag 约定（两步，不要一起推）：
+#   1. 普通 tag v3.x.y → 本工作流发 GitHub Release；docker.yml 同时推 GHCR 镜像
+#   2. 等 Release 产物就绪后，再单独打 v3.x.y-registry → 只跑 publish-registry（MCP Registry）
+#   后补的 registry tag 钉同一 commit（只多跑封包/发布 job）
 #
 # Trigger: push an annotated tag (git tag -a v3.4.0 -m "...")
 #   - builds server + cli binaries for the Release 四平台 (CGO_ENABLED=0)
@@ -18,7 +18,8 @@
 #   - attaches every binary with its own .sha256 checksum
 #   - plain tags (v3.4.0) only build the Release here: no MCPB packaging
 #   - GHCR 镜像在独立工作流 docker.yml 中随普通 tag 推送，不与本流程互相阻塞
-#   - a tag with the "-registry" suffix (e.g. v3.4.0-registry):
+#   - a follow-up tag with the "-registry" suffix (e.g. v3.4.0-registry),
+#     pushed only after the base Release exists:
 #     downloads the base release binaries, packages them as .mcpb bundles
 #     (MCP Bundle, zip + manifest.json) via mcpb-tool-cli, uploads the bundles
 #     back to the base release, and publishes it to the official MCP Registry
@@ -143,8 +144,8 @@ jobs:
 
   publish-registry:
     name: Publish to MCP Registry
-    # Triggered only by a "-registry" suffix tag (e.g. v3.1.1-registry).
-    # Publishes the matching stable release (v3.1.1) to the official registry.
+    # 发完普通 tag 后再单独打 "-registry" 后缀（如 v3.4.0-registry）。
+    # 依赖已存在的稳定版 Release（v3.4.0），只发布到官方 MCP Registry。
     if: ${{ endsWith(github.ref_name, '-registry') }}
     runs-on: ubuntu-latest
     permissions:

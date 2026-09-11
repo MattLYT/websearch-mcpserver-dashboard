@@ -41,7 +41,7 @@
 
 > **发布矩阵拆分**：GitHub Release 只提供上表 4 个平台（linux/windows amd64 + darwin amd64/arm64）。Linux ARM64 没有对应二进制，请用下面的 GHCR 镜像。Windows ARM64 不发布。MCP Registry 的 `.mcpb` 与这 4 个平台一致。
 >
-> **打 tag**：推送普通版本 tag（如 `v3.4.0`）会发 GitHub Release **并同时推送 GHCR 镜像**；带 `-registry` 后缀的 tag（如 `v3.4.0-registry`）**只**发布到 MCP Registry（从已有 `v3.4.0` Release 拉二进制封 `.mcpb`），不重复推镜像。两个 tag 钉在同一个 commit。
+> **打 tag**（两步，不要一起推）：先推普通版本 tag（如 `v3.4.0`）发 GitHub Release **并同时推送 GHCR 镜像**；**等 Release 产物就绪后再单独打** `-registry` 后缀 tag（如 `v3.4.0-registry`）发布到 MCP Registry（从已有 `v3.4.0` Release 拉二进制封 `.mcpb`），不重复推镜像。后补的 registry tag 钉在同一个 commit。
 
 **stdio CLI**（由 MCP 客户端拉起，无 HTTP 端口）：
 

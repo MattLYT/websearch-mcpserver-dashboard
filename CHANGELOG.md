@@ -15,7 +15,7 @@
 
 ### 文档
 - **发布矩阵拆分**：GitHub Release 二进制 4 平台（linux/windows amd64 + darwin amd64/arm64）；GHCR `linux/amd64,linux/arm64`；MCP Registry 按 Release 封 4 个 mcpb。linux-arm64 容器走 GHCR，不提供 GitHub `linux-arm64` 二进制
-- **打 tag 约定**：普通 tag（`vX.Y.Z`）发 GitHub Release 并同时推送 GHCR 镜像；带 `-registry` 后缀的 tag 单独发布到 MCP Registry，不重复推镜像。两 tag 钉同一 commit
+- **打 tag 约定**：先打普通 tag（`vX.Y.Z`）发 GitHub Release 并推送 GHCR 镜像；发完后再单独补 `-registry` 后缀 tag 发布到 MCP Registry，不要和版本 tag 一起推。后补 tag 钉同一 commit
 - **配置与工具文档对齐 v3.4.0**：豆包 Key / `apipool.engines` 默认不含 doubao / `weights.doubao=500`、academicsearch `time_range` 官方语法、stdio 环境变量与 gitignored `config.test.yaml`
 
 ## v3.3.0 — 2026-09-04
