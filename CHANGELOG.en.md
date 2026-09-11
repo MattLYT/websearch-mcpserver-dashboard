@@ -5,7 +5,7 @@
 ## v3.4.0 — 2026-09-11
 
 ### Added
-- **Doubao Search**: Volcengine Doubao Search Global / Custom (`mode=doubao`); joins `hybrid` when a key is present; add `doubao` to `apipool.engines` explicitly (default provider list unchanged). `Name()` and result `Engine` are both `doubao`; Custom implements `SearchTimeRanger`. Env: `DOUBAO_SEARCH_API_KEY` (also `ASK_ECHO_SEARCH_INFINITY_API_KEY`). Global / Custom / Custom `time_range` verified live; integration tests follow Tavily (`-short` skip, key only from gitignored `config.test.yaml`)
+- **Doubao Search**: Volcengine Doubao Search Global / Custom (`mode=doubao`); joins `hybrid` when a key is present; add `doubao` to `apipool.engines` explicitly (default provider list unchanged). `Name()` and result `Engine` are both `doubao`; Custom implements `SearchTimeRanger`. Env: `DOUBAO_SEARCH_API_KEY` (also `ASK_ECHO_SEARCH_INFINITY_API_KEY`). Free tier is 500 credits/month, so `apipool.weights.doubao` defaults to 500. Global / Custom / Custom `time_range` verified live; integration tests follow Tavily (`-short` skip, key only from gitignored `config.test.yaml`)
 
 ### Fixed
 - **Academic `time_range` syntax**: Crossref now uses `filter=from-pub-date:`; DOAJ uses a closed `bibjson.year` range (no `*`); arXiv uses `submittedDate:[YYYYMMDDHHMM TO YYYYMMDDHHMM]` (UTC). `academicsearch` with a time range no longer fails these three engines at the upstream

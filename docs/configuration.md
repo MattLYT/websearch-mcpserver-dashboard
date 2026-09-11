@@ -115,6 +115,7 @@ anysearch:
 
 # 豆包联网搜索 Global / Custom（mode=doubao/hybrid；apipool 需显式加入 engines）
 # 开通: https://console.volcengine.com/search-infinity/web-search
+# 免费档每月默认 500 积分；apipool.weights.doubao 默认 500
 doubao:
   api_key: ""               # 环境变量: DOUBAO_SEARCH_API_KEY（兼容 ASK_ECHO_SEARCH_INFINITY_API_KEY）
   sk_list: []               # 多 Key 轮询列表（优先级高于 api_key；重复 Key 自动去重）
@@ -258,10 +259,11 @@ pdf_parser:
 #     - tavily
 #     - exa
 #   weights:              # weighted 策略权重（单 Key 权重，实际权重按可用 Key 数累加）
-#     anysearch: 30000    # 默认值: anysearch=30000, baidu=1500, tavily=1200, exa=1200
+#     anysearch: 30000    # 默认值: anysearch=30000, baidu=1500, tavily=1200, exa=1200, doubao=500（每月默认积分）
 #     baidu: 1500
 #     tavily: 1200
 #     exa: 1200
+#     doubao: 500
 
 # 日志滚动
 log:
@@ -303,7 +305,7 @@ log:
 | `rate_limit.per_min` | 60 | 全局限流 |
 | `apipool.strategy` | round-robin | `round-robin` 跨请求轮转供应商 / `priority` 固定优先级顺序 / `weighted` 加权随机 |
 | `apipool.engines` | [anysearch, baidu, tavily, exa] | 供应商优先级顺序，百度网页搜索兜底始终在末尾 |
-| `apipool.weights` | anysearch=30000, baidu=1500, tavily=1200, exa=1200 | weighted 策略单 Key 权重，实际权重按可用 Key 数累加 |
+| `apipool.weights` | anysearch=30000, baidu=1500, tavily=1200, exa=1200, doubao=500 | weighted 策略单 Key 权重，实际权重按可用 Key 数累加；豆包 500 对齐免费档每月积分
 | `doubao.version` | global | Global / Custom；两版并发走 hybrid，适配器内不提供 both |
 | `doubao.num_results` | 10 | Global 最大 20；Custom 最大 50 |
 | `baidu.enable_ai_search` | true | true=智能搜索 chat/completions，false=网页搜索 web_search；不传 model 不产生 LLM 费用 |

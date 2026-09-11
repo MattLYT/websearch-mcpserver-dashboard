@@ -152,6 +152,7 @@ func (c AnysearchConfig) EffectiveSKList() []string {
 
 // DoubaoConfig 火山引擎豆包联网搜索（Global / Custom）。
 // API Key 来自「联网搜索 API」控制台，与 Ark 豆包大模型 Key 不通用。
+// 免费档每月默认 500 积分；显式加入 apipool.engines 时 weighted 默认权重 500。
 type DoubaoConfig struct {
 	APIKey              string   `mapstructure:"api_key"`                 // 搜索 API Key；环境变量 DOUBAO_SEARCH_API_KEY
 	SKList              []string `mapstructure:"sk_list"`                 // 多 Key 轮询列表（优先级高于 api_key）
@@ -462,6 +463,7 @@ func (c ApipoolConfig) GetWeights() map[string]int {
 		"baidu":     1500,
 		"tavily":    1200,
 		"exa":       1200,
+		"doubao":    500, // 火山免费档每月默认 500 积分
 	}
 	maps.Copy(w, c.Weights)
 	return w
