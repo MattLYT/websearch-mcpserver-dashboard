@@ -114,7 +114,7 @@ smartsearch:
 
 ### Academic Search Scoring
 
-Six academic engines are fused via RRF ranking with academic-specific signals:
+Nine academic engines are fused via RRF ranking with academic-specific signals:
 
 - **Citation count** (log-compressed, clamped [1.0, 1.7])
 - **High-impact journal / conference** boost
@@ -153,6 +153,11 @@ smartsearch:
     google:            # Google (disabled by default, anti-bot blocked)
       max_size: 4
     duckduckgo:        # DuckDuckGo (no score, needs proxy)
+      max_size: 4
+    anysearch:         # AnySearch (no score)
+      max_size: 4
+    doubao:            # Doubao Search (Custom returns score; Global does not)
+      min_score: 0
       max_size: 4
 ```
 
@@ -205,9 +210,9 @@ apipool:
 |-----------|------|----------|-------------|
 | `query` | string | ✅ | Search keyword |
 | `intent` | string | ❌ | Search intent (only effective when LLM is enabled; auto-removed to save context when disabled) |
-| `time_range` | int | ❌ | Search time range in months, default 3. `1`=last month, `6`=last 6 months, `12`=last year, `0`=unlimited |
+| `time_range` | int | ❌ | Search time range in months, default 3. `1`=last month, `6`=last 6 months, `12`=last year, `0`=unlimited. Doubao Custom maps this to `OneDay`/`OneWeek`/`OneMonth`/`OneYear`; Global has no time-filter API and ignores it |
 
-Results include engine source and relevance score by default (for engines that support scores like Tavily). Disable via `smartsearch.show_meta: false`.
+Results include engine source and relevance score by default (for engines that support scores like Tavily / Doubao Custom). Disable via `smartsearch.show_meta: false`.
 
 **LLM summarization**: with the `llm` section configured, `smartsearch` accepts `intent` and generates a structured summary; the summary stage pushes tokens in real time via MCP progress notifications, auto-cancels on client disconnect, and falls back to non-streaming summary on failure.
 
@@ -219,6 +224,14 @@ Results include engine source and relevance score by default (for engines that s
 | `engines` | []string | ❌ | Engine subset: `arxiv` `crossref` `openalex` `pubmed` `europepmc` `dblp` `doaj` `semantic_scholar` `google_scholar` |
 | `time_range` | string | ❌ | `year` / `month` / `week` / `day` |
 | `page` | int | ❌ | Page number, default 1 |
+
+With `time_range`, each academic engine uses its official syntax (aligned in v3.4.0 so Crossref / DOAJ / arXiv no longer fail upstream):
+
+| Engine | Syntax |
+|--------|--------|
+| Crossref | `filter=from-pub-date:YYYY-MM-DD` |
+| DOAJ | `bibjson.year:[startYear TO current UTC year]` (no `*`; `day`/`week`/`month` collapse to year granularity) |
+| arXiv | `submittedDate:[YYYYMMDDHHMM TO YYYYMMDDHHMM]` (UTC/GMT) |
 
 Results are ranked by the academic scoring enhancement (enabled by default): RRF fusion ranking + citation / journal authority / PDF availability / recency signals, with low-score papers auto-filtered (Top-1 + per-engine floor). Config: `academic.enhance` (default true), `academic.threshold` (default 0.02).
 

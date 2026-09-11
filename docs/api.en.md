@@ -158,8 +158,8 @@ MCP clients use this endpoint for protocol handshake, tool listing, and tool inv
 
 | Tool | Description | Parameters |
 |------|-------------|------------|
-| `smartsearch` | Web search, supports general and academic search | `query` (required), `intent` (optional, effective when LLM enabled), `academic` (optional, boolean) |
-| `academicsearch` | Academic paper search, supports arXiv, Crossref, OpenAlex, PubMed, etc. | `query` (required), `engines` (optional), `time_range` (optional), `page` (optional) |
+| `smartsearch` | Web search | `query` (required), `intent` (optional, when LLM is enabled), `time_range` (optional, months; default 3) |
+| `academicsearch` | Academic paper search (arXiv / Crossref / OpenAlex / PubMed / Europe PMC / DBLP / DOAJ, etc.) | `query` (required), `engines` (optional), `time_range` (optional: `year`/`month`/`week`/`day`), `page` (optional) |
 | `cleanfetch` | Web content fetch, returns Markdown | `url` (required) — requires `cleanfetch.enabled` |
 | `pdf_parser` | PDF parsing with MinerU AI enhancement (table/formula/multi-column recognition) | `path` (required) — requires `pdf_parser.enabled`, optional `mineru_token` |
 

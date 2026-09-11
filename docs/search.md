@@ -114,7 +114,7 @@ smartsearch:
 
 ### 学术搜索评分
 
-六大学术引擎结果经 RRF 融合排名，叠加学术特有信号：
+九大学术引擎结果经 RRF 融合排名，叠加学术特有信号：
 
 - **引用数**（对数压缩，clamp [1.0, 1.7]）
 - **高影响力期刊 / 会议**加分
@@ -153,6 +153,11 @@ smartsearch:
     google:            # Google（默认禁用，被反爬拦截）
       max_size: 4
     duckduckgo:        # DuckDuckGo（不回传 score，需代理）
+      max_size: 4
+    anysearch:         # AnySearch（不回传 score）
+      max_size: 4
+    doubao:            # 豆包联网搜索（Custom 回传 score；Global 不回传）
+      min_score: 0
       max_size: 4
 ```
 
@@ -205,9 +210,9 @@ apipool:
 |------|------|------|------|
 | `query` | string | ✅ | 搜索关键词 |
 | `intent` | string | ❌ | 搜索意图（仅 LLM 启用时生效，未启用时自动移除该参数节省上下文） |
-| `time_range` | int | ❌ | 搜索时间范围（月），默认 3。`1`=近 1 个月，`6`=近半年，`12`=近一年，`0`=不限 |
+| `time_range` | int | ❌ | 搜索时间范围（月），默认 3。`1`=近 1 个月，`6`=近半年，`12`=近一年，`0`=不限。豆包 Custom 会映射为 `OneDay`/`OneWeek`/`OneMonth`/`OneYear`；Global 无时间过滤接口，忽略 |
 
-返回结果默认附带来源引擎和相关性分数（Tavily 等支持 score 的引擎）。可通过 `smartsearch.show_meta: false` 关闭。
+返回结果默认附带来源引擎和相关性分数（Tavily / 豆包 Custom 等支持 score 的引擎）。可通过 `smartsearch.show_meta: false` 关闭。
 
 **LLM 摘要**：配置 `llm` 节后，`smartsearch` 支持 `intent` 参数并生成结构化摘要；摘要阶段通过 MCP progress notification 逐 token 流式推送生成过程，客户端断开自动取消，失败自动回退非流式摘要。
 
@@ -219,6 +224,14 @@ apipool:
 | `engines` | []string | ❌ | 引擎子集：`arxiv` `crossref` `openalex` `pubmed` `europepmc` `dblp` `doaj` `semantic_scholar` `google_scholar` |
 | `time_range` | string | ❌ | `year` / `month` / `week` / `day` |
 | `page` | int | ❌ | 页码，默认 1 |
+
+带 `time_range` 时各学术引擎走官方语法（v3.4.0 已对齐，不再把 Crossref / DOAJ / arXiv 打成上游失败）：
+
+| 引擎 | 语法 |
+|------|------|
+| Crossref | `filter=from-pub-date:YYYY-MM-DD` |
+| DOAJ | `bibjson.year:[起始年 TO 当前 UTC 年]`（禁止 `*`；`day`/`week`/`month` 退化成年粒度） |
+| arXiv | `submittedDate:[YYYYMMDDHHMM TO YYYYMMDDHHMM]`（UTC/GMT） |
 
 结果按学术评分增强排序（默认开启）：RRF 融合排名 + 引用数 / 期刊权威 / PDF 全文 / 新鲜度信号，低分论文自动过滤（Top-1 + 每引擎保底）。配置项：`academic.enhance`（默认 true）、`academic.threshold`（默认 0.02）。
 

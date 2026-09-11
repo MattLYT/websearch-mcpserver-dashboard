@@ -98,6 +98,7 @@ pkg/
 
 - 所有配置结构体在 `pkg/config/config.go`
 - 样例配置同步更新 `config.example.yaml` 和 `pkg/config/config.example.yaml`
+- 用户文档同步更新 `docs/configuration.md` / `docs/configuration.en.md`；搜索模式或 MCP 工具参数改动还要改 `docs/search.md`、`docs/search.en.md`、`docs/api.md`、README
 - 环境变量覆盖格式：`WEBCRAWLER_` 前缀 + 大写路径（如 `WEBCRAWLER_PORT`）
 
 ### 测试
@@ -143,7 +144,7 @@ docker build -t websearch-mcpserver .
 ## 给智能体的提示
 
 1. **修改搜索逻辑前**，先读 `pkg/search/inf.go` 了解接口契约，再读 `hybrid.go` 了解编排流程
-2. **新增配置项时**，同步更新 `pkg/config/config.go` 和两个 `config.example.yaml`
+2. **新增配置项时**，同步更新 `pkg/config/config.go`、两个 `config.example.yaml`，以及 `docs/configuration.md` / `docs/configuration.en.md`（搜索/工具参数还要改 `docs/search.md`、`docs/api.md`、README）
 3. **涉及反检测/限流**，修改应在 `pkg/antirobot/` 层进行，不要在各引擎包中重复实现
 4. **学术搜索与通用搜索是独立模块**，学术引擎在 `pkg/academic/`，通用引擎在 `pkg/baidu/` `pkg/bing/` 等，不要混淆
-5. **发布矩阵拆分，不要合成一套 6 平台**：GitHub Release = linux/windows amd64 + darwin amd64/arm64；GHCR = linux/amd64+arm64；MCP Registry mcpb 跟 Release（`--expect-packages 4`）。linux-arm64 走 GHCR，不要把 linux-arm64 / windows-arm64 加回 Release 来对齐 Docker 或旧版 v3.1.1 MCP
+5. **发布矩阵拆分，不要合成一套 6 平台**：GitHub Release = linux/windows amd64 + darwin amd64/arm64；GHCR = linux/amd64+arm64；MCP Registry mcpb 跟 Release（`--expect-packages 4`）。**普通 tag（`vX.Y.Z`）同时发 Release 并推 GHCR 镜像**；**带 `-registry` 后缀的 tag 只发 MCP Registry**（不推镜像）。`vX.Y.Z` 与 `vX.Y.Z-registry` 钉同一 commit。linux-arm64 走 GHCR，不要把 linux-arm64 / windows-arm64 加回 Release 来对齐 Docker 或旧版 v3.1.1 MCP

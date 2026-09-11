@@ -40,6 +40,8 @@ Download from the [Release page](https://github.com/daidaiJ/websearch-mcpserver/
 | macOS Apple Silicon | `websearch-mcpserver-darwin-arm64` |
 
 > **Split release matrices**: GitHub Release only ships the four platforms above (linux/windows amd64 + darwin amd64/arm64). There is no linux-arm64 binary — use the GHCR image below. Windows ARM64 is not published. MCP Registry `.mcpb` bundles match these four platforms.
+>
+> **Tagging**: pushing a plain version tag (e.g. `v3.4.0`) publishes the GitHub Release **and** the GHCR image; a tag with the `-registry` suffix (e.g. `v3.4.0-registry`) **only** publishes to the MCP Registry (packs `.mcpb` from the existing `v3.4.0` Release) and does not push the image again. Pin both tags to the same commit.
 
 **stdio CLI** (spawned by the MCP client, no HTTP port):
 
