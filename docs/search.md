@@ -31,9 +31,10 @@
 | `tavily` | Tavily Search API | `TAVILY_SK` |
 | `exa` | Exa Web Search API | `EXA_API_KEY` |
 | `anysearch` | AnySearch API（[anysearch.com](https://www.anysearch.com/docs)） | `ANYSEARCH_API_KEY` |
-| `hybrid` | 全引擎混合（Anysearch + 百度智能搜索 + 百度网页搜索 + Tavily + Exa + Bing + DuckDuckGo + Google） | 各 Key 可选 |
+| `doubao` | 豆包联网搜索 Global / Custom（[火山引擎文档](https://docs.volcengine.com/docs/87772/2272949)） | `DOUBAO_SEARCH_API_KEY` |
+| `hybrid` | 全引擎混合（Anysearch + 百度智能搜索 + 百度网页搜索 + Tavily + Exa + 豆包(有 Key 时) + Bing + DuckDuckGo + Google） | 各 Key 可选 |
 
-> 所有模式主引擎失败均自动回退。无 Key 时自动降级为 `engine`。`baidu`/`tavily`/`exa`/`anysearch` 均支持 `sk_list` 多 Key 轮询（同供应商重复 Key 自动去重），`sk_list` 为空时自动用 `api_key` 作为单元素列表。
+> 所有模式主引擎失败均自动回退。无 Key 时自动降级为 `engine`。`baidu`/`tavily`/`exa`/`anysearch`/`doubao` 均支持 `sk_list` 多 Key 轮询（同供应商重复 Key 自动去重），`sk_list` 为空时自动用 `api_key` 作为单元素列表。
 
 **各模式引擎映射**（来自 `pkg/search/factory.go`）：
 
@@ -44,8 +45,9 @@
 | `tavily` | Tavily；无 Key 时回退 Bing |
 | `exa` | Exa；无 Key 时回退 Bing |
 | `anysearch` | AnySearch；无 Key 时回退 Bing |
-| `apipool` | 按配置顺序轮转 anysearch / baidu / tavily / exa，百度网页搜索始终兜底 |
-| `hybrid` | Anysearch + 百度智能搜索 + 百度网页搜索 + Tavily + Exa + Bing + Google + DuckDuckGo，并发 |
+| `doubao` | 豆包联网搜索 Global/Custom（`doubao.version`）；无 Key 时回退 Bing |
+| `apipool` | 按配置顺序轮转 anysearch / baidu / tavily / exa（`doubao` 需显式写入 `apipool.engines`），百度网页搜索始终兜底 |
+| `hybrid` | Anysearch + 百度智能搜索 + 百度网页搜索 + Tavily + Exa + 豆包(有 Key 时) + Bing + Google + DuckDuckGo，并发 |
 
 ---
 
@@ -62,6 +64,7 @@
 | `tavily_api` | Tavily Search API | ✅ | 否 |
 | `exa` | Exa Web Search API | ❌ | 否 |
 | `anysearch` | AnySearch API（内置本地黑名单过滤） | ❌ | 否 |
+| `doubao` | 豆包联网搜索 Global/Custom API（内置本地黑名单过滤；Custom 回传 score） | ✅ | 否 |
 | `baidu_api` | 百度千帆搜索（`enable_ai_search` 控制端点） | ❌ | 否 |
 
 **学术搜索引擎**（无需 Key）：
@@ -172,6 +175,7 @@ apipool:
     - baidu
     - tavily
     - exa
+    # - doubao            # 不在默认列表；有 Key 时显式加入
   weights:                # weighted 策略权重（单 Key 权重；默认值见下）
     anysearch: 30000
     baidu: 1500

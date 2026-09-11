@@ -31,9 +31,10 @@
 | `tavily` | Tavily Search API | `TAVILY_SK` |
 | `exa` | Exa Web Search API | `EXA_API_KEY` |
 | `anysearch` | AnySearch API ([anysearch.com](https://www.anysearch.com/docs)) | `ANYSEARCH_API_KEY` |
-| `hybrid` | Full mix (Anysearch + Baidu AI + Baidu web + Tavily + Exa + Bing + DuckDuckGo + Google) | All optional |
+| `doubao` | Doubao Search Global / Custom ([Volcengine docs](https://docs.volcengine.com/docs/87772/2272949)) | `DOUBAO_SEARCH_API_KEY` |
+| `hybrid` | Full mix (Anysearch + Baidu AI + Baidu web + Tavily + Exa + Doubao if keyed + Bing + DuckDuckGo + Google) | All optional |
 
-> All modes auto-fallback on primary engine failure. Auto-degrades to `engine` mode when keys are missing. `baidu`/`tavily`/`exa`/`anysearch` all support `sk_list` multi-key rotation (duplicate keys within one provider are deduplicated automatically); `sk_list` falls back to `api_key` as a single-element list when empty.
+> All modes auto-fallback on primary engine failure. Auto-degrades to `engine` mode when keys are missing. `baidu`/`tavily`/`exa`/`anysearch`/`doubao` all support `sk_list` multi-key rotation (duplicate keys within one provider are deduplicated automatically); `sk_list` falls back to `api_key` as a single-element list when empty.
 
 **Mode → engine mapping** (from `pkg/search/factory.go`):
 
@@ -44,8 +45,9 @@
 | `tavily` | Tavily; falls back to Bing when no key |
 | `exa` | Exa; falls back to Bing when no key |
 | `anysearch` | AnySearch; falls back to Bing when no key |
-| `apipool` | Rotates anysearch / baidu / tavily / exa in configured order, Baidu web search always last |
-| `hybrid` | Anysearch + Baidu AI + Baidu web + Tavily + Exa + Bing + Google + DuckDuckGo, concurrent |
+| `doubao` | Doubao Search Global/Custom (`doubao.version`); falls back to Bing when no key |
+| `apipool` | Rotates anysearch / baidu / tavily / exa in configured order (`doubao` must be listed in `apipool.engines`), Baidu web search always last |
+| `hybrid` | Anysearch + Baidu AI + Baidu web + Tavily + Exa + Doubao (if keyed) + Bing + Google + DuckDuckGo, concurrent |
 
 ---
 
@@ -62,6 +64,7 @@
 | `tavily_api` | Tavily Search API | ✅ | No |
 | `exa` | Exa Web Search API | ❌ | No |
 | `anysearch` | AnySearch API (built-in local blacklist filtering) | ❌ | No |
+| `doubao` | Doubao Search Global/Custom API (local blacklist; Custom returns score) | ✅ | No |
 | `baidu_api` | Baidu Qianfan search (`enable_ai_search` controls endpoint) | ❌ | No |
 
 **Academic engines** (no keys required):
@@ -172,6 +175,7 @@ apipool:
     - baidu
     - tavily
     - exa
+    # - doubao            # not in the default list; add explicitly when you have a key
   weights:                # weighted strategy weights (per-key; defaults below)
     anysearch: 30000
     baidu: 1500

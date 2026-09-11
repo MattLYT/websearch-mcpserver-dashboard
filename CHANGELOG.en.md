@@ -2,6 +2,14 @@
 
 [English](CHANGELOG.en.md) | [中文](CHANGELOG.md)
 
+## v3.4.0 — 2026-09-11
+
+### Added
+- **Doubao Search**: Volcengine Doubao Search Global / Custom (`mode=doubao`); joins `hybrid` when a key is present; add `doubao` to `apipool.engines` explicitly (default provider list unchanged). `Name()` and result `Engine` are both `doubao`; Custom implements `SearchTimeRanger`. Env: `DOUBAO_SEARCH_API_KEY` (also `ASK_ECHO_SEARCH_INFINITY_API_KEY`)
+
+### Fixed
+- **Academic `time_range` syntax**: Crossref now uses `filter=from-pub-date:`; DOAJ uses a closed `bibjson.year` range (no `*`); arXiv uses `submittedDate:[YYYYMMDDHHMM TO YYYYMMDDHHMM]` (UTC). `academicsearch` with a time range no longer fails these three engines at the upstream
+
 ## v3.3.0 — 2026-09-04
 
 ### Added
