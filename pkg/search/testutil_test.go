@@ -71,3 +71,13 @@ func loadAnysearchAPIKey(t *testing.T) string {
 	}
 	return conf.Anysearch.APIKey
 }
+
+// loadDoubaoAPIKey 从测试配置加载豆包联网搜索 API Key。
+func loadDoubaoAPIKey(t *testing.T) string {
+	t.Helper()
+	conf := loadTestConfig(t)
+	if conf.Doubao.APIKey == "" {
+		t.Skip("跳过: 未配置 doubao.api_key")
+	}
+	return conf.Doubao.APIKey
+}

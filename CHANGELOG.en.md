@@ -5,10 +5,13 @@
 ## v3.4.0 — 2026-09-11
 
 ### Added
-- **Doubao Search**: Volcengine Doubao Search Global / Custom (`mode=doubao`); joins `hybrid` when a key is present; add `doubao` to `apipool.engines` explicitly (default provider list unchanged). `Name()` and result `Engine` are both `doubao`; Custom implements `SearchTimeRanger`. Env: `DOUBAO_SEARCH_API_KEY` (also `ASK_ECHO_SEARCH_INFINITY_API_KEY`)
+- **Doubao Search**: Volcengine Doubao Search Global / Custom (`mode=doubao`); joins `hybrid` when a key is present; add `doubao` to `apipool.engines` explicitly (default provider list unchanged). `Name()` and result `Engine` are both `doubao`; Custom implements `SearchTimeRanger`. Env: `DOUBAO_SEARCH_API_KEY` (also `ASK_ECHO_SEARCH_INFINITY_API_KEY`). Global / Custom / Custom `time_range` verified live; integration tests follow Tavily (`-short` skip, key only from gitignored `config.test.yaml`)
 
 ### Fixed
 - **Academic `time_range` syntax**: Crossref now uses `filter=from-pub-date:`; DOAJ uses a closed `bibjson.year` range (no `*`); arXiv uses `submittedDate:[YYYYMMDDHHMM TO YYYYMMDDHHMM]` (UTC). `academicsearch` with a time range no longer fails these three engines at the upstream
+
+### Credits
+- [@matt1060338871-pixel](https://github.com/matt1060338871-pixel): [#5](https://github.com/daidaiJ/websearch-mcpserver/pull/5) academic `time_range`, [#6](https://github.com/daidaiJ/websearch-mcpserver/pull/6) Doubao Search (rewritten to match this repo's orchestration and landed in [#7](https://github.com/daidaiJ/websearch-mcpserver/pull/7))
 
 ## v3.3.0 — 2026-09-04
 

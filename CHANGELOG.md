@@ -5,10 +5,13 @@
 ## v3.4.0 — 2026-09-11
 
 ### 新增
-- **豆包联网搜索**：接入火山引擎 Doubao Search Global / Custom（`mode=doubao`）；有 Key 时参与 `hybrid`；`apipool` 需显式把 `doubao` 写入 `engines`（不改默认供应商列表）。`Name()` 与结果 `Engine` 均为 `doubao`，Custom 实现 `SearchTimeRanger`。环境变量 `DOUBAO_SEARCH_API_KEY`（兼容 `ASK_ECHO_SEARCH_INFINITY_API_KEY`）
+- **豆包联网搜索**：接入火山引擎 Doubao Search Global / Custom（`mode=doubao`）；有 Key 时参与 `hybrid`；`apipool` 需显式把 `doubao` 写入 `engines`（不改默认供应商列表）。`Name()` 与结果 `Engine` 均为 `doubao`，Custom 实现 `SearchTimeRanger`。环境变量 `DOUBAO_SEARCH_API_KEY`（兼容 `ASK_ECHO_SEARCH_INFINITY_API_KEY`）。Global / Custom / Custom `time_range` 本地实测通过；集成测试对齐 Tavily（`-short` 跳过，Key 只从 gitignore 的 `config.test.yaml` 读取）
 
 ### 修复
 - **学术 `time_range` 语法**：Crossref 改用 `filter=from-pub-date:`；DOAJ 改用 `bibjson.year` 闭区间（禁止 `*`）；arXiv 改用 `submittedDate:[YYYYMMDDHHMM TO YYYYMMDDHHMM]`（UTC）。带时间范围的 `academicsearch` 不再把这三家打成上游失败
+
+### 致谢
+- [@matt1060338871-pixel](https://github.com/matt1060338871-pixel)：[#5](https://github.com/daidaiJ/websearch-mcpserver/pull/5) 学术 `time_range`、[#6](https://github.com/daidaiJ/websearch-mcpserver/pull/6) 豆包联网搜索（按仓库编排改写后合入 [#7](https://github.com/daidaiJ/websearch-mcpserver/pull/7)）
 
 ## v3.3.0 — 2026-09-04
 
