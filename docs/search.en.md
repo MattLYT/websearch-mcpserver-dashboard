@@ -181,6 +181,7 @@ apipool:
     baidu: 1500
     tavily: 1200
     exa: 1200
+    doubao: 500           # free-tier 500 credits/month
 ```
 
 **Strategy details**:
@@ -188,7 +189,7 @@ apipool:
 - **`priority`**: always starts from the first provider; exhausts all SKs → switches to next provider → Baidu web search as final fallback
 - **`weighted`**: weighted-random selection of the starting provider, which naturally spreads request bursts across providers. A provider's effective weight = **configured weight × currently available SK count** (auto-shrinks when SKs cool down, self-healing); providers absent from the weight table count as 1; an explicit `0` excludes a provider from weighted starting selection (it stays in the failure-switch chain); when all weights are 0 it degrades to round-robin. The Baidu web search fallback engine has no key pool and a fixed weight of 1
 
-**Default weights** (overridable via `apipool.weights`): `anysearch=30000`, `baidu=1500`, `tavily=1200`, `exa=1200`
+**Default weights** (overridable via `apipool.weights`): `anysearch=30000`, `baidu=1500`, `tavily=1200`, `exa=1200`, `doubao=500` (free-tier monthly credits)
 
 **Workflow**: select provider → `pool.Next()` → call API → success / mark key cooldown 30 min → retry next SK in same provider → all exhausted → next provider → all failed → Baidu web search fallback
 

@@ -116,6 +116,7 @@ anysearch:
 
 # Doubao Search Global / Custom (mode=doubao/hybrid; add to apipool.engines explicitly)
 # Activate: https://console.volcengine.com/search-infinity/web-search
+# Free tier: 500 credits/month; apipool.weights.doubao defaults to 500
 doubao:
   api_key: ""               # Env: DOUBAO_SEARCH_API_KEY (also ASK_ECHO_SEARCH_INFINITY_API_KEY)
   sk_list: []               # Multi-key rotation list (priority over api_key; duplicates are deduplicated)
@@ -259,10 +260,11 @@ pdf_parser:
 #     - tavily
 #     - exa
 #   weights:              # weighted strategy weights (per-key, accumulated by available key count)
-#     anysearch: 30000    # defaults: anysearch=30000, baidu=1500, tavily=1200, exa=1200
+#     anysearch: 30000    # defaults: anysearch=30000, baidu=1500, tavily=1200, exa=1200, doubao=500 (monthly free-tier credits)
 #     baidu: 1500
 #     tavily: 1200
 #     exa: 1200
+#     doubao: 500
 
 # Log rotation
 log:
@@ -304,7 +306,7 @@ log:
 | `rate_limit.per_min` | 60 | Global rate limit |
 | `apipool.strategy` | round-robin | `round-robin` rotates provider across requests / `priority` fixed order / `weighted` weighted-random |
 | `apipool.engines` | [anysearch, baidu, tavily, exa] | Provider priority order, Baidu web search fallback always last |
-| `apipool.weights` | anysearch=30000, baidu=1500, tavily=1200, exa=1200 | weighted per-key weights, accumulated by available key count |
+| `apipool.weights` | anysearch=30000, baidu=1500, tavily=1200, exa=1200, doubao=500 | weighted per-key weights, accumulated by available key count; doubao 500 matches the free-tier monthly credits |
 | `doubao.version` | global | Global / Custom; concurrent both goes through hybrid, not inside the adapter |
 | `doubao.num_results` | 10 | Global max 20; Custom max 50 |
 | `baidu.enable_ai_search` | true | true=AI search chat/completions, false=web search web_search; no LLM cost when model is empty |

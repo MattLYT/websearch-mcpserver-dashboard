@@ -422,6 +422,7 @@ func TestApipoolConfig_GetWeights(t *testing.T) {
 		"baidu":     1500,
 		"tavily":    1200,
 		"exa":       1200,
+		"doubao":    500,
 	} {
 		if w[name] != want {
 			t.Errorf("default weight[%s] = %d, want %d", name, w[name], want)

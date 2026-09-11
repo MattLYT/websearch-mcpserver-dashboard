@@ -123,6 +123,7 @@ rate_limit:
 # API Key: https://console.volcengine.com/search-infinity/api-key
 # 环境变量: DOUBAO_SEARCH_API_KEY（兼容 ASK_ECHO_SEARCH_INFINITY_API_KEY）
 # 注意: 这是联网搜索 API Key，不是 Ark 豆包大模型 Key
+# 免费档每月默认 500 积分；显式加入 apipool.engines 时 weighted 默认权重 500
 # ==============================================
 # doubao:
 #   api_key: ""           # 单 Key（sk_list 为空时自动作为单元素列表）
@@ -328,8 +329,9 @@ log:
 #     - tavily
 #     - exa
 #   weights:              # weighted 策略的供应商权重（单 Key 权重，实际权重 = 配置权重 × 当前可用 Key 数累加）
-#                         # 默认值: anysearch=30000, baidu=1500, tavily=1200, exa=1200；显式 0 = 不参与加权起始选择
+#                         # 默认值: anysearch=30000, baidu=1500, tavily=1200, exa=1200, doubao=500（每月默认积分）；显式 0 = 不参与加权起始选择
 #     anysearch: 30000
 #     baidu: 1500
 #     tavily: 1200
 #     exa: 1200
+#     doubao: 500
