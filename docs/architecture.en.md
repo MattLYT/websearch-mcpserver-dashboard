@@ -26,6 +26,7 @@
 - **Single config source** — HTTP daemon and stdio CLI share the same YAML config (`pkg/config`); `mode` decides how the engine group is built
 - **Engines as interfaces** — all engines implement the unified `SearchInf` interface; `pkg/search/factory.go` assembles them by mode; `HybridSearchImpl` handles multi-engine concurrent orchestration
 - **Pure Go, no CGO** — SQLite via `modernc.org/sqlite`, single-binary deployment
+- **Split release matrices** — GitHub Release: linux/windows amd64 + darwin amd64/arm64; GHCR: `linux/amd64,linux/arm64`; MCP Registry mcpb matches the four Release platforms. Use the image for linux-arm64; do not add a GitHub `linux-arm64` binary to "align" the channels
 
 ---
 

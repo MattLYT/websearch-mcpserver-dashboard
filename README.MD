@@ -171,7 +171,7 @@ autostart.vbs
 
 | 文档 | 内容 |
 |------|------|
-| [docs/installation.md](docs/installation.md) | 安装部署（二进制 / Docker / 源码 / 客户端注册）、运维与排障 |
+| [docs/installation.md](docs/installation.md) | 安装部署（二进制 4 平台 / GHCR linux amd64+arm64 / 源码 / 客户端注册）、运维与排障 |
 | [docs/configuration.md](docs/configuration.md) | 完整配置参考、环境变量覆盖、默认值速查 |
 | [docs/search.md](docs/search.md) | 搜索模式详解、引擎对照、相关性评分、MCP 工具参数 |
 | [docs/architecture.md](docs/architecture.md) | 架构设计、回退链、代理检测、缓存、Go 模块嵌入、web-researcher 扩展 |

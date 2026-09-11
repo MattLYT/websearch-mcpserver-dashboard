@@ -39,6 +39,8 @@
 | macOS Intel | `websearch-mcpserver-darwin-amd64` |
 | macOS Apple Silicon | `websearch-mcpserver-darwin-arm64` |
 
+> **发布矩阵拆分**：GitHub Release 只提供上表 4 个平台（linux/windows amd64 + darwin amd64/arm64）。Linux ARM64 没有对应二进制，请用下面的 GHCR 镜像。Windows ARM64 不发布。MCP Registry 的 `.mcpb` 与这 4 个平台一致。
+
 **stdio CLI**（由 MCP 客户端拉起，无 HTTP 端口）：
 
 | 平台 | 文件 |
@@ -50,21 +52,30 @@
 
 ### Docker
 
+官方镜像在 GHCR，清单为 **linux/amd64 + linux/arm64**（Apple Silicon / ARM 服务器直接拉镜像即可）：
+
 ```bash
-git clone --depth 1 https://github.com/daidaiJ/websearch-mcpserver.git
-cd websearch-mcpserver && docker build -t websearch:v1 .
+docker pull ghcr.io/daidaij/websearch-mcpserver:latest
+# 或钉版本：ghcr.io/daidaij/websearch-mcpserver:3.4.0
 ```
 
 ```yaml
 # docker-compose.yml
 services:
   websearch:
-    image: websearch:v1
+    image: ghcr.io/daidaij/websearch-mcpserver:latest
     restart: always
     volumes:
       - ./config.yaml:/app/config.yaml
     ports:
       - "8338:8338"
+```
+
+本地构建：
+
+```bash
+git clone --depth 1 https://github.com/daidaiJ/websearch-mcpserver.git
+cd websearch-mcpserver && docker build -t websearch:v1 .
 ```
 
 ### 源码构建

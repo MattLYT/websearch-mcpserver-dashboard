@@ -26,6 +26,7 @@
 - **单一配置源** — HTTP daemon 与 stdio CLI 共用同一 YAML 配置（`pkg/config`），`mode` 决定搜索引擎组如何构建
 - **引擎即接口** — 所有引擎实现统一 `SearchInf` 接口，`pkg/search/factory.go` 按模式组装；`HybridSearchImpl` 负责多引擎并发编排
 - **纯 Go 无 CGO** — SQLite 使用 `modernc.org/sqlite`，单二进制部署
+- **发布矩阵拆分** — GitHub Release：linux/windows amd64 + darwin amd64/arm64；GHCR：`linux/amd64,linux/arm64`；MCP Registry mcpb 跟 Release 四平台。linux-arm64 用镜像，不要在 Release 里补 linux-arm64 二进制来「对齐」
 
 ---
 

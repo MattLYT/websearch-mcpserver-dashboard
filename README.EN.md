@@ -171,7 +171,7 @@ Or use MCP Hooks for session auto start/stop (Qwen Code example; full details in
 
 | Document | Contents |
 |----------|----------|
-| [docs/installation.md](docs/installation.md) | Installation (binary / Docker / source / client registration), operations & troubleshooting |
+| [docs/installation.md](docs/installation.md) | Installation (4-platform binaries / GHCR linux amd64+arm64 / source / client registration), operations & troubleshooting |
 | [docs/configuration.md](docs/configuration.md) | Full config reference, environment variable overrides, defaults quick reference |
 | [docs/search.md](docs/search.md) | Search modes, engine reference, relevance scoring, MCP tool parameters |
 | [docs/architecture.md](docs/architecture.md) | Architecture, fallback chain, proxy detection, caching, Go module embedding, web-researcher extension |

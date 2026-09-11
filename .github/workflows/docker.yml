@@ -1,7 +1,9 @@
-# GHCR 多架构镜像 — 与 CLI/二进制 release 拆开，互不阻塞。
+# GHCR 多架构镜像 — 与 CLI/二进制 Release、MCP Registry 拆开，互不阻塞。
 #
-# Trigger: 普通 semver tag（v3.3.1）；-registry 后缀不重复推镜像
-#   - linux/amd64 + linux/arm64 清单（closes daidaiJ/websearch-mcpserver#4）
+# 发布矩阵拆分：本工作流只构建容器 linux/amd64 + linux/arm64（closes #4）。
+# GitHub Release 不含 linux-arm64 / windows-arm64 二进制；MCP mcpb 跟 Release 四平台。
+#
+# Trigger: 普通 semver tag（v3.4.0）；-registry 后缀不重复推镜像
 #   - Go 交叉编译在 Dockerfile BUILDPLATFORM 阶段完成，不装 QEMU
 #   - 失败不影响 GitHub Release / MCP Registry 工作流
 

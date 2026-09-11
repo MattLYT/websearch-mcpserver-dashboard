@@ -39,6 +39,8 @@ Download from the [Release page](https://github.com/daidaiJ/websearch-mcpserver/
 | macOS Intel | `websearch-mcpserver-darwin-amd64` |
 | macOS Apple Silicon | `websearch-mcpserver-darwin-arm64` |
 
+> **Split release matrices**: GitHub Release only ships the four platforms above (linux/windows amd64 + darwin amd64/arm64). There is no linux-arm64 binary — use the GHCR image below. Windows ARM64 is not published. MCP Registry `.mcpb` bundles match these four platforms.
+
 **stdio CLI** (spawned by the MCP client, no HTTP port):
 
 | Platform | File |
@@ -50,21 +52,30 @@ Download from the [Release page](https://github.com/daidaiJ/websearch-mcpserver/
 
 ### Docker
 
+Official images are on GHCR as a **linux/amd64 + linux/arm64** manifest (Apple Silicon / ARM servers can pull directly):
+
 ```bash
-git clone --depth 1 https://github.com/daidaiJ/websearch-mcpserver.git
-cd websearch-mcpserver && docker build -t websearch:v1 .
+docker pull ghcr.io/daidaij/websearch-mcpserver:latest
+# or pin: ghcr.io/daidaij/websearch-mcpserver:3.4.0
 ```
 
 ```yaml
 # docker-compose.yml
 services:
   websearch:
-    image: websearch:v1
+    image: ghcr.io/daidaij/websearch-mcpserver:latest
     restart: always
     volumes:
       - ./config.yaml:/app/config.yaml
     ports:
       - "8338:8338"
+```
+
+Build locally:
+
+```bash
+git clone --depth 1 https://github.com/daidaiJ/websearch-mcpserver.git
+cd websearch-mcpserver && docker build -t websearch:v1 .
 ```
 
 ### Build from Source
