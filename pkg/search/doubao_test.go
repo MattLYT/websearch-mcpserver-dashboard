@@ -151,3 +151,75 @@ func TestLookbackDaysToDoubaoRange(t *testing.T) {
 		}
 	}
 }
+
+// ── 集成测试（从 gitignore 的 config.test.yaml 加载 API Key） ──
+
+func TestDoubao_Global_SearchRaw_Integration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("跳过集成测试: -short 模式")
+	}
+	apiKey := loadDoubaoAPIKey(t)
+	engine := NewDoubaoSearch(newTestKeyPool(t, apiKey), DoubaoOptions{
+		Version:    doubaoVersionGlobal,
+		NumResults: 5,
+	})
+	results, err := engine.SearchRaw("Go 泛型")
+	if err != nil {
+		t.Fatalf("global SearchRaw failed: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected non-empty global results")
+	}
+	for i, r := range results {
+		t.Logf("[global %d] %s - %s", i+1, r.Title, r.Url)
+		if r.Title == "" || r.Url == "" {
+			t.Errorf("empty title/url: %+v", r)
+		}
+		if r.Engine != "doubao" {
+			t.Errorf("engine = %q, want doubao", r.Engine)
+		}
+	}
+}
+
+func TestDoubao_Custom_SearchRaw_Integration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("跳过集成测试: -short 模式")
+	}
+	apiKey := loadDoubaoAPIKey(t)
+	engine := NewDoubaoSearch(newTestKeyPool(t, apiKey), DoubaoOptions{
+		Version:    doubaoVersionCustom,
+		NumResults: 5,
+	})
+	results, err := engine.SearchRaw("Go 泛型")
+	if err != nil {
+		t.Fatalf("custom SearchRaw failed: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected non-empty custom results")
+	}
+	for i, r := range results {
+		t.Logf("[custom %d] %s - %s", i+1, r.Title, r.Url)
+		if r.Engine != "doubao" {
+			t.Errorf("engine = %q, want doubao", r.Engine)
+		}
+	}
+}
+
+func TestDoubao_Custom_SearchRawWithTimeRange_Integration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("跳过集成测试: -short 模式")
+	}
+	apiKey := loadDoubaoAPIKey(t)
+	engine := NewDoubaoSearch(newTestKeyPool(t, apiKey), DoubaoOptions{
+		Version:    doubaoVersionCustom,
+		NumResults: 5,
+	})
+	results, err := engine.SearchRawWithTimeRange("AI", 7)
+	if err != nil {
+		t.Fatalf("custom SearchRawWithTimeRange(week) failed: %v", err)
+	}
+	t.Logf("custom week 范围结果数: %d", len(results))
+	if len(results) == 0 {
+		t.Fatal("expected non-empty custom week results")
+	}
+}
