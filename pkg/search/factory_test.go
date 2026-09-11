@@ -24,9 +24,24 @@ func TestInitBaiduWebEngine_ExplicitEnable(t *testing.T) {
 
 // TestBuildEngineMode_AllDisabledEngines 验证默认配置（baidu/google 禁用、bing/ddg 开关由调用方传入）
 // 下 engine 模式对 nil 引擎的容错：全部为 nil 时返回 nil 并告警，不 panic。
+// TestBuildEngineMode_AllDisabledEngines 验证默认配置（baidu/google 禁用、bing/ddg 开关由调用方传入）
+// 下 engine 模式对 nil 引擎的容错：全部为 nil 时返回 nil 并告警，不 panic。
 func TestBuildEngineMode_AllDisabledEngines(t *testing.T) {
 	g := &SearchGroup{conf: config.Config{}}
 	if got := buildEngineMode(g, nil, nil, nil); got != nil {
 		t.Fatalf("expected nil primary when all engines disabled, got %v", got)
+	}
+}
+
+func TestNewFromConfig_DoubaoMode_NoKey_Fallback(t *testing.T) {
+	g, err := NewFromConfig(config.Config{Mode: config.ModeDoubao, Bing: config.BingConfig{Enabled: true}})
+	if err != nil {
+		t.Fatalf("NewFromConfig: %v", err)
+	}
+	if g.Primary == nil {
+		t.Fatal("expected Bing fallback when doubao has no key")
+	}
+	if g.Primary.Name() != "bing" {
+		t.Fatalf("fallback Name() = %q, want bing", g.Primary.Name())
 	}
 }

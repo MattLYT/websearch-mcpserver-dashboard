@@ -70,7 +70,7 @@ mcp_stateless: false        # Stateless MCP HTTP mode (default false = stateful)
                             # horizontal scaling behind proxies/LBs; GET SSE returns 405. All tools are
                             # request-response, so stateless mode loses nothing
 log_level: info             # debug / info / warn / error
-mode: engine                # baidu / apipool / tavily / exa / anysearch / hybrid / engine
+mode: engine                # baidu / apipool / tavily / exa / anysearch / doubao / hybrid / engine
 network: china              # china (skip overseas engines) / international
 
 # Global rate limit (applies to all search engines)
@@ -113,6 +113,21 @@ anysearch:
   api_key: ""               # Env: ANYSEARCH_API_KEY (falls back to single-element sk_list when empty)
   sk_list: []               # Multi-key rotation list (priority over api_key; duplicate keys are deduplicated)
   num_results: 10           # Results per search (default 10)
+
+# Doubao Search Global / Custom (mode=doubao/hybrid; add to apipool.engines explicitly)
+# Activate: https://console.volcengine.com/search-infinity/web-search
+doubao:
+  api_key: ""               # Env: DOUBAO_SEARCH_API_KEY (also ASK_ECHO_SEARCH_INFINITY_API_KEY)
+  sk_list: []               # Multi-key rotation list (priority over api_key; duplicates are deduplicated)
+  version: global           # global (default) / custom
+  num_results: 10           # Global max 20; Custom max 50
+  max_snippet_length: 500   # Global: max tokens per snippet, maximum 3000
+  max_image_count_per_doc: 0 # Global: images per document, default 0
+  icp_host_only: false      # Global: restrict search to ICP-filed China sites
+  time_range: ""            # Custom default; MCP request-level time_range takes precedence
+  auth_level: 0             # Custom: 0=default, 1=highly authoritative sources only
+  query_rewrite: false      # Custom: enable query rewriting
+  need_content: false       # Custom: request full page content
 
 # Bing engine (fallback + engine mode primary, no key needed)
 bing:
@@ -266,6 +281,8 @@ log:
 | `TAVILY_SK` | `tavily.api_key` | |
 | `EXA_API_KEY` | `exa.api_key` | Exa Web Search API Key |
 | `ANYSEARCH_API_KEY` | `anysearch.api_key` | AnySearch API Key ([anysearch.com](https://www.anysearch.com/docs)) |
+| `DOUBAO_SEARCH_API_KEY` | `doubao.api_key` | Doubao Search API Key ([console](https://console.volcengine.com/search-infinity/api-key)) |
+| `ASK_ECHO_SEARCH_INFINITY_API_KEY` | `doubao.api_key` | Official Volcengine MCP-compatible variable name |
 | `LLM_BASE_URL` | `llm.base_url` | |
 | `LLM_API_KEY` | `llm.api_key` | |
 | `MINERU_TOKEN` | `pdf_parser.mineru_token` | MinerU Standard API Token |
@@ -288,6 +305,8 @@ log:
 | `apipool.strategy` | round-robin | `round-robin` rotates provider across requests / `priority` fixed order / `weighted` weighted-random |
 | `apipool.engines` | [anysearch, baidu, tavily, exa] | Provider priority order, Baidu web search fallback always last |
 | `apipool.weights` | anysearch=30000, baidu=1500, tavily=1200, exa=1200 | weighted per-key weights, accumulated by available key count |
+| `doubao.version` | global | Global / Custom; concurrent both goes through hybrid, not inside the adapter |
+| `doubao.num_results` | 10 | Global max 20; Custom max 50 |
 | `baidu.enable_ai_search` | true | true=AI search chat/completions, false=web search web_search; no LLM cost when model is empty |
 | `bing.enabled` | true | |
 | `duckduckgo.enabled` | true | Needs proxy; auto-joins when proxy is available |

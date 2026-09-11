@@ -119,8 +119,8 @@ func (e *arxivEngine) fetch(query string, page int, timeRange antirobot.TimeRang
 	}
 
 	q := "all:" + query
-	if since := antirobot.TimeRangeSince(timeRange); since != "" {
-		q += " AND submittedDate:[" + since + " TO *]"
+	if dateRange := arxivDateRange(timeRange); dateRange != "" {
+		q += dateRange
 	}
 
 	u := fmt.Sprintf("%s?search_query=%s&start=%d&max_results=10",
@@ -143,6 +143,18 @@ func (e *arxivEngine) fetch(query string, page int, timeRange antirobot.TimeRang
 	}
 	retryAfter := antirobot.ParseRetryAfter(resp.Header.Get("Retry-After"))
 	return body, resp.StatusCode, retryAfter, nil
+}
+
+// arxivDateRange 按官方 API 拼 submittedDate 闭区间。
+// 格式必须是 YYYYMMDDHHMM（GMT），开放通配符 TO * 会被拒绝。
+func arxivDateRange(timeRange antirobot.TimeRange) string {
+	since := antirobot.TimeRangeSince(timeRange)
+	if since == "" {
+		return ""
+	}
+	start := strings.ReplaceAll(since, "-", "") + "0000"
+	end := time.Now().UTC().Format("200601021504")
+	return " AND submittedDate:[" + start + " TO " + end + "]"
 }
 
 // handleRateLimited 限流避让决策：

@@ -97,7 +97,8 @@ func TestLoadOrDefault_MCPStateless(t *testing.T) {
 	}
 }
 
-func TestLoadOrDefault_MissingExplicitFile(t *testing.T) {	viper.Reset()
+func TestLoadOrDefault_MissingExplicitFile(t *testing.T) {
+	viper.Reset()
 	t.Setenv("WEBSEARCH_CONFIG", "")
 	_, err := LoadOrDefault(filepath.Join(t.TempDir(), "missing.yaml"))
 	if err == nil {
@@ -452,6 +453,28 @@ func TestGetMode_Anysearch(t *testing.T) {
 	}
 }
 
+func TestGetMode_Doubao(t *testing.T) {
+	conf := Config{Mode: ModeDoubao}
+	if conf.GetMode() != ModeDoubao {
+		t.Errorf("GetMode() = %q, want %q", conf.GetMode(), ModeDoubao)
+	}
+	if !conf.NeedsAPIKey() {
+		t.Error("mode=doubao should require API key")
+	}
+}
+
+func TestDoubaoConfig_EffectiveSKListAndVersion(t *testing.T) {
+	if got := (DoubaoConfig{APIKey: "k1"}).EffectiveSKList(); len(got) != 1 || got[0] != "k1" {
+		t.Errorf("single api_key should become sk_list, got %v", got)
+	}
+	if got := (DoubaoConfig{Version: "CUSTOM"}).GetVersion(); got != "custom" {
+		t.Errorf("GetVersion(CUSTOM) = %q, want custom", got)
+	}
+	if got := (DoubaoConfig{Version: "both"}).GetVersion(); got != "global" {
+		t.Errorf("GetVersion(both) must fall back to global, got %q", got)
+	}
+}
+
 func TestAnysearchConfig_EffectiveSKList(t *testing.T) {
 	if got := (AnysearchConfig{APIKey: "k1"}).EffectiveSKList(); len(got) != 1 || got[0] != "k1" {
 		t.Errorf("single api_key should become sk_list, got %v", got)
@@ -469,5 +492,20 @@ func TestDefault_AppliesAnysearchEnv(t *testing.T) {
 	conf := Default()
 	if conf.Anysearch.APIKey != "as-test" {
 		t.Errorf("Anysearch.APIKey = %q, want as-test", conf.Anysearch.APIKey)
+	}
+}
+
+func TestDefault_AppliesDoubaoEnv(t *testing.T) {
+	t.Setenv("DOUBAO_SEARCH_API_KEY", "doubao-test")
+	conf := Default()
+	if conf.Doubao.APIKey != "doubao-test" {
+		t.Errorf("Doubao.APIKey = %q, want doubao-test", conf.Doubao.APIKey)
+	}
+
+	t.Setenv("DOUBAO_SEARCH_API_KEY", "")
+	t.Setenv("ASK_ECHO_SEARCH_INFINITY_API_KEY", "official-test")
+	conf = Default()
+	if conf.Doubao.APIKey != "official-test" {
+		t.Errorf("Doubao.APIKey from official env = %q, want official-test", conf.Doubao.APIKey)
 	}
 }

@@ -69,7 +69,7 @@ mcp_stateless: false        # MCP 无状态 HTTP 模式（默认 false = 会话�
                             # 免 initialize 握手与 Mcp-Session-Id 会话，便于反向代理/负载均衡水平扩展；
                             # GET SSE 长连返回 405。本服务工具均为请求-响应式，无状态模式下功能无损
 log_level: info             # debug / info / warn / error
-mode: engine                # baidu / apipool / tavily / exa / anysearch / hybrid / engine
+mode: engine                # baidu / apipool / tavily / exa / anysearch / doubao / hybrid / engine
 network: china              # china（跳过海外引擎） / international
 
 # 全局限流（对所有搜索引擎统一生效）
@@ -112,6 +112,21 @@ anysearch:
   api_key: ""               # 环境变量: ANYSEARCH_API_KEY（sk_list 为空时自动作为单元素列表）
   sk_list: []               # 多 Key 轮询列表（优先级高于 api_key；重复 Key 自动去重）
   num_results: 10           # 单次搜索结果数量（默认 10）
+
+# 豆包联网搜索 Global / Custom（mode=doubao/hybrid；apipool 需显式加入 engines）
+# 开通: https://console.volcengine.com/search-infinity/web-search
+doubao:
+  api_key: ""               # 环境变量: DOUBAO_SEARCH_API_KEY（兼容 ASK_ECHO_SEARCH_INFINITY_API_KEY）
+  sk_list: []               # 多 Key 轮询列表（优先级高于 api_key；重复 Key 自动去重）
+  version: global           # global（默认）/ custom
+  num_results: 10           # Global 最大 20；Custom 最大 50
+  max_snippet_length: 500   # Global: 单片段最大 tokens，最大 3000
+  max_image_count_per_doc: 0 # Global: 图片数，默认 0
+  icp_host_only: false      # Global: 仅搜索国内 ICP 备案网站
+  time_range: ""            # Custom 默认时间范围；MCP 请求级 time_range 优先
+  auth_level: 0             # Custom: 0=默认，1=仅非常权威来源
+  query_rewrite: false      # Custom: 是否启用查询改写
+  need_content: false       # Custom: 是否请求网页正文
 
 # Bing 引擎（兜底 + engine 模式主力，无需 Key）
 bing:
@@ -265,6 +280,8 @@ log:
 | `TAVILY_SK` | `tavily.api_key` | |
 | `EXA_API_KEY` | `exa.api_key` | Exa Web Search API Key |
 | `ANYSEARCH_API_KEY` | `anysearch.api_key` | AnySearch API Key（[anysearch.com](https://www.anysearch.com/docs)） |
+| `DOUBAO_SEARCH_API_KEY` | `doubao.api_key` | 豆包联网搜索 API Key（[控制台](https://console.volcengine.com/search-infinity/api-key)） |
+| `ASK_ECHO_SEARCH_INFINITY_API_KEY` | `doubao.api_key` | 火山官方 MCP 兼容变量名 |
 | `LLM_BASE_URL` | `llm.base_url` | |
 | `LLM_API_KEY` | `llm.api_key` | |
 | `MINERU_TOKEN` | `pdf_parser.mineru_token` | MinerU 精准解析 API Token |
@@ -287,6 +304,8 @@ log:
 | `apipool.strategy` | round-robin | `round-robin` 跨请求轮转供应商 / `priority` 固定优先级顺序 / `weighted` 加权随机 |
 | `apipool.engines` | [anysearch, baidu, tavily, exa] | 供应商优先级顺序，百度网页搜索兜底始终在末尾 |
 | `apipool.weights` | anysearch=30000, baidu=1500, tavily=1200, exa=1200 | weighted 策略单 Key 权重，实际权重按可用 Key 数累加 |
+| `doubao.version` | global | Global / Custom；两版并发走 hybrid，适配器内不提供 both |
+| `doubao.num_results` | 10 | Global 最大 20；Custom 最大 50 |
 | `baidu.enable_ai_search` | true | true=智能搜索 chat/completions，false=网页搜索 web_search；不传 model 不产生 LLM 费用 |
 | `bing.enabled` | true | |
 | `duckduckgo.enabled` | true | 需代理，代理可用时自动参与 |

@@ -10,8 +10,8 @@
 
 | 能力 | 说明 |
 |------|------|
-| **搜索引擎搜索** | 内置百度/Bing/DuckDuckGo/Google 多引擎并发编排，支持 Tavily/Exa 等 API 引擎混合 |
-| **API 搜索** | API Key 池轮转模式，支持百度千帆/Tavily/Exa 等多种 API 供应商，失败自动切换 |
+| **搜索引擎搜索** | 内置百度/Bing/DuckDuckGo/Google 多引擎并发编排，支持 Tavily/Exa/AnySearch/豆包等 API 引擎混合 |
+| **API 搜索** | API Key 池轮转模式，支持百度千帆/Tavily/Exa/AnySearch/豆包等多种 API 供应商，失败自动切换 |
 | **学术搜索** | arXiv/Crossref/OpenAlex/PubMed/Semantic Scholar/Google Scholar/Europe PMC/DBLP/DOAJ 九大学术引擎并发，DOI 跨引擎去重、逐引擎错误透传 |
 | **网页抓取** | 增强型网页内容提取（TLS 指纹伪装 + SSRF 防护 + Jina Reader 备选） |
 | **PDF 解析** | MinerU AI 增强 PDF 解析（表格/公式/多栏/图片智能识别），无 Token 自动降级 |
@@ -49,6 +49,7 @@ pkg/
 │   ├── baidu_fallback.go  # 百度适配器（含智能回退）
 │   ├── bing_adapter.go    # Bing 适配器
 │   ├── apipool.go         # API Key 池轮转
+│   ├── doubao.go          # 豆包联网搜索 Global/Custom 适配器
 │   └── *_test.go          # 单元测试
 ├── antirobot/    # 反检测公共层：Searcher 接口、限流器、TLS 指纹
 ├── baidu/        # 百度底层引擎实现
