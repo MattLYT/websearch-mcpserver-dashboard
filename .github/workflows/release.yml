@@ -1,8 +1,13 @@
 # Release workflow — 参考 2native-ssh-mcp 已验证实现（v1.4.1 成功发布）。
 #
+# 发布矩阵拆分（三套独立，不要合并成 6 平台）：
+#   GitHub Release 二进制：linux/amd64, windows/amd64, darwin/amd64, darwin/arm64
+#   GHCR 镜像（docker.yml）：linux/amd64, linux/arm64
+#   MCP Registry mcpb：跟 Release 四平台封包（--expect-packages 4）
+# linux-arm64 容器走 GHCR；不要为了「对齐 MCP/Docker」把 linux-arm64 / windows-arm64 加回本矩阵。
+#
 # Trigger: push an annotated tag (git tag -a v3.1.1 -m "...")
-#   - builds server + cli binaries for windows/linux amd64 and darwin amd64/arm64
-#     (CGO_ENABLED=0)
+#   - builds server + cli binaries for the Release 四平台 (CGO_ENABLED=0)
 #   - injects the tag name as the binary version (-X main.version=<tag>)
 #   - release notes = the annotated tag message (read via GitHub API)
 #   - attaches every binary with its own .sha256 checksum
@@ -13,6 +18,7 @@
 #     (MCP Bundle, zip + manifest.json) via mcpb-tool-cli, uploads the bundles
 #     back to the base release, and publishes it to the official MCP Registry
 #     (registry.modelcontextprotocol.io) via OIDC.
+#   - v3.x 与 v3.x-registry 应钉在同一个 commit（registry 只多跑封包/发布 job）
 
 name: Release
 
@@ -165,7 +171,8 @@ jobs:
           go install github.com/daidaiJ/mcpb-tool-cli@latest
           # go install 产物在 GOPATH/bin（不在 runner PATH），且二进制名为 mcpb-tool-cli
           MCPB="$(go env GOPATH)/bin/mcpb-tool-cli"
-          # 与 build 矩阵对齐：linux/windows 仅 amd64，darwin amd64+arm64（缺文件跳过）
+          # MCP 跟 GitHub Release 四平台：linux/windows amd64 + darwin amd64/arm64。
+          # 缺文件跳过是兜底；正常应正好 4 个 mcpb（--expect-packages 4）。
           for os in linux darwin windows; do
             for arch in amd64 arm64; do
               ext=""; [ "$os" = "windows" ] && ext=".exe"

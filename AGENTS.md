@@ -28,7 +28,7 @@
 | 日志 | Zerolog 结构化日志 |
 | MCP 协议 | modelcontextprotocol/go-sdk |
 | HTTP 客户端 | resty.dev/v3 + go-webfetch（TLS 指纹伪装） |
-| 部署 | 单二进制 / Docker 多阶段构建 |
+| 部署 | 单二进制 / Docker 多阶段构建；Release 与 GHCR / MCP Registry 矩阵拆分（见下方提示） |
 
 ---
 
@@ -146,3 +146,4 @@ docker build -t websearch-mcpserver .
 2. **新增配置项时**，同步更新 `pkg/config/config.go` 和两个 `config.example.yaml`
 3. **涉及反检测/限流**，修改应在 `pkg/antirobot/` 层进行，不要在各引擎包中重复实现
 4. **学术搜索与通用搜索是独立模块**，学术引擎在 `pkg/academic/`，通用引擎在 `pkg/baidu/` `pkg/bing/` 等，不要混淆
+5. **发布矩阵拆分，不要合成一套 6 平台**：GitHub Release = linux/windows amd64 + darwin amd64/arm64；GHCR = linux/amd64+arm64；MCP Registry mcpb 跟 Release（`--expect-packages 4`）。linux-arm64 走 GHCR，不要把 linux-arm64 / windows-arm64 加回 Release 来对齐 Docker 或旧版 v3.1.1 MCP

@@ -13,6 +13,9 @@
 ### 致谢
 - [@matt1060338871-pixel](https://github.com/matt1060338871-pixel)：[#5](https://github.com/daidaiJ/websearch-mcpserver/pull/5) 学术 `time_range`、[#6](https://github.com/daidaiJ/websearch-mcpserver/pull/6) 豆包联网搜索（按仓库编排改写后合入 [#7](https://github.com/daidaiJ/websearch-mcpserver/pull/7)）
 
+### 文档
+- **发布矩阵拆分**：GitHub Release 二进制 4 平台（linux/windows amd64 + darwin amd64/arm64）；GHCR `linux/amd64,linux/arm64`；MCP Registry 按 Release 封 4 个 mcpb。linux-arm64 容器走 GHCR，不提供 GitHub `linux-arm64` 二进制
+
 ## v3.3.0 — 2026-09-04
 
 ### 新增

@@ -13,6 +13,9 @@
 ### Credits
 - [@matt1060338871-pixel](https://github.com/matt1060338871-pixel): [#5](https://github.com/daidaiJ/websearch-mcpserver/pull/5) academic `time_range`, [#6](https://github.com/daidaiJ/websearch-mcpserver/pull/6) Doubao Search (rewritten to match this repo's orchestration and landed in [#7](https://github.com/daidaiJ/websearch-mcpserver/pull/7))
 
+### Docs
+- **Split release matrices**: GitHub Release binaries cover 4 platforms (linux/windows amd64 + darwin amd64/arm64); GHCR is `linux/amd64,linux/arm64`; MCP Registry ships 4 mcpb bundles matching Release. linux-arm64 containers use GHCR; there is no GitHub `linux-arm64` binary
+
 ## v3.3.0 — 2026-09-04
 
 ### Added
