@@ -15,7 +15,7 @@
 
 ### Docs
 - **Split release matrices**: GitHub Release binaries cover 4 platforms (linux/windows amd64 + darwin amd64/arm64); GHCR is `linux/amd64,linux/arm64`; MCP Registry ships 4 mcpb bundles matching Release. linux-arm64 containers use GHCR; there is no GitHub `linux-arm64` binary
-- **Tagging**: a plain tag (`vX.Y.Z`) publishes the GitHub Release and the GHCR image together; a `-registry` suffix tag publishes to the MCP Registry only (no image push). Pin both tags to the same commit
+- **Tagging**: first push a plain tag (`vX.Y.Z`) for the GitHub Release and GHCR image; after that is done, separately push a `-registry` suffix tag to the MCP Registry. Do not push both at once. The follow-up tag stays on the same commit
 - **Config and tool docs aligned with v3.4.0**: Doubao keys / `apipool.engines` omits doubao by default / `weights.doubao=500`, academicsearch `time_range` official syntax, stdio env vars, and gitignored `config.test.yaml`
 
 ## v3.3.0 — 2026-09-04

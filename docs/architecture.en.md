@@ -26,7 +26,7 @@
 - **Single config source** — HTTP daemon and stdio CLI share the same YAML config (`pkg/config`); `mode` decides how the engine group is built
 - **Engines as interfaces** — all engines implement the unified `SearchInf` interface; `pkg/search/factory.go` assembles them by mode; `HybridSearchImpl` handles multi-engine concurrent orchestration
 - **Pure Go, no CGO** — SQLite via `modernc.org/sqlite`, single-binary deployment
-- **Split release matrices** — GitHub Release: linux/windows amd64 + darwin amd64/arm64; GHCR: `linux/amd64,linux/arm64`; MCP Registry mcpb matches the four Release platforms. A plain tag (`vX.Y.Z`) publishes the Release and the GHCR image together; a `-registry` suffix tag publishes to the MCP Registry only (no image push). Pin both tags to the same commit. Use the image for linux-arm64; do not add a GitHub `linux-arm64` binary to "align" the channels
+- **Split release matrices** — GitHub Release: linux/windows amd64 + darwin amd64/arm64; GHCR: `linux/amd64,linux/arm64`; MCP Registry mcpb matches the four Release platforms. First push a plain tag (`vX.Y.Z`) for the Release and GHCR image; after that is done, separately push a `-registry` suffix tag for the MCP Registry only. Do not push both at once. The follow-up tag stays on the same commit. Use the image for linux-arm64; do not add a GitHub `linux-arm64` binary to "align" the channels
 
 ---
 
