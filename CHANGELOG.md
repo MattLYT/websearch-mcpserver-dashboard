@@ -2,7 +2,7 @@
 
 [English](CHANGELOG.en.md) | [中文](CHANGELOG.md)
 
-## Unreleased
+## v3.5.0 — 2026-09-13
 
 ### 新增
 - **`fetch_top_n` 三分语义 + 双路径取正文**：不传 = 与旧版完全一致（只返回引擎/供应商自带内容，服务端 `smartsearch.fetch_top_n` 可改默认，默认 0）；传 0 = 只要标题摘要和 URL；传 1-5 = 为前 N 条获取页面原文——**支持原文传参的 API 引擎走快速路径**（Tavily `include_raw_content`、Exa `contents.text`（`exa.text_max_characters` 默认 3000）、豆包 Custom `need_content`，均默认开启、可显式关闭），**其余引擎内部抓取页面**（webfetch 惰性初始化，无需 cleanfetch 开启）；已有足量正文（≥1000 字符）的条目自动跳过内嵌抓取
@@ -16,7 +16,7 @@
 - **`pdf_parser` 的 `pages` 区间先限宽再分配**：单个区间宽度超过 1000 页（如 `pages="1-2147483647"`）立即报参数错误，不再先展开切片导致内存暴涨
 - **HEAD 预检重定向逐跳安全复查**：HEAD 跟随重定向（最多 5 跳）时对每一跳目标复跑私网/云 metadata 校验；公网 URL 302 到 `169.254.169.254` 等内网地址会被拒绝，不再被当成未鉴权探针
 
-- **缓存默认关闭（v3.4.1 起）**：`cache.enabled` 不设置时不再按 `storage_path` 判断；显式 `enabled: true` 启用，`storage_path` 未配置时默认 exe 同目录 `cache/websearch-cache.db`
+- **缓存默认关闭（v3.5.0 起）**：`cache.enabled` 不设置时不再按 `storage_path` 判断；显式 `enabled: true` 启用，`storage_path` 未配置时默认 exe 同目录 `cache/websearch-cache.db`
 - **cleanfetch 落盘目录默认 exe 同目录 `fetchdata/`**：不再用系统临时目录 `webfetch/`
 - **配置示例 / 配置说明 / 模式表补齐 API Key 获取地址**：Tavily / Exa / AnySearch / 豆包（`config.example.yaml`、`docs/configuration`、`docs/search`、README，中英双语）
 ### 变更

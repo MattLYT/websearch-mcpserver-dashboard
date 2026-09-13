@@ -510,7 +510,7 @@ func (c Config) CacheEnabled() bool {
 	if c.Cache.Enabled != nil {
 		return *c.Cache.Enabled
 	}
-	// 未显式设置时默认关闭（v3.4.1 起）：SQLite 缓存对轻量部署收益有限，
+	// 未显式设置时默认关闭（v3.5.0 起）：SQLite 缓存对轻量部署收益有限，
 	// 需要缓存时在配置中显式 enabled: true（storage_path 未配置时用默认路径）
 	return false
 }

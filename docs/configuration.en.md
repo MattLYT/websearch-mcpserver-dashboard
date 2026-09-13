@@ -184,7 +184,7 @@ llm:
 
 # Cache (disabled by default)
 cache:
-  # enabled: true            # Unset → disabled by default (since v3.4.1); set true to enable
+  # enabled: true            # Unset → disabled by default (since v3.5.0); set true to enable
   # storage_path: ""         # Unset → exe sibling dir cache/websearch-cache.db
   cleanup_interval: 30      # Cleanup interval (minutes), max 360
 
@@ -369,7 +369,7 @@ log:
 | `smartsearch.relevance_threshold` | 0.05 | Relevance threshold after enhancement |
 | `smartsearch.mmr.enabled` | true | MMR diversity re-ranking |
 | `smartsearch.mmr.lambda` | 0.7 | Relevance-diversity tradeoff |
-| `cache.enabled` | false | Unset → disabled by default (since v3.4.1); set true to enable (storage_path defaults to exe sibling dir cache/websearch-cache.db) |
+| `cache.enabled` | false | Unset → disabled by default (since v3.5.0); set true to enable (storage_path defaults to exe sibling dir cache/websearch-cache.db) |
 | `cache.cleanup_interval` | 30 (min) | Max 360 |
 | Cache expiry | 6 hours | Based on last hit time, hardcoded |
 | `log.max_size` | 1 (MB) | |

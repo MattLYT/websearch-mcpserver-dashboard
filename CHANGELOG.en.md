@@ -2,7 +2,7 @@
 
 [English](CHANGELOG.en.md) | [中文](CHANGELOG.md)
 
-## Unreleased
+## v3.5.0 — 2026-09-13
 
 ### Added
 - **Three-way `fetch_top_n` semantics + dual-path body retrieval**: omitted = exactly as before (only engine/provider-provided content; server `smartsearch.fetch_top_n` can change the default, default 0); 0 = title+snippet+URL only; 1-5 = obtain page-original text for the top N results — **API engines that support full-text params use the fast path** (Tavily `include_raw_content`, Exa `contents.text` (`exa.text_max_characters`, default 3000), Doubao Custom `need_content`; all on by default, explicitly disableable), **other engines fetch internally** (webfetch lazily initializes, no cleanfetch required); results already carrying sufficient body text (≥1000 chars) skip the embedded fetch
@@ -16,7 +16,7 @@
 - **`pdf_parser` `pages` ranges are width-capped before allocation**: a single range wider than 1000 pages (e.g. `pages="1-2147483647"`) raises a parameter error immediately instead of expanding the slice and ballooning memory
 - **HEAD pre-check re-validates every redirect hop (up to 5)** against private-network / cloud-metadata checks; a public URL 302-ing to `169.254.169.254` or other internal addresses is rejected instead of being probed unauthenticated
 
-- **Cache disabled by default (since v3.4.1)**: an unset `cache.enabled` no longer infers from `storage_path`; set `enabled: true` explicitly to enable. With `storage_path` unset the DB defaults to the exe sibling dir `cache/websearch-cache.db`
+- **Cache disabled by default (since v3.5.0)**: an unset `cache.enabled` no longer infers from `storage_path`; set `enabled: true` explicitly to enable. With `storage_path` unset the DB defaults to the exe sibling dir `cache/websearch-cache.db`
 - **cleanfetch output dir defaults to the exe sibling dir `fetchdata/`**: no longer the system temp dir `webfetch/`
 - **API key acquisition URLs added across config examples / configuration docs / mode tables**: Tavily / Exa / AnySearch / Doubao (`config.example.yaml`, `docs/configuration`, `docs/search`, README, both languages)
 ### Changed

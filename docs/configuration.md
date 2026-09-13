@@ -182,7 +182,7 @@ llm:
 
 # 缓存（默认关闭）
 cache:
-  # enabled: true            # 不设置时默认关闭（v3.4.1 起）；显式 true 启用
+  # enabled: true            # 不设置时默认关闭（v3.5.0 起）；显式 true 启用
   # storage_path: ""         # 未配置时默认 exe 同目录 cache/websearch-cache.db
   cleanup_interval: 30      # 清理间隔（分钟），最大 360
 
@@ -367,7 +367,7 @@ log:
 | `smartsearch.relevance_threshold` | 0.05 | 增强后相关性阀值 |
 | `smartsearch.mmr.enabled` | true | MMR 多样性重排 |
 | `smartsearch.mmr.lambda` | 0.7 | 相关性-多样性权衡系数 |
-| `cache.enabled` | false | 不设置时默认关闭（v3.4.1 起）；显式 true 启用（storage_path 默认 exe 同目录 cache/websearch-cache.db） |
+| `cache.enabled` | false | 不设置时默认关闭（v3.5.0 起）；显式 true 启用（storage_path 默认 exe 同目录 cache/websearch-cache.db） |
 | `cache.cleanup_interval` | 30 (min) | 最大 360 |
 | 缓存过期 | 6 小时 | 基于最近命中时间，硬编码不可配置 |
 | `log.max_size` | 1 (MB) | |

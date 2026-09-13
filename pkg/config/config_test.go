@@ -206,7 +206,7 @@ func TestCacheEnabled(t *testing.T) {
 			want:    false,
 		},
 		{
-			name:    "nil enabled, non-empty path -> disabled (v3.4.1 default off)",
+			name:    "nil enabled, non-empty path -> disabled (v3.5.0 default off)",
 			enabled: nil,
 			path:    "/tmp/cache.db",
 			want:    false,
