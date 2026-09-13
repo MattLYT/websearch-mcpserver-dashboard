@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"path/filepath"
 	"testing"
-	"websearch/pkg/search"
+	"websearch/pkg/search/core"
 )
 
 func newTestCache(t *testing.T) *Cache {
@@ -21,11 +21,11 @@ func newTestCache(t *testing.T) *Cache {
 func TestStoreUpsertSameQuery(t *testing.T) {
 	c := newTestCache(t)
 
-	results1 := []search.SearchResult{{Title: "first", Url: "https://example.com/1"}}
+	results1 := []core.SearchResult{{Title: "first", Url: "https://example.com/1"}}
 	if err := c.Store("golang", "web", false, results1, "summary-1"); err != nil {
 		t.Fatalf("第一次 Store 失败: %v", err)
 	}
-	results2 := []search.SearchResult{{Title: "second", Url: "https://example.com/2"}}
+	results2 := []core.SearchResult{{Title: "second", Url: "https://example.com/2"}}
 	if err := c.Store("golang", "web", false, results2, "summary-2"); err != nil {
 		t.Fatalf("第二次 Store 失败: %v", err)
 	}

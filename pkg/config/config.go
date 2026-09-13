@@ -101,7 +101,10 @@ func (c BaiduConfig) EffectiveSKList() []string {
 
 type TavilyConfig struct {
 	APIKey string   `mapstructure:"api_key"` // Tavily Search API Key（单 key 时自动作为 sk_list）
-	SKList []string `mapstructure:"sk_list"` // 多 Key 轮询列表（优先级高于 api_key）
+	SKList []string `mapstructure:"sk_list"` // 多 Key 轮转列表（优先级高于 api_key）
+	// IncludeRawContent 是否请求 API 返回页面原文（raw_content），默认 true；
+	// 显式 false 退回摘要片段，减小响应体与配额消耗
+	IncludeRawContent *bool `mapstructure:"include_raw_content"`
 }
 
 // EffectiveSKList 返回合并后的 Key 列表。
@@ -117,9 +120,13 @@ func (c TavilyConfig) EffectiveSKList() []string {
 
 type ExaConfig struct {
 	APIKey       string   `mapstructure:"api_key"`       // Exa Search API Key（单 key 时自动作为 sk_list）
-	SKList       []string `mapstructure:"sk_list"`       // 多 Key 轮询列表（优先级高于 api_key）
+	SKList       []string `mapstructure:"sk_list"`       // 多 Key 轮转列表（优先级高于 api_key）
 	NumResults   int      `mapstructure:"num_results"`   // 单次搜索结果数量（默认 5）
 	LookbackDays int      `mapstructure:"lookback_days"` // 搜索时间范围（天），默认 90
+	// IncludeText 是否请求 API 返回页面正文（contents.text），默认 true
+	IncludeText *bool `mapstructure:"include_text"`
+	// TextMaxCharacters 正文最大字符数（默认 3000，<=0 时取默认）
+	TextMaxCharacters int `mapstructure:"text_max_characters"`
 }
 
 // EffectiveSKList 返回合并后的 Key 列表。
@@ -246,13 +253,16 @@ type AcademicConfig struct {
 	DisableEuropePMC       bool `mapstructure:"disable_europepmc"`
 	DisableDBLP            bool `mapstructure:"disable_dblp"`
 	DisableDOAJ            bool `mapstructure:"disable_doaj"`
+
+	// UnpaywallEmail 用于补全缺失的 OA PDF（环境变量 UNPAYWALL_EMAIL）。空则跳过 Unpaywall。
+	UnpaywallEmail string `mapstructure:"unpaywall_email"`
 }
 
 // ── CleanFetch 配置 ──
 
 type CleanFetchConfig struct {
 	Enabled        bool   `mapstructure:"enabled"`           // 总开关（默认 false，旧配置不启用）
-	FileOutputDir  string `mapstructure:"file_output_dir"`   // 大文本文件输出目录（默认 os.TempDir()/webfetch/）
+	FileOutputDir  string `mapstructure:"file_output_dir"`   // 大文本文件输出目录（默认 exe 同目录 fetchdata/）
 	FileTTL        int    `mapstructure:"file_ttl_hours"`    // 文件保留时长（小时），默认 24
 	MaxInlineLines int    `mapstructure:"max_inline_lines"`  // 内联返回最大行数（默认 100）
 	MaxInlineChars int    `mapstructure:"max_inline_chars"`  // 内联返回最大字符数（默认 0 = 不限）
@@ -266,6 +276,7 @@ type CleanFetchConfig struct {
 
 type PDFParserConfig struct {
 	Enabled         bool   `mapstructure:"enabled"`           // 总开关（默认 false）
+	MaxPages        int    `mapstructure:"max_pages"`         // 省略 pages 时最多解析的页数（默认 20，与 MinerU 轻量档对齐）
 	MinerUToken     string `mapstructure:"mineru_token"`      // MinerU API Token（精准解析 API 需要）
 	MinerUModel     string `mapstructure:"mineru_model"`      // 模型版本: pipeline(默认) / vlm
 	MinerUOcr       bool   `mapstructure:"mineru_ocr"`        // OCR 识别（默认 false）
@@ -273,6 +284,14 @@ type PDFParserConfig struct {
 	MinerUTable     *bool  `mapstructure:"mineru_table"`      // 表格识别（nil=默认 true）
 	MinerULang      string `mapstructure:"mineru_lang"`       // 文档语言（默认 ch）
 	MinerURemotePDF bool   `mapstructure:"mineru_remote_pdf"` // 远程 PDF URL 走 MinerU 精准 API（默认 true；false 则远程一律不走 MinerU，只保留本地 PDF OCR 回退）
+}
+
+// GetMaxPages 返回省略 pages 时一次最多解析的页数，默认 20。
+func (c PDFParserConfig) GetMaxPages() int {
+	if c.MaxPages > 0 {
+		return c.MaxPages
+	}
+	return 20
 }
 
 // MinerUEnabled 返回是否需要初始化 MinerU 客户端。
@@ -387,8 +406,8 @@ type LLMConfig struct {
 }
 
 type CacheConfig struct {
-	Enabled         *bool  `mapstructure:"enabled"`          // 缓存总开关（默认 nil = 按 storage_path 判断；显式 false 强制禁用；显式 true 强制启用）
-	StoragePath     string `mapstructure:"storage_path"`     // SQLite 数据库文件存储路径
+	Enabled         *bool  `mapstructure:"enabled"`          // 缓存总开关（默认 nil = 关闭；显式 true 启用并按 storage_path 或默认路径建库）
+	StoragePath     string `mapstructure:"storage_path"`     // SQLite 数据库文件存储路径（空 = exe 同目录 cache/websearch-cache.db）
 	CleanupInterval int    `mapstructure:"cleanup_interval"` // 清理间隔（分钟），默认30分钟，最大360分钟
 }
 
@@ -405,6 +424,7 @@ type LogConfig struct {
 // SmartSearchConfig smartsearch 工具高级配置。
 type SmartSearchConfig struct {
 	MaxSize            int                          `mapstructure:"max_size"`            // 全局最大结果数（按 score 排序后截断），0 = 不限
+	FetchTopN          int                          `mapstructure:"fetch_top_n"`         // 服务端默认抓取正文条数（agent 未传 fetch_top_n 参数时生效），默认 0 = 与旧版一致不抓取；1-5 = 一次搜索即含正文
 	ShowMeta           bool                         `mapstructure:"show_meta"`           // 输出中是否显示引擎来源和 score（默认 true）
 	Enhance            *bool                        `mapstructure:"enhance"`             // 是否启用 Wigolo 本地评分增强（RRF+词汇对齐+域名品质+多层 Boost），默认 true
 	RelevanceThreshold float64                      `mapstructure:"relevance_threshold"` // 增强评分后的相关性阀值，低于此值丢弃（Top-1/每引擎保底），默认 0.05
@@ -490,8 +510,18 @@ func (c Config) CacheEnabled() bool {
 	if c.Cache.Enabled != nil {
 		return *c.Cache.Enabled
 	}
-	// 未显式设置时按 storage_path 判断（向后兼容）
-	return c.Cache.StoragePath != ""
+	// 未显式设置时默认关闭（v3.5.0 起）：SQLite 缓存对轻量部署收益有限，
+	// 需要缓存时在配置中显式 enabled: true（storage_path 未配置时用默认路径）
+	return false
+}
+
+// GetCacheStoragePath 返回缓存 SQLite 数据库路径。
+// 未配置时默认 exe 同目录的 cache 子目录（websearch-cache.db）。
+func (c Config) GetCacheStoragePath() string {
+	if c.Cache.StoragePath != "" {
+		return c.Cache.StoragePath
+	}
+	return filepath.Join(ExeBaseDir(), "cache", "websearch-cache.db")
 }
 
 func (c Config) GetCleanupInterval() time.Duration {
@@ -594,6 +624,7 @@ func Load(configPath string) (*Config, error) {
 	viper.BindEnv("llm.base_url", "LLM_BASE_URL")
 	viper.BindEnv("llm.api_key", "LLM_API_KEY")
 	viper.BindEnv("pdf_parser.mineru_token", "MINERU_TOKEN")
+	viper.BindEnv("academic.unpaywall_email", "UNPAYWALL_EMAIL")
 	var conf Config
 	if err := viper.Unmarshal(&conf); err != nil {
 		return nil, fmt.Errorf("配置解析失败,%w", err)
@@ -686,9 +717,20 @@ func Load(configPath string) (*Config, error) {
 		conf.Baidu.EnableAISearch = true
 	}
 
+	// 豆包 Custom 版请求网页正文默认开启（API 快速路径：一次搜索即含正文）；
+	// 显式写 need_content: false 才退回摘要
+	if !viper.IsSet("doubao.need_content") {
+		conf.Doubao.NeedContent = true
+	}
+
 	// SmartSearch 默认值
 	if !viper.IsSet("smartsearch.show_meta") {
 		conf.SmartSearch.ShowMeta = true // 默认显示引擎来源和 score
+	}
+	// fetch_top_n 默认 0：默认部署与旧版行为一致（不抓取正文）；
+	// 用户可设 1-5 让 agent 未传参时也默认获取正文，yaml 显式 0 即纯摘要模式
+	if !viper.IsSet("smartsearch.fetch_top_n") {
+		conf.SmartSearch.FetchTopN = 0
 	}
 	if conf.SmartSearch.Enhance == nil {
 		enhance := true // 默认启用 Wigolo 本地评分增强
@@ -742,6 +784,7 @@ func Default() *Config {
 			MinerURemotePDF: true,
 		},
 		SmartSearch: SmartSearchConfig{
+			FetchTopN:          0,
 			ShowMeta:           true,
 			Enhance:            &enhance,
 			RelevanceThreshold: 0.05,
@@ -810,6 +853,9 @@ func applyKnownEnv(conf *Config) {
 	if v := os.Getenv("SEMANTIC_SCHOLAR_API_KEY"); v != "" {
 		conf.Academic.SemanticScholarAPIKey = v
 	}
+	if v := os.Getenv("UNPAYWALL_EMAIL"); v != "" {
+		conf.Academic.UnpaywallEmail = v
+	}
 	if v := os.Getenv("WEBSEARCH_TOKEN"); v != "" {
 		conf.AuthToken = v
 	}
@@ -835,4 +881,15 @@ func GetConfigDir() string {
 		return cwd
 	}
 	return os.TempDir()
+}
+
+// ExeBaseDir 返回可执行文件所在目录，获取失败时回退配置目录。
+// 用作 cache / fetchdata 等派生数据目录的基准（exe 同目录）。
+func ExeBaseDir() string {
+	if exePath, err := os.Executable(); err == nil {
+		if exeDir := filepath.Dir(exePath); exeDir != "" {
+			return exeDir
+		}
+	}
+	return GetConfigDir()
 }

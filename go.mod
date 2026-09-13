@@ -4,7 +4,7 @@ go 1.26
 
 require (
 	github.com/PuerkitoBio/goquery v1.12.0
-	github.com/daidaiJ/go-webfetch v0.2.0
+	github.com/daidaiJ/go-webfetch v0.2.1-0.20260913051955-85f5174c4851
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/rs/zerolog v1.34.0
 	github.com/spf13/viper v1.21.0

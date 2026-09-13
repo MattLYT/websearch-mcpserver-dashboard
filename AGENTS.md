@@ -4,6 +4,10 @@
 
 ---
 
+> 包接口、工具调用链与改动落点详见 [docs/developers.md](docs/developers.md)。
+
+---
+
 ## 项目一句话定位
 
 **websearch-mcpserver** 是一个用 Go 编写的轻量级 MCP 搜索服务，零 API Key 即可运行，支持 Claude Code / Qwen Code / Cursor 等 MCP 客户端。提供四大核心能力：
@@ -41,32 +45,28 @@ server/           # HTTP 服务：生命周期、路由
 searxng/          # SearXNG 兼容 HTTP 端点
 
 pkg/
-├── search/       # ★ 核心编排层
-│   ├── inf.go          # 接口定义（SearchInf, SearchResult）
-│   ├── hybrid.go       # 多引擎并发编排、去重、合并、排序
-│   ├── factory.go      # 引擎工厂：根据配置选择并实例化引擎
-│   ├── engine_adapter.go  # 通用引擎适配器（Tavily/Exa/Google/DDG）
-│   ├── baidu_fallback.go  # 百度适配器（含智能回退）
-│   ├── bing_adapter.go    # Bing 适配器
-│   ├── apipool.go         # API Key 池轮转
-│   ├── doubao.go          # 豆包联网搜索 Global/Custom 适配器
-│   └── *_test.go          # 单元测试
-├── antirobot/    # 反检测公共层：Searcher 接口、限流器、TLS 指纹
-├── baidu/        # 百度底层引擎实现
-├── bing/         # Bing 底层引擎实现
-├── ddg/          # DuckDuckGo 底层引擎实现
-├── google/       # Google 底层引擎实现
+├── search/       # ★ 搜索编排层（factory.go 为组合根，只做装配与类型别名）
+│   ├── core/           # 类型契约：SearchInf/SearchResult/ScoreBucket + 结果格式化
+│   ├── engine/         # 底层网页引擎（HTTP 抓取层）：baidu/ bing/ ddg/ google/
+│   ├── provider/       # API 供应商适配器：tavily/ exa/ anysearch/ doubao/ baidu*，KeyPool 轮转
+│   ├── adapter/        # 本地引擎/学术适配器：EngineSearchAdapter/ Bing/ 百度回退/ 学术
+│   ├── apipool/        # 跨供应商轮转策略（round-robin/priority/weighted）
+│   ├── hybrid/         # 多引擎并发编排策略（去重、合并、per-engine 过滤）
+│   ├── enhance/        # 高阶评分功能：RRF/域名品质/词汇对齐/MMR/学术评分增强
+│   └── mode/           # 搜索模式构建：按 config.mode 组装 Primary（engine/baidu/apipool/hybrid…）
+├── antirobot/    # 反检测公共层：Searcher 接口、限流器、TLS 指纹（跨层公共，保持顶层）
 ├── academic/     # 学术搜索：arXiv/Crossref/OpenAlex/PubMed/S2/GS/EuropePMC/DBLP/DOAJ
+├── fetch/        # 抓取与解析族
+│   ├── webfetch/       # 增强型网页抓取（SSRF 防护、DNS rebinding 检测、PDF 解析分支）
+│   ├── jina/           # Jina Reader 备选抓取
+│   └── mineru/         # MinerU PDF 解析
+├── llm/          # LLM：Client + 搜索摘要 Summarizer
 ├── config/       # 配置加载与结构体定义
 ├── cache/        # SQLite 缓存（6h 过期，后台清理）
-├── webfetch/     # 增强型网页抓取（SSRF 防护、DNS rebinding 检测）
-├── jina/         # Jina Reader 备选抓取
-├── llm/          # LLM 摘要生成
-├── mineru/       # MinerU PDF 解析
+├── client/       # HTTP 客户端（API 供应商共用）
 ├── proxy/        # 系统代理自动检测（Windows 注册表 / 环境变量）
 ├── daemon/       # 引用计数进程管理
-├── log/          # 日志配置
-└── xml/          # XML 格式化
+└── log/          # 日志配置
 ```
 
 ---
@@ -88,7 +88,7 @@ pkg/
 
 ### 新增搜索引擎
 
-1. 在 `pkg/` 下创建独立包（如 `pkg/newengine/`）
+1. 在 `pkg/search/engine/` 下创建独立包（如 `pkg/search/engine/newengine/`）
 2. 实现 `antirobot.Searcher` 接口（`Name()`, `Search()`, `SearchRaw()`）
 3. 在 `pkg/search/` 下创建适配器文件，实现 `search.SearchInf` 接口
 4. 在 `pkg/config/config.go` 中添加引擎配置结构体
@@ -118,7 +118,7 @@ pkg/
 | 通用评分管线（RRF/域名品质/词汇对齐/稀有词/共识权威新鲜度 Boost/阈值过滤/意图分类/MMR） | v2.14.0 已全部实现 | 不要重复立项 |
 | Google 网页引擎 | 2025-01 起 JS 挑战全量硬化，"凭据缺失"模型，HTTP 200 空壳零结果；UA/TLS 伪装全部失效（详见 `pkg/config/config.go` GoogleConfig 注释） | 保持默认关闭，勿再尝试伪装修复 |
 | Google wml + Nokia UA 绕过（SearXNG PR #6546 路线） | 2026-09-03 实测：HK 代理出口下首请求 429 进 /sorry/，其余 200 均为 JS 挑战空壳，Google 未对 Nokia UA 返回 WML/XML | 强依赖出口 IP 信誉，非普适方案；wml 遗留端点随时可能被 Google 移除，勿照抄 |
-| 百度 tn=json 接口（SearXNG baidu.py 路线） | 2026-09-03 实测：直连裸客户端 3/3 被 302 至 wappass 验证码，预热 cookie 无效；同 IP 下 HTML 引擎同样被 CAPTCHA。识别主因疑似 IP 信誉 + TLS 指纹，与 HTML/JSON 入口无关 | tn=json 非免检通道，JSON 接口不能替代 pkg/baidu 现有反检测层 |
+| 百度 tn=json 接口（SearXNG baidu.py 路线） | 2026-09-03 实测：直连裸客户端 3/3 被 302 至 wappass 验证码，预热 cookie 无效；同 IP 下 HTML 引擎同样被 CAPTCHA。识别主因疑似 IP 信誉 + TLS 指纹，与 HTML/JSON 入口无关 | tn=json 非免检通道，JSON 接口不能替代 pkg/engine/baidu 现有反检测层 |
 | DDG / arXiv 限流 | 服务端窗口限流，引擎内置钳制（DDG 1/s·6/min，arXiv 1/s·12/min + 3s 间隔）+ 429 冷却避让 + 预算感知重试 | 调整限流参数须实测校准，勿放宽内置上限 |
 
 ---
@@ -132,8 +132,9 @@ go build -o websearch-mcpserver ./cmd/
 # 运行（零 API Key 模式）
 ./websearch-mcpserver
 
-# 运行测试
+# 运行测试（网络集成测试按场景自动跳过；WS_TEST_NETWORK=on 强制执行、不可达即 fail）
 go test ./...
+go test -short ./...   # 快速模式，跳过所有网络集成测试
 
 # Docker 构建
 docker build -t websearch-mcpserver .
@@ -146,5 +147,5 @@ docker build -t websearch-mcpserver .
 1. **修改搜索逻辑前**，先读 `pkg/search/inf.go` 了解接口契约，再读 `hybrid.go` 了解编排流程
 2. **新增配置项时**，同步更新 `pkg/config/config.go`、两个 `config.example.yaml`，以及 `docs/configuration.md` / `docs/configuration.en.md`（搜索/工具参数还要改 `docs/search.md`、`docs/api.md`、README）
 3. **涉及反检测/限流**，修改应在 `pkg/antirobot/` 层进行，不要在各引擎包中重复实现
-4. **学术搜索与通用搜索是独立模块**，学术引擎在 `pkg/academic/`，通用引擎在 `pkg/baidu/` `pkg/bing/` 等，不要混淆
-5. **发布矩阵拆分，不要合成一套 6 平台**：GitHub Release = linux/windows amd64 + darwin amd64/arm64；GHCR = linux/amd64+arm64；MCP Registry mcpb 跟 Release（`--expect-packages 4`）。**先打普通 tag（`vX.Y.Z`）发 Release 并推 GHCR 镜像**；**发完、Release 产物就绪后再单独打 `-registry` 后缀 tag 发 MCP Registry**（不推镜像，不要和版本 tag 一起推）。后补的 `vX.Y.Z-registry` 钉同一 commit。linux-arm64 走 GHCR，不要把 linux-arm64 / windows-arm64 加回 Release 来对齐 Docker 或旧版 v3.1.1 MCP
+4. **学术搜索与通用搜索是独立模块**，学术引擎在 `pkg/academic/`，通用引擎在 `pkg/engine/baidu/` `pkg/engine/bing/` 等，不要混淆
+5. **发布矩阵拆分，不要合成一套 6 平台**：GitHub Release = linux/windows amd64 + darwin amd64/arm64；GHCR = linux/amd64+arm64；MCP Registry mcpb 走 `vX.Y.Z-registry` tag 的**独立 Release 页**（`--expect-packages 4`，server.json 下载链接指向该页，base Release 只放二进制，两类产物分开）。**先打普通 tag（`vX.Y.Z`）发 Release 并推 GHCR 镜像**；**发完、Release 产物就绪后再单独打 `-registry` 后缀 tag 发 MCP Registry**（不推镜像，不要和版本 tag 一起推）。后补的 `vX.Y.Z-registry` 钉同一 commit（重跑工作流时需钉到含新 workflow 的 commit——打包原料从 base Release 下载，不重编译）。linux-arm64 走 GHCR，不要把 linux-arm64 / windows-arm64 加回 Release 来对齐 Docker 或旧版 v3.1.1 MCP

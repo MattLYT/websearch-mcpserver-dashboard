@@ -2,6 +2,27 @@
 
 [English](CHANGELOG.en.md) | [中文](CHANGELOG.md)
 
+## v3.5.0 — 2026-09-13
+
+### Added
+- **Three-way `fetch_top_n` semantics + dual-path body retrieval**: omitted = exactly as before (only engine/provider-provided content; server `smartsearch.fetch_top_n` can change the default, default 0); 0 = title+snippet+URL only; 1-5 = obtain page-original text for the top N results — **API engines that support full-text params use the fast path** (Tavily `include_raw_content`, Exa `contents.text` (`exa.text_max_characters`, default 3000), Doubao Custom `need_content`; all on by default, explicitly disableable), **other engines fetch internally** (webfetch lazily initializes, no cleanfetch required); results already carrying sufficient body text (≥1000 chars) skip the embedded fetch
+- **Fetch failures are explicitly reported**: when the embedded fetch is blocked by anti-bot protection (JS challenge/WAF/captcha) or fails, the reason and suggestion (switch source / retry with cleanfetch) are annotated on that result instead of being silently swallowed
+- The `fetch_top_n` tool parameter now distinguishes "omitted" from "explicit 0", with semantics documented in the schema; the two smartsearch param structs share fields via an embedded struct, so the schema is maintained in one place
+
+- **`fetch_top_n` no longer mislabels large bodies saved to disk**: when the extracted body exceeds `max_inline_lines`, webfetch returns `saved_to_file` with an empty `Markdown`, which was treated as "empty content" failure; the result now carries the file path and reading hint (same format as cleanfetch's large-text output)
+- **cleanfetch file TTL was never enforced**: upstream `CleanFiles()` was never invoked, so temp files piled up in the output directory; an idle-time janitor now cleans expired files (runs only with no in-flight fetch and ≥1 minute since the last fetch activity, checks every minute, stops with the engine); only files matching this program's naming pattern (date_time_slug_6-hex-hash.md) past TTL are removed — any other user files in the directory are untouched
+### Fixed
+- **`smartsearch` `fetch_top_n` now works on default deployments**: webfetch no longer requires `cleanfetch.enabled` / `pdf_parser.enabled` to be turned on explicitly; with `fetch_top_n>0` it lazily initializes from the current config. The fetch path is aligned with cleanfetch (SSRF pre-check + HEAD size pre-check) and gains a per-result byte cap (`cleanfetch.max_fetch_size_mb`, default 10MB); per-item failures log a warning and keep the snippet instead of being silently swallowed
+- **`pdf_parser` `pages` ranges are width-capped before allocation**: a single range wider than 1000 pages (e.g. `pages="1-2147483647"`) raises a parameter error immediately instead of expanding the slice and ballooning memory
+- **HEAD pre-check re-validates every redirect hop (up to 5)** against private-network / cloud-metadata checks; a public URL 302-ing to `169.254.169.254` or other internal addresses is rejected instead of being probed unauthenticated
+
+- **Cache disabled by default (since v3.5.0)**: an unset `cache.enabled` no longer infers from `storage_path`; set `enabled: true` explicitly to enable. With `storage_path` unset the DB defaults to the exe sibling dir `cache/websearch-cache.db`
+- **cleanfetch output dir defaults to the exe sibling dir `fetchdata/`**: no longer the system temp dir `webfetch/`
+- **API key acquisition URLs added across config examples / configuration docs / mode tables**: Tavily / Exa / AnySearch / Doubao (`config.example.yaml`, `docs/configuration`, `docs/search`, README, both languages)
+### Changed
+- **Omitting `pages` in `pdf_parser` has meant "first `max_pages` (default 20) pages + truncation notice" since v3.4.0**, not full-text parsing; docs are now aligned — pass `pages` explicitly for long documents
+- **`academicsearch` tool description and `docs/search` now document the DOI / arXiv id short-circuit** (passing an id as `query` ignores `engines`/`time_range`/`page`; `pdf_url` can be handed to `pdf_parser`); configuration docs now cover `academic.unpaywall_email` (env `UNPAYWALL_EMAIL`; empty = skip Unpaywall OA completion silently)
+
 ## v3.4.0 — 2026-09-11
 
 ### Added

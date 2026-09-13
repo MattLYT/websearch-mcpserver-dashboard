@@ -21,9 +21,12 @@
 #   - a follow-up tag with the "-registry" suffix (e.g. v3.4.0-registry),
 #     pushed only after the base Release exists:
 #     downloads the base release binaries, packages them as .mcpb bundles
-#     (MCP Bundle, zip + manifest.json) via mcpb-tool-cli, uploads the bundles
-#     back to the base release, and publishes it to the official MCP Registry
+#     (MCP Bundle, zip + manifest.json) via mcpb-tool-cli, creates its OWN
+#     GitHub Release (the "-registry" tag) holding ONLY the .mcpb bundles,
+#     and publishes the server to the official MCP Registry
 #     (registry.modelcontextprotocol.io) via OIDC.
+#     server.json download URLs point at the -registry release, so the base
+#     release keeps binaries only and the two artifact families stay separate.
 
 name: Release
 
@@ -150,7 +153,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       id-token: write
-      contents: write   # gh release upload 回传 .mcpb 到 base release
+      contents: write   # 为 -registry tag 创建 Release 并上传 .mcpb
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -161,7 +164,7 @@ jobs:
           go-version-file: go.mod
 
       # MCPB 封包只发生在 -registry 流程：从 base release 拉服务端二进制，
-      # 现场打包 .mcpb 后回传到 base release（server.json 的下载链接指向那里）
+      # 现场打包 .mcpb（base release 不承载 mcpb，两类产物分开）
       - name: Package MCPB bundles
         env:
           GH_TOKEN: ${{ github.token }}
@@ -197,14 +200,19 @@ jobs:
           done
           ls -la mcpb-assets
 
-      - name: Upload MCPB bundles to base release
+      - name: Create registry release with MCPB bundles
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
           BASE_TAG="${TAG%-registry}"
-          gh release upload "$BASE_TAG" \
-            mcpb-assets/*.mcpb mcpb-assets/*.mcpb.sha256 --clobber
+          # mcpb 落到 -registry tag 自己的 Release（与 base Release 的二进制分开），
+          # server.json 的下载链接指向这里（--base-tag "$TAG"）
+          gh release delete "$TAG" --yes || true
+          gh release create "$TAG" \
+            mcpb-assets/*.mcpb mcpb-assets/*.mcpb.sha256 \
+            --title "$TAG (MCP Registry bundles)" \
+            --notes "MCP Registry 专用打包产物（.mcpb + sha256）。服务端/CLI 二进制与其校验和见 [$BASE_TAG](https://github.com/$GITHUB_REPOSITORY/releases/tag/$BASE_TAG) Release。"
 
       - name: Install mcp-publisher
         run: |
@@ -226,7 +234,7 @@ jobs:
             --description "Zero-API-key MCP search server: multi-engine web/academic search, PDF parsing, secure web fetch" \
             --version "$VERSION" \
             --repo-url https://github.com/daidaiJ/websearch-mcpserver \
-            --base-tag "$BASE_TAG" \
+            --base-tag "$TAG" \
             --expect-packages 4 \
             --out server.json
           echo "--- server.json ---"

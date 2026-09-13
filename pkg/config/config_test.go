@@ -178,6 +178,20 @@ func TestExplicitConfigPath(t *testing.T) {
 	}
 }
 
+// TestGetCacheStoragePath 验证缓存路径默认值：未配置时落到 exe 同目录
+// cache/websearch-cache.db，显式配置优先。
+func TestGetCacheStoragePath(t *testing.T) {
+	conf := Config{}
+	got := conf.GetCacheStoragePath()
+	if !strings.Contains(got, "cache") || !strings.HasSuffix(got, "websearch-cache.db") {
+		t.Fatalf("default storage path should end with cache/websearch-cache.db, got %q", got)
+	}
+	conf.Cache.StoragePath = "D:/data/custom.db"
+	if got := conf.GetCacheStoragePath(); got != "D:/data/custom.db" {
+		t.Fatalf("explicit storage_path must win, got %q", got)
+	}
+}
+
 func TestCacheEnabled(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -192,10 +206,10 @@ func TestCacheEnabled(t *testing.T) {
 			want:    false,
 		},
 		{
-			name:    "nil enabled, non-empty path -> enabled (backward compat)",
+			name:    "nil enabled, non-empty path -> disabled (v3.5.0 default off)",
 			enabled: nil,
 			path:    "/tmp/cache.db",
-			want:    true,
+			want:    false,
 		},
 		{
 			name:    "explicit true, non-empty path -> enabled",

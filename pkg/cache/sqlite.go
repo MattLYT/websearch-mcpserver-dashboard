@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 	"websearch/pkg/log"
-	"websearch/pkg/search"
+	"websearch/pkg/search/core"
 
 	_ "modernc.org/sqlite"
 )
@@ -20,7 +20,7 @@ type CacheRecord struct {
 	Query      string    `json:"query"`
 	Intent     string    `json:"intent"`
 	Academic   bool      `json:"academic"`    // 是否为学术搜索
-	RawResults string    `json:"raw_results"` // []SearchResult JSON
+	RawResults string    `json:"raw_results"` // []core.SearchResult JSON
 	Summary    string    `json:"summary"`     // LLM 摘要文本，可能为空
 	CreatedAt  time.Time `json:"created_at"`  // 存储时间
 	LastHitAt  time.Time `json:"last_hit_at"` // 最近一次命中时间
@@ -178,7 +178,7 @@ func (c *Cache) touchLastHit(id int64, now int64) {
 }
 
 // Store 存储缓存记录
-func (c *Cache) Store(query, intent string, academic bool, results []search.SearchResult, summary string) error {
+func (c *Cache) Store(query, intent string, academic bool, results []core.SearchResult, summary string) error {
 	now := time.Now().Unix()
 	rawJSON, err := json.Marshal(results)
 	if err != nil {
@@ -216,8 +216,8 @@ func (c *Cache) UpdateSummary(query, intent string, summary string) error {
 }
 
 // GetRawResults 从 CacheRecord 反序列化搜索结果
-func (r *CacheRecord) GetRawResults() ([]search.SearchResult, error) {
-	var results []search.SearchResult
+func (r *CacheRecord) GetRawResults() ([]core.SearchResult, error) {
+	var results []core.SearchResult
 	if err := json.Unmarshal([]byte(r.RawResults), &results); err != nil {
 		return nil, fmt.Errorf("反序列化缓存结果失败: %w", err)
 	}

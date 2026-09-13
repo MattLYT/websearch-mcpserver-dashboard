@@ -28,10 +28,10 @@
 | `engine` | Baidu web search + Bing concurrently (DuckDuckGo joins when a proxy is available, Google when enabled) | **None** |
 | `baidu` | Baidu Qianfan search (`enable_ai_search` controls endpoint), falls back to Baidu web search; uses Baidu web search directly when no SK | `BAIDU_SK` (optional) |
 | `apipool` | API key pool rotation: one provider per request, auto-switch on failure; supports `round-robin` / `priority` / `weighted` strategies; Baidu web search as final fallback | All optional |
-| `tavily` | Tavily Search API | `TAVILY_SK` |
-| `exa` | Exa Web Search API | `EXA_API_KEY` |
-| `anysearch` | AnySearch API ([anysearch.com](https://www.anysearch.com/docs)) | `ANYSEARCH_API_KEY` |
-| `doubao` | Doubao Search Global / Custom ([Volcengine docs](https://docs.volcengine.com/docs/87772/2272949)) | `DOUBAO_SEARCH_API_KEY` |
+| `tavily` | Tavily Search API ([get key](https://app.tavily.com/home)) | `TAVILY_SK` |
+| `exa` | Exa Web Search API ([get key](https://dashboard.exa.ai/api-keys)) | `EXA_API_KEY` |
+| `anysearch` | AnySearch API ([get key](https://www.anysearch.com/console/api-keys)) | `ANYSEARCH_API_KEY` |
+| `doubao` | Doubao Search Global / Custom ([get key](https://console.volcengine.com/search-infinity/api-key)) | `DOUBAO_SEARCH_API_KEY` |
 | `hybrid` | Full mix (Anysearch + Baidu AI + Baidu web + Tavily + Exa + Doubao if keyed + Bing + DuckDuckGo + Google) | All optional |
 
 > All modes auto-fallback on primary engine failure. Auto-degrades to `engine` mode when keys are missing. `baidu`/`tavily`/`exa`/`anysearch`/`doubao` all support `sk_list` multi-key rotation (duplicate keys within one provider are deduplicated automatically); `sk_list` falls back to `api_key` as a single-element list when empty.
@@ -132,6 +132,8 @@ The `smartsearch` section controls result filtering, truncation, and output form
 ```yaml
 smartsearch:
   max_size: 10           # Global max results (truncated by score), 0 = unlimited
+  fetch_top_n: 0         # Server-side default body-fetch count (applies when the agent omits fetch_top_n), default 0 = no fetch (same as before);
+                         # set 1-5 to fetch full text by default too (API engines use the fast path, web engines fetch internally)
   show_meta: true        # Show engine source and relevance score in output (default true)
   enhance: true          # Local scoring enhancement (RRF fusion + lexical alignment + domain quality + boosts + threshold), default true
   relevance_threshold: 0.05  # Relevance threshold after enhancement; below this is filtered (Top-1 protected), default 0.05
@@ -211,6 +213,7 @@ apipool:
 | `query` | string | ✅ | Search keyword |
 | `intent` | string | ❌ | Search intent (only effective when LLM is enabled; auto-removed to save context when disabled) |
 | `time_range` | int | ❌ | Search time range in months, default 3. `1`=last month, `6`=last 6 months, `12`=last year, `0`=unlimited. Doubao Custom maps this to `OneDay`/`OneWeek`/`OneMonth`/`OneYear`; Global has no time-filter API and ignores it |
+| `fetch_top_n` | int | ❌ | Body-fetch mode: when omitted, behaves as before — only engine/provider-provided content is returned (server config `smartsearch.fetch_top_n` can change the default, default `0` = no fetch); `0` means title+snippet+URL only; `1-5` obtains page-original text for the top N results — API engines that support full-text params (Tavily/Exa/Doubao) use the fast path directly, web engines fetch internally (no `cleanfetch.enabled` needed, webfetch lazily initializes); results already carrying sufficient body text are skipped; anti-bot blocks (JS challenge/WAF) are explicitly annotated on the result |
 
 Results include engine source and relevance score by default (for engines that support scores like Tavily / Doubao Custom). Disable via `smartsearch.show_meta: false`.
 
@@ -220,7 +223,7 @@ Results include engine source and relevance score by default (for engines that s
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `query` | string | ✅ | Search keyword |
+| `query` | string | ✅ | Search keyword; a DOI or arXiv id can also be passed directly for single-paper lookup (see below) |
 | `engines` | []string | ❌ | Engine subset: `arxiv` `crossref` `openalex` `pubmed` `europepmc` `dblp` `doaj` `semantic_scholar` `google_scholar` |
 | `time_range` | string | ❌ | `year` / `month` / `week` / `day` |
 | `page` | int | ❌ | Page number, default 1 |
@@ -233,23 +236,31 @@ With `time_range`, each academic engine uses its official syntax (aligned in v3.
 | DOAJ | `bibjson.year:[startYear TO current UTC year]` (no `*`; `day`/`week`/`month` collapse to year granularity) |
 | arXiv | `submittedDate:[YYYYMMDDHHMM TO YYYYMMDDHHMM]` (UTC/GMT) |
 
+**Single-paper lookup (DOI / arXiv id short-circuit)**: when you already have a DOI or arXiv id, pass it directly as `query`, e.g. `10.1038/s41586-020-2649-2`, `doi:10.1038/s41586-020-2649-2`, `https://doi.org/10.1038/s41586-020-2649-2`, or `2401.04085`, `arXiv:2401.04085`, `https://arxiv.org/abs/2401.04085`. This triggers a single-paper lookup that ignores `engines` / `time_range` / `page`; once you have the `pdf_url` from the result, pass that URL as the `path` parameter of the `pdf_parser` tool to parse the full text instead of searching by title.
+
 Results are ranked by the academic scoring enhancement (enabled by default): RRF fusion ranking + citation / journal authority / PDF availability / recency signals, with low-score papers auto-filtered (Top-1 + per-engine floor). Config: `academic.enhance` (default true), `academic.threshold` (default 0.02).
 
 ### `cleanfetch` — Web Content Fetch
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `url` | string | ✅ | Web page URL |
+| `url` | string | one of `url`/`urls` | Web page URL |
+| `urls` | string[] | one of `url`/`urls` | Batch fetch; merged with `url`, deduplicated, up to 5 |
 
-Requires `cleanfetch.enabled: true`. Based on go-webfetch, no proxy needed; built-in DNS rebinding protection and HEAD pre-check for large files (`max_fetch_size_mb` controls threshold, default 10MB); falls back to Jina Reader on failure (requires `jina.api_key`, proxy auto-detected).
+Requires `cleanfetch.enabled: true`. Based on go-webfetch, no proxy needed; built-in DNS rebinding protection and HEAD pre-check for large files (`max_fetch_size_mb` controls threshold, default 10MB; every redirect hop is re-checked against private-network/metadata rules, up to 5 hops); falls back to Jina Reader on failure (requires `jina.api_key`, proxy auto-detected).
+
+In batch mode (`urls`), each URL is pre-checked and fetched independently; one failure does not affect the others, and results are returned grouped by URL. With only `url`, output is identical to previous versions.
 
 ### `pdf_parser` — PDF Parsing
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `path` | string | ✅ | Local PDF file path or remote URL |
+| `path` | string | ✅ | Local PDF file path or remote http(s) URL (academic `pdf_url` can be passed directly) |
+| `pages` | string | ❌ | Page range (1-based), e.g. `1-10`, `1,3,5-7`; invalid formats raise a parameter error, and explicit page counts above `max_pages` or a single range wider than 1000 pages are rejected with a split suggestion |
 
-Requires `pdf_parser.enabled: true`. Large documents auto-stored to temp files.
+Requires `pdf_parser.enabled: true`. Large documents auto-stored to temp files. Remote URLs use the same SSRF and HEAD pre-checks as `cleanfetch` (including per-hop redirect re-checks) and are not prefixed with `file://`.
+
+When `pages` is omitted, only the first `pdf_parser.max_pages` (default 20) pages are parsed; on truncation the output states the total page count and suggests continuing with `pages`. The MinerU path (remote Standard API / scanned OCR) does not support page selection yet and returns the full text with a note.
 
 **Parsing strategy**: local PDFs prefer the PDF library (ledongthuc/pdf) for text extraction; if there is no text layer and `mineru_ocr` is enabled, fall back to MinerU OCR.
 - `mineru_ocr: true`: OCR fallback for scanned / image-based PDFs (without Token uses Agent Lightweight API, ≤10MB/20 pages)

@@ -99,11 +99,13 @@ baidu:
   search_mode: "auto"       # auto / required / disabled
 
 # Tavily (required for mode=tavily/apipool/hybrid)
+# Get API key: https://app.tavily.com/home
 tavily:
   api_key: ""               # Env: TAVILY_SK (falls back to single-element sk_list when empty)
   sk_list: []               # Multi-key rotation list (priority over api_key)
 
 # Exa (required for mode=exa/apipool/hybrid)
+# Get API key: https://dashboard.exa.ai/api-keys
 exa:
   api_key: ""               # Env: EXA_API_KEY (falls back to single-element sk_list when empty)
   sk_list: []               # Multi-key rotation list (priority over api_key)
@@ -111,6 +113,7 @@ exa:
   lookback_days: 90         # Search time range (days), default 90
 
 # AnySearch (required for mode=anysearch/apipool/hybrid)
+# Get API key: https://www.anysearch.com/console/api-keys
 anysearch:
   api_key: ""               # Env: ANYSEARCH_API_KEY (falls back to single-element sk_list when empty)
   sk_list: []               # Multi-key rotation list (priority over api_key; duplicate keys are deduplicated)
@@ -118,6 +121,7 @@ anysearch:
 
 # Doubao Search Global / Custom (mode=doubao/hybrid; add to apipool.engines explicitly)
 # Activate: https://console.volcengine.com/search-infinity/web-search
+# Get API key: https://console.volcengine.com/search-infinity/api-key
 # Free tier: 500 credits/month; apipool.weights.doubao defaults to 500
 doubao:
   api_key: ""               # Env: DOUBAO_SEARCH_API_KEY (also ASK_ECHO_SEARCH_INFINITY_API_KEY)
@@ -161,6 +165,8 @@ academic:
   disable_google_scholar: true      # Disabled by default (auto-proxied when enabled)
   # Optional Semantic Scholar API key (degrades to anonymous after consecutive 429s)
   # semantic_scholar_api_key: ""   # env: SEMANTIC_SCHOLAR_API_KEY
+  # Unpaywall email: completes OA full-text links when a result has a DOI but no PDF; empty = skip silently
+  # unpaywall_email: "you@example.com"   # env: UNPAYWALL_EMAIL
   disable_europepmc: false  # Europe PMC biomedical supplement (direct from China)
   disable_dblp: false       # DBLP CS conference/journal index (direct from China)
   disable_doaj: false       # DOAJ open-access journals (direct from China)
@@ -176,10 +182,10 @@ llm:
   api_key: ""                               # Env: LLM_API_KEY
   model_id: "gpt-4o-mini"
 
-# Cache
+# Cache (disabled by default)
 cache:
-  # enabled: true            # Not set → judge by storage_path; explicit false → force disable
-  storage_path: "./data/search_cache.db"
+  # enabled: true            # Unset → disabled by default (since v3.5.0); set true to enable
+  # storage_path: ""         # Unset → exe sibling dir cache/websearch-cache.db
   cleanup_interval: 30      # Cleanup interval (minutes), max 360
 
 # Jina Reader (optional, fallback for cleanfetch)
@@ -189,13 +195,13 @@ jina:
 
 # Enhanced web fetch (disabled by default)
 cleanfetch:
-  enabled: false            # Must be explicitly true to enable
-  file_output_dir: ""       # Default: system temp dir /webfetch/
+  enabled: false            # Must be explicitly true for the cleanfetch tool; smartsearch's fetch_top_n is not gated by this switch (webfetch lazily initializes from current config)
+  file_output_dir: ""       # Default: exe sibling dir fetchdata/
   file_ttl_hours: 24        # Temp file retention (hours)
   max_inline_lines: 100     # Lines above this threshold stored to file
   max_inline_chars: 0       # Chars above this threshold stored to file, 0=unlimited
   timeout_sec: 30           # Per-request timeout (seconds), default 30
-  max_fetch_size_mb: 10     # HEAD pre-check max file size (MB), reject above (default 10)
+  max_fetch_size_mb: 10     # HEAD pre-check max file size (MB), reject above (default 10); also the per-result byte cap for fetch_top_n
   use_system_proxy: false   # Auto-use system proxy (env vars + Windows registry), default false
   max_retries: 3            # Max retries (429/502/503 only), default 3
 
@@ -203,6 +209,7 @@ cleanfetch:
 # MinerU AI enhancement (optional): with Token uses Standard API (remote URL, ≤200MB), without Token uses Agent API (local file, ≤10MB)
 # Get Token: https://mineru.net/apiManage | Env: MINERU_TOKEN
 pdf_parser:
+  # max_pages: 20            # Max pages parsed per call when pages is omitted (default 20)
   enabled: false            # Must be explicitly true to enable
   # mineru_token: ""        # JWT Token; enables Standard API when set
   # mineru_model: "pipeline" # pipeline (default) / vlm (recommended)
@@ -292,9 +299,9 @@ log:
 |---------|-----------|-------|
 | `WEBSEARCH_CONFIG` | Config file path | Highest priority |
 | `BAIDU_SK` | `baidu.api_key` | |
-| `TAVILY_SK` | `tavily.api_key` | |
-| `EXA_API_KEY` | `exa.api_key` | Exa Web Search API Key |
-| `ANYSEARCH_API_KEY` | `anysearch.api_key` | AnySearch API Key ([anysearch.com](https://www.anysearch.com/docs)) |
+| `TAVILY_SK` | `tavily.api_key` | Tavily API Key ([get key](https://app.tavily.com/home)) |
+| `EXA_API_KEY` | `exa.api_key` | Exa Web Search API Key ([get key](https://dashboard.exa.ai/api-keys)) |
+| `ANYSEARCH_API_KEY` | `anysearch.api_key` | AnySearch API Key ([get key](https://www.anysearch.com/console/api-keys)) |
 | `DOUBAO_SEARCH_API_KEY` | `doubao.api_key` | Doubao Search API Key ([console](https://console.volcengine.com/search-infinity/api-key)) |
 | `ASK_ECHO_SEARCH_INFINITY_API_KEY` | `doubao.api_key` | Official Volcengine MCP-compatible variable name |
 | `LLM_BASE_URL` | `llm.base_url` | |
@@ -322,6 +329,10 @@ log:
 | `doubao.version` | global | Global / Custom; concurrent both goes through hybrid, not inside the adapter |
 | `doubao.num_results` | 10 | Global max 20; Custom max 50 |
 | `doubao.time_range` | "" | Custom default; MCP request-level `time_range` wins (mapped to OneDay/OneWeek/OneMonth/OneYear) |
+| `doubao.need_content` | true | Custom requests full page content (API fast path); explicit false falls back to summaries |
+| `tavily.include_raw_content` | true | Tavily requests raw page content (raw_content, fast path); explicit false falls back to excerpts |
+| `exa.include_text` | true | Exa requests page body text (contents.text) |
+| `exa.text_max_characters` | 3000 | Max characters of Exa body text |
 | `baidu.enable_ai_search` | true | true=AI search chat/completions, false=web search web_search; no LLM cost when model is empty |
 | `bing.enabled` | true | |
 | `duckduckgo.enabled` | true | Needs proxy; auto-joins when proxy is available |
@@ -333,29 +344,32 @@ log:
 | `academic.disable_semantic_scholar` | true | Disabled by default, auto-proxied when enabled |
 | `academic.disable_google_scholar` | true | Disabled by default, auto-proxied when enabled |
 | `academic.semantic_scholar_api_key` | "" | Optional API key; auto-degrades to anonymous after consecutive 429s (env `SEMANTIC_SCHOLAR_API_KEY`) |
+| `academic.unpaywall_email` | "" | Unpaywall email for OA link completion (when a result has a DOI but no PDF); empty = skip silently (env `UNPAYWALL_EMAIL`) |
 | `academic.disable_europepmc` | false | Europe PMC biomedical supplement, reachable from China |
 | `academic.disable_dblp` | false | DBLP CS conference/journal index, reachable from China |
 | `academic.disable_doaj` | false | DOAJ open-access journals, reachable from China |
 | `proxy.enabled` | unset | Auto-detects system proxy when not set; explicit false disables; explicit true uses endpoint |
 | `proxy.endpoint` | `http://127.0.0.1:7897` | Only effective when `enabled: true` |
-| `cleanfetch.enabled` | false | Old configs don't enable; must be explicit |
+| `cleanfetch.enabled` | false | Old configs don't enable; must be explicit. Only gates the cleanfetch tool — `fetch_top_n` is not gated (webfetch lazily initializes) |
 | `cleanfetch.file_ttl_hours` | 24 | |
 | `cleanfetch.max_inline_lines` | 100 | |
 | `cleanfetch.timeout_sec` | 30 | |
-| `cleanfetch.max_fetch_size_mb` | 10 | HEAD pre-check threshold |
+| `cleanfetch.max_fetch_size_mb` | 10 | HEAD pre-check threshold; also the per-result byte cap for `fetch_top_n` |
 | `cleanfetch.use_system_proxy` | false | Auto-use system proxy (env vars + Windows registry) |
 | `cleanfetch.max_retries` | 3 | Only retries on 429/502/503 |
 | `pdf_parser.enabled` | false | Independent of cleanfetch |
+| `pdf_parser.max_pages` | 20 | Max pages parsed per call when pages is omitted; a single pages range is capped at 1000 pages wide |
 | `pdf_parser.mineru_model` | pipeline | pipeline / vlm |
 | `pdf_parser.mineru_formula` | true | Formula recognition |
 | `pdf_parser.mineru_table` | true | Table recognition |
 | `pdf_parser.mineru_lang` | ch | Document language |
 | `smartsearch.show_meta` | true | Show engine source and relevance score in output |
+| `smartsearch.fetch_top_n` | 0 | Server-side default body-fetch count (applies when the agent omits `fetch_top_n`); default 0 = no fetch (same as before), 1-5 = one search returns full text (API engines use the fast path, web engines fetch internally) |
 | `smartsearch.enhance` | true | Local scoring enhancement |
 | `smartsearch.relevance_threshold` | 0.05 | Relevance threshold after enhancement |
 | `smartsearch.mmr.enabled` | true | MMR diversity re-ranking |
 | `smartsearch.mmr.lambda` | 0.7 | Relevance-diversity tradeoff |
-| `cache.enabled` | nil | Not set → judge by storage_path; explicit false → force disable; explicit true → force enable |
+| `cache.enabled` | false | Unset → disabled by default (since v3.5.0); set true to enable (storage_path defaults to exe sibling dir cache/websearch-cache.db) |
 | `cache.cleanup_interval` | 30 (min) | Max 360 |
 | Cache expiry | 6 hours | Based on last hit time, hardcoded |
 | `log.max_size` | 1 (MB) | |

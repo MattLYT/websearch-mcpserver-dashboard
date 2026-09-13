@@ -157,10 +157,10 @@ Or use MCP Hooks for session auto start/stop (Qwen Code example; full details in
 | `engine` | Baidu web search + Bing (DuckDuckGo joins when a proxy is available) | **None** |
 | `baidu` | Baidu Qianfan search, falls back to Baidu web search | Optional |
 | `apipool` | API key pool rotation: one provider per request, auto-switch on failure; supports round-robin / priority / weighted | All optional |
-| `tavily` | Tavily Search API | `TAVILY_SK` |
-| `exa` | Exa Web Search API | `EXA_API_KEY` |
-| `anysearch` | AnySearch API | `ANYSEARCH_API_KEY` |
-| `doubao` | Doubao Search Global / Custom | `DOUBAO_SEARCH_API_KEY` |
+| `tavily` | Tavily Search API ([get key](https://app.tavily.com/home)) | `TAVILY_SK` |
+| `exa` | Exa Web Search API ([get key](https://dashboard.exa.ai/api-keys)) | `EXA_API_KEY` |
+| `anysearch` | AnySearch API ([get key](https://www.anysearch.com/console/api-keys)) | `ANYSEARCH_API_KEY` |
+| `doubao` | Doubao Search Global / Custom ([get key](https://console.volcengine.com/search-infinity/api-key)) | `DOUBAO_SEARCH_API_KEY` |
 | `hybrid` | Full mix (Anysearch + Baidu + Tavily + Exa + Doubao if keyed + Bing + DuckDuckGo, etc.) | All optional |
 
 > Auto-degrades to `engine` mode when keys are missing. See [docs/search.md](docs/search.md) for mode and engine details.
