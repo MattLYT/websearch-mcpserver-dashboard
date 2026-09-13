@@ -246,6 +246,9 @@ type AcademicConfig struct {
 	DisableEuropePMC       bool `mapstructure:"disable_europepmc"`
 	DisableDBLP            bool `mapstructure:"disable_dblp"`
 	DisableDOAJ            bool `mapstructure:"disable_doaj"`
+
+	// UnpaywallEmail 用于补全缺失的 OA PDF（环境变量 UNPAYWALL_EMAIL）。空则跳过 Unpaywall。
+	UnpaywallEmail string `mapstructure:"unpaywall_email"`
 }
 
 // ── CleanFetch 配置 ──
@@ -266,6 +269,7 @@ type CleanFetchConfig struct {
 
 type PDFParserConfig struct {
 	Enabled         bool   `mapstructure:"enabled"`           // 总开关（默认 false）
+	MaxPages        int    `mapstructure:"max_pages"`         // 省略 pages 时最多解析的页数（默认 20，与 MinerU 轻量档对齐）
 	MinerUToken     string `mapstructure:"mineru_token"`      // MinerU API Token（精准解析 API 需要）
 	MinerUModel     string `mapstructure:"mineru_model"`      // 模型版本: pipeline(默认) / vlm
 	MinerUOcr       bool   `mapstructure:"mineru_ocr"`        // OCR 识别（默认 false）
@@ -273,6 +277,14 @@ type PDFParserConfig struct {
 	MinerUTable     *bool  `mapstructure:"mineru_table"`      // 表格识别（nil=默认 true）
 	MinerULang      string `mapstructure:"mineru_lang"`       // 文档语言（默认 ch）
 	MinerURemotePDF bool   `mapstructure:"mineru_remote_pdf"` // 远程 PDF URL 走 MinerU 精准 API（默认 true；false 则远程一律不走 MinerU，只保留本地 PDF OCR 回退）
+}
+
+// GetMaxPages 返回省略 pages 时一次最多解析的页数，默认 20。
+func (c PDFParserConfig) GetMaxPages() int {
+	if c.MaxPages > 0 {
+		return c.MaxPages
+	}
+	return 20
 }
 
 // MinerUEnabled 返回是否需要初始化 MinerU 客户端。
@@ -594,6 +606,7 @@ func Load(configPath string) (*Config, error) {
 	viper.BindEnv("llm.base_url", "LLM_BASE_URL")
 	viper.BindEnv("llm.api_key", "LLM_API_KEY")
 	viper.BindEnv("pdf_parser.mineru_token", "MINERU_TOKEN")
+	viper.BindEnv("academic.unpaywall_email", "UNPAYWALL_EMAIL")
 	var conf Config
 	if err := viper.Unmarshal(&conf); err != nil {
 		return nil, fmt.Errorf("配置解析失败,%w", err)
@@ -809,6 +822,9 @@ func applyKnownEnv(conf *Config) {
 	}
 	if v := os.Getenv("SEMANTIC_SCHOLAR_API_KEY"); v != "" {
 		conf.Academic.SemanticScholarAPIKey = v
+	}
+	if v := os.Getenv("UNPAYWALL_EMAIL"); v != "" {
+		conf.Academic.UnpaywallEmail = v
 	}
 	if v := os.Getenv("WEBSEARCH_TOKEN"); v != "" {
 		conf.AuthToken = v

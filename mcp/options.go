@@ -90,4 +90,5 @@ func applyWebFetch(conf config.Config) {
 	}
 	webfetchInst = f
 	cleanFetchMaxSizeMB = conf.CleanFetch.MaxFetchSizeMB
+	pdfMaxPages = conf.PDFParser.GetMaxPages()
 }

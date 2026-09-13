@@ -211,6 +211,7 @@ apipool:
 | `query` | string | ✅ | Search keyword |
 | `intent` | string | ❌ | Search intent (only effective when LLM is enabled; auto-removed to save context when disabled) |
 | `time_range` | int | ❌ | Search time range in months, default 3. `1`=last month, `6`=last 6 months, `12`=last year, `0`=unlimited. Doubao Custom maps this to `OneDay`/`OneWeek`/`OneMonth`/`OneYear`; Global has no time-filter API and ignores it |
+| `fetch_top_n` | int | ❌ | After ranking, fetch full text for the top N results (default `0`, max 5). Per-URL failure keeps the snippet |
 
 Results include engine source and relevance score by default (for engines that support scores like Tavily / Doubao Custom). Disable via `smartsearch.show_meta: false`.
 
@@ -239,17 +240,23 @@ Results are ranked by the academic scoring enhancement (enabled by default): RRF
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `url` | string | ✅ | Web page URL |
+| `url` | string | one of `url`/`urls` | Web page URL |
+| `urls` | string[] | one of `url`/`urls` | Batch fetch; merged with `url`, deduplicated, up to 5 |
 
 Requires `cleanfetch.enabled: true`. Based on go-webfetch, no proxy needed; built-in DNS rebinding protection and HEAD pre-check for large files (`max_fetch_size_mb` controls threshold, default 10MB); falls back to Jina Reader on failure (requires `jina.api_key`, proxy auto-detected).
+
+In batch mode (`urls`), each URL is pre-checked and fetched independently; one failure does not affect the others, and results are returned grouped by URL. With only `url`, output is identical to previous versions.
 
 ### `pdf_parser` — PDF Parsing
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `path` | string | ✅ | Local PDF file path or remote URL |
+| `path` | string | ✅ | Local PDF file path or remote http(s) URL (academic `pdf_url` can be passed directly) |
+| `pages` | string | ❌ | Page range (1-based), e.g. `1-10`, `1,3,5-7`; invalid formats raise a parameter error, and explicit page counts above `max_pages` are rejected with a split suggestion |
 
-Requires `pdf_parser.enabled: true`. Large documents auto-stored to temp files.
+Requires `pdf_parser.enabled: true`. Large documents auto-stored to temp files. Remote URLs use the same SSRF checks as `cleanfetch` and are not prefixed with `file://`.
+
+When `pages` is omitted, only the first `pdf_parser.max_pages` (default 20) pages are parsed; on truncation the output states the total page count and suggests continuing with `pages`. The MinerU path (remote Standard API / scanned OCR) does not support page selection yet and returns the full text with a note.
 
 **Parsing strategy**: local PDFs prefer the PDF library (ledongthuc/pdf) for text extraction; if there is no text layer and `mineru_ocr` is enabled, fall back to MinerU OCR.
 - `mineru_ocr: true`: OCR fallback for scanned / image-based PDFs (without Token uses Agent Lightweight API, ≤10MB/20 pages)

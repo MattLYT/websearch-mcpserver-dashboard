@@ -203,6 +203,7 @@ cleanfetch:
 # MinerU AI enhancement (optional): with Token uses Standard API (remote URL, ≤200MB), without Token uses Agent API (local file, ≤10MB)
 # Get Token: https://mineru.net/apiManage | Env: MINERU_TOKEN
 pdf_parser:
+  # max_pages: 20            # Max pages parsed per call when pages is omitted (default 20)
   enabled: false            # Must be explicitly true to enable
   # mineru_token: ""        # JWT Token; enables Standard API when set
   # mineru_model: "pipeline" # pipeline (default) / vlm (recommended)
@@ -346,6 +347,7 @@ log:
 | `cleanfetch.use_system_proxy` | false | Auto-use system proxy (env vars + Windows registry) |
 | `cleanfetch.max_retries` | 3 | Only retries on 429/502/503 |
 | `pdf_parser.enabled` | false | Independent of cleanfetch |
+| `pdf_parser.max_pages` | 20 | Max pages parsed per call when pages is omitted |
 | `pdf_parser.mineru_model` | pipeline | pipeline / vlm |
 | `pdf_parser.mineru_formula` | true | Formula recognition |
 | `pdf_parser.mineru_table` | true | Table recognition |

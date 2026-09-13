@@ -456,6 +456,7 @@ func initAcademicEngine(conf config.Config, g *SearchGroup) {
 		DBLP:            antirobot.DBLPOpts{Enabled: !acad.DisableDBLP},
 		DOAJ:            antirobot.DOAJOpts{Enabled: !acad.DisableDOAJ},
 		ProxyResolve:    conf.Proxy.ProxyResolver(),
+		UnpaywallEmail:  acad.UnpaywallEmail,
 	}
 
 	adapter := NewAcademicAdapter(acadConf)

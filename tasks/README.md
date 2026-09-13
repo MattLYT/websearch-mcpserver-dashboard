@@ -22,6 +22,32 @@
 
 T01 与 T02 无相互依赖，可并行。[T05](T05-ci-quality-gate.md) 已取消（不建 CI workflow）。
 
+---
+
+# Tasks — 工具链吸收（`issues/`）
+
+对照 [`issues/overview.md`](../issues/overview.md) 校正后的筛选标准：往返成本优先，不把「再调一次工具」当更优默认；不改 `SearchInf` / `Engine.Search()`。一次会话只做一号。
+
+### P0 修断裂闭环 + 压缩搜索后最贵的 N 次 fetch
+
+| 顺序 | ID | 标题 | 依赖 |
+|------|----|------|------|
+| 1 | [T15](T15-pdf-parser-remote-url.md) | pdf_parser 的 path 接受远程 URL | — |
+| 2 | [T16](T16-smartsearch-fetch-top-n.md) | smartsearch `fetch_top_n` 搜后浅抽取 | — |
+| 3 | [T17](T17-academic-doi-oa.md) | query 识别 DOI/arXiv + 合并后补 OA | T15 先合则工具描述更顺 |
+
+T15 与 T16 无相互依赖，可并行。T17 描述依赖 T15，代码可并行。
+
+### P1 压缩正文 / 多 URL / 长 PDF
+
+| 顺序 | ID | 标题 | 依赖 |
+|------|----|------|------|
+| 4 | [T18](T18-cleanfetch-reuse-summarizer.md) | cleanfetch 复用 LLM 摘要（解耦 SearchResult） | **不做**（工具不耦合，见任务卡决策） |
+| 5 | [T19](T19-pdf-parser-pages.md) | pdf_parser 页范围 / max_pages | T15 |
+| 6 | [T20](T20-cleanfetch-batch-urls.md) | cleanfetch 批量 URL | 与 T18 抽 fetchOne 更顺 |
+
+未拆项见 overview 表内「不做」（含 Brave：免费档仍要信用卡）。
+
 ## 状态图例
 
 任务文件头部 `状态` 字段：`待办` / `进行中` / `完成`。落地时改这一行即可。

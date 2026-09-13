@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"websearch/pkg/academic"
@@ -24,10 +25,11 @@ import (
 // AcademicAdapter 将学术引擎适配为 AcademicSearcher 接口。
 // 负责 arXiv、Crossref、OpenAlex、Semantic Scholar、PubMed、Google Scholar。
 type AcademicAdapter struct {
-	searcher  *antirobot.Searcher
-	engines   []antirobot.Engine // 保存全部引擎引用，用于按名过滤
-	enhance   bool               // 是否启用学术评分增强（RRF 融合 + 学术信号）
-	threshold float64            // 学术结果阀值（默认 0.02）
+	searcher       *antirobot.Searcher
+	engines        []antirobot.Engine // 保存全部引擎引用，用于按名过滤
+	enhance        bool              // 是否启用学术评分增强（RRF 融合 + 学术信号）
+	threshold      float64           // 学术结果阀值（默认 0.02）
+	unpaywallEmail string
 }
 
 // AcademicSearchResult 学术搜索聚合结果：结果列表 + 逐引擎错误信息。
@@ -56,6 +58,7 @@ type AcademicConfig struct {
 	DBLP            antirobot.DBLPOpts
 	DOAJ            antirobot.DOAJOpts
 	ProxyResolve    proxy.ProxyResolver // 代理端点动态解析函数
+	UnpaywallEmail  string
 }
 
 // NewAcademicAdapter 创建学术搜索适配器。
@@ -91,7 +94,7 @@ func NewAcademicAdapter(conf AcademicConfig) *AcademicAdapter {
 	}
 
 	searcher := antirobot.NewSearcher(antirobot.StrategyParallel, engines)
-	return &AcademicAdapter{searcher: searcher, engines: engines}
+	return &AcademicAdapter{searcher: searcher, engines: engines, unpaywallEmail: conf.UnpaywallEmail}
 }
 
 // SearchAcademicRaw 实现 AcademicSearcher 接口，返回学术论文搜索结果。
@@ -108,6 +111,10 @@ func (a *AcademicAdapter) SearchAcademicRaw(query string, opts ...AcademicSearch
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
+	if kind, id := academic.ParsePaperQuery(query); kind != "" {
+		return a.lookupPaper(ctx, kind, id)
+	}
 
 	// 设置时间范围
 	tr := ParseTimeRange(opt.TimeRange)
@@ -165,6 +172,7 @@ func (a *AcademicAdapter) SearchAcademicRaw(query string, opts ...AcademicSearch
 		if len(results) == 0 {
 			return AcademicSearchResult{}, noResultError(engineErrors)
 		}
+		a.enrichOAPDF(ctx, results)
 		return AcademicSearchResult{Results: results, EngineErrors: engineErrors}, nil
 	}
 
@@ -175,7 +183,50 @@ func (a *AcademicAdapter) SearchAcademicRaw(query string, opts ...AcademicSearch
 		return AcademicSearchResult{}, noResultError(engineErrors)
 	}
 
-	return AcademicSearchResult{Results: toSearchResults(all), EngineErrors: engineErrors}, nil
+	results := toSearchResults(all)
+	a.enrichOAPDF(ctx, results)
+	return AcademicSearchResult{Results: results, EngineErrors: engineErrors}, nil
+}
+
+func (a *AcademicAdapter) lookupPaper(ctx context.Context, kind, id string) (AcademicSearchResult, error) {
+	var raw []antirobot.Result
+	switch kind {
+	case "doi":
+		raw = academic.LookupDOI(ctx, id)
+	case "arxiv":
+		raw = academic.LookupArxivID(ctx, id)
+	}
+	if len(raw) == 0 {
+		return AcademicSearchResult{}, fmt.Errorf("学术引擎搜索无结果")
+	}
+	raw = antirobot.DeduplicateResults(raw)
+	results := toSearchResults(raw)
+	if len(results) > 1 {
+		results = results[:1]
+	}
+	a.enrichOAPDF(ctx, results)
+	return AcademicSearchResult{Results: results}, nil
+}
+
+func (a *AcademicAdapter) enrichOAPDF(ctx context.Context, results []SearchResult) {
+	if a.unpaywallEmail == "" || len(results) == 0 {
+		return
+	}
+	var wg sync.WaitGroup
+	for i := range results {
+		if results[i].DOI == "" || results[i].PDFURL != "" {
+			continue
+		}
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			pdf, err := academic.UnpaywallPDF(ctx, results[i].DOI, a.unpaywallEmail)
+			if err == nil && pdf != "" {
+				results[i].PDFURL = pdf
+			}
+		}(i)
+	}
+	wg.Wait()
 }
 
 // noResultError 全部引擎无结果时返回错误；有引擎失败的把错误拼进 message。

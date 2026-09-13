@@ -83,6 +83,8 @@ type openalexWork struct {
 	AbstractInvIdx map[string][]int     `json:"abstract_inverted_index"`
 	Authorships    []openalexAuthorship `json:"authorships"`
 	PrimaryLocation *openalexLocation   `json:"primary_location"`
+	BestOALocation  *openalexLocation   `json:"best_oa_location"`
+	OpenAccess      *openalexOA         `json:"open_access"`
 	PublicationDate string              `json:"publication_date"`
 	CitedByCount   int                  `json:"cited_by_count"`
 	RelevanceScore float64              `json:"relevance_score"`
@@ -95,6 +97,11 @@ type openalexAuthorship struct {
 
 type openalexAuthor struct {
 	DisplayName string `json:"display_name"`
+}
+
+type openalexOA struct {
+	IsOA  bool   `json:"is_oa"`
+	OAURL string `json:"oa_url"`
 }
 
 type openalexLocation struct {
@@ -119,64 +126,75 @@ func (e *openalexEngine) parse(data []byte) (*antirobot.SearchResponse, error) {
 
 	results := make([]antirobot.Result, 0, len(resp.Results))
 	for _, w := range resp.Results {
-		title := w.Title
-		if title == "" {
-			title = w.DisplayName
+		if r, ok := openalexWorkToResult(w); ok {
+			results = append(results, r)
 		}
-		if title == "" {
-			continue
-		}
-		title = antirobot.CollapseSpace(strings.TrimSpace(title))
-
-		resultURL := ""
-		if w.PrimaryLocation != nil && w.PrimaryLocation.LandingPage != "" {
-			resultURL = w.PrimaryLocation.LandingPage
-		}
-		if resultURL == "" && w.DOI != "" {
-			resultURL = w.DOI
-		}
-		if resultURL == "" {
-			resultURL = w.ID
-		}
-
-		pdfURL := ""
-		if w.PrimaryLocation != nil && w.PrimaryLocation.PDFUrl != "" {
-			pdfURL = w.PrimaryLocation.PDFUrl
-		}
-
-		abstract := reconstructAbstract(w.AbstractInvIdx)
-
-		authors := make([]string, 0, len(w.Authorships))
-		for _, a := range w.Authorships {
-			if a.Author.DisplayName != "" {
-				authors = append(authors, a.Author.DisplayName)
-			}
-		}
-
-		journal := ""
-		if w.PrimaryLocation != nil && w.PrimaryLocation.Source != nil {
-			journal = w.PrimaryLocation.Source.DisplayName
-		}
-
-		doi := strings.TrimPrefix(w.DOI, "https://doi.org/")
-
-		results = append(results, antirobot.Result{
-			Type:        antirobot.ResultPaper,
-			Title:       title,
-			URL:         resultURL,
-			Content:     abstract,
-			PDFURL:      pdfURL,
-			Authors:     strings.Join(authors, ", "),
-			PublishedAt: w.PublicationDate,
-			DOI:         doi,
-			Journal:     journal,
-			CitedBy:     w.CitedByCount,
-			Score:       w.RelevanceScore,
-			Engine:      "openalex",
-		})
 	}
 
 	return &antirobot.SearchResponse{Engine: "openalex", Results: results}, nil
+}
+
+func openalexPDFURL(w openalexWork) string {
+	if w.PrimaryLocation != nil && w.PrimaryLocation.PDFUrl != "" {
+		return w.PrimaryLocation.PDFUrl
+	}
+	if w.BestOALocation != nil && w.BestOALocation.PDFUrl != "" {
+		return w.BestOALocation.PDFUrl
+	}
+	if w.OpenAccess != nil && w.OpenAccess.OAURL != "" {
+		return w.OpenAccess.OAURL
+	}
+	return ""
+}
+
+func openalexWorkToResult(w openalexWork) (antirobot.Result, bool) {
+	title := w.Title
+	if title == "" {
+		title = w.DisplayName
+	}
+	if title == "" {
+		return antirobot.Result{}, false
+	}
+	title = antirobot.CollapseSpace(strings.TrimSpace(title))
+
+	resultURL := ""
+	if w.PrimaryLocation != nil && w.PrimaryLocation.LandingPage != "" {
+		resultURL = w.PrimaryLocation.LandingPage
+	}
+	if resultURL == "" && w.DOI != "" {
+		resultURL = w.DOI
+	}
+	if resultURL == "" {
+		resultURL = w.ID
+	}
+
+	journal := ""
+	if w.PrimaryLocation != nil && w.PrimaryLocation.Source != nil {
+		journal = w.PrimaryLocation.Source.DisplayName
+	}
+
+	authors := make([]string, 0, len(w.Authorships))
+	for _, a := range w.Authorships {
+		if a.Author.DisplayName != "" {
+			authors = append(authors, a.Author.DisplayName)
+		}
+	}
+
+	doi := strings.TrimPrefix(w.DOI, "https://doi.org/")
+	return antirobot.Result{
+		Type:        antirobot.ResultPaper,
+		Title:       title,
+		URL:         resultURL,
+		Content:     reconstructAbstract(w.AbstractInvIdx),
+		PDFURL:      openalexPDFURL(w),
+		Authors:     strings.Join(authors, ", "),
+		PublishedAt: w.PublicationDate,
+		DOI:         doi,
+		Journal:     journal,
+		CitedBy:     w.CitedByCount,
+		Score:       w.RelevanceScore,
+		Engine:      "openalex",
+	}, true
 }
 
 func reconstructAbstract(invIdx map[string][]int) string {

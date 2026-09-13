@@ -158,10 +158,10 @@ MCP 客户端通过此端点完成协议握手、工具列表获取和工具调�
 
 | 工具名 | 说明 | 参数 |
 |--------|------|------|
-| `smartsearch` | 网络检索 | `query`（必填）、`intent`（可选，LLM 启用时可用）、`time_range`（可选，月；默认 3） |
+| `smartsearch` | 网络检索 | `query`（必填）、`intent`（可选，LLM 启用时可用）、`time_range`（可选，月；默认 3）、`fetch_top_n`（可选，默认 0） |
 | `academicsearch` | 学术论文检索（arXiv / Crossref / OpenAlex / PubMed / Europe PMC / DBLP / DOAJ 等） | `query`（必填）、`engines`（可选）、`time_range`（可选：`year`/`month`/`week`/`day`）、`page`（可选） |
-| `cleanfetch` | 网页内容抓取，返回 Markdown | `url`（必填） — 需配置 `cleanfetch.enabled` |
-| `pdf_parser` | PDF 解析，支持 MinerU AI 增强（表格/公式/多栏识别） | `path`（必填） — 需配置 `pdf_parser.enabled`，可选配置 `mineru_token` |
+| `cleanfetch` | 网页内容抓取，返回 Markdown | `url`（与 `urls` 至少一者）、`urls`（可选批量，合并去重最多 5 个） — 需配置 `cleanfetch.enabled` |
+| `pdf_parser` | PDF 解析，支持 MinerU AI 增强（表格/公式/多栏识别） | `path`（必填，本地路径或远程 URL）、`pages`（可选页码范围，如 1-10） — 需配置 `pdf_parser.enabled`，可选 `mineru_token`；省略 pages 时受 `max_pages`（默认 20）约束 |
 
 #### 客户端配置示例
 

@@ -211,6 +211,7 @@ apipool:
 | `query` | string | ✅ | 搜索关键词 |
 | `intent` | string | ❌ | 搜索意图（仅 LLM 启用时生效，未启用时自动移除该参数节省上下文） |
 | `time_range` | int | ❌ | 搜索时间范围（月），默认 3。`1`=近 1 个月，`6`=近半年，`12`=近一年，`0`=不限。豆包 Custom 会映射为 `OneDay`/`OneWeek`/`OneMonth`/`OneYear`；Global 无时间过滤接口，忽略 |
+| `fetch_top_n` | int | ❌ | 评分截断后对前 N 条并发抓取正文（默认 `0` 不抓，上限 5）。单条失败保留 snippet |
 
 返回结果默认附带来源引擎和相关性分数（Tavily / 豆包 Custom 等支持 score 的引擎）。可通过 `smartsearch.show_meta: false` 关闭。
 
@@ -239,17 +240,23 @@ apipool:
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `url` | string | ✅ | 网页 URL |
+| `url` | string | 与 `urls` 至少一者 | 网页 URL |
+| `urls` | string[] | 与 `url` 至少一者 | 批量抓取，与 `url` 合并去重后最多 5 个 |
 
 需配置 `cleanfetch.enabled: true`。基于 go-webfetch，无需代理；内置 DNS rebinding 防护和 HEAD 预检防大文件（`max_fetch_size_mb` 控制阈值，默认 10MB）；失败时自动回退 Jina Reader（需配置 `jina.api_key`，代理自动检测）。
+
+批量模式（`urls`）下每条 URL 独立预检与抓取，单条失败不影响其它，结果按 URL 分节返回；只传 `url` 时输出与旧版一致。
 
 ### `pdf_parser` — PDF 解析
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `path` | string | ✅ | 本地 PDF 文件路径或远程 URL |
+| `path` | string | ✅ | 本地 PDF 文件路径或远程 http(s) URL（学术结果的 `pdf_url` 可直接传入） |
+| `pages` | string | ❌ | 页码范围（1-based），如 `1-10`、`1,3,5-7`；非法格式报参数错误，显式页数超过 `max_pages` 时报错并要求拆分 |
 
-需配置 `pdf_parser.enabled: true`。大文档自动存储到临时文件。
+需配置 `pdf_parser.enabled: true`。大文档自动存储到临时文件。远程 URL 走与 `cleanfetch` 相同的 SSRF 预检，不会被拼成 `file://`。
+
+省略 `pages` 时只解析前 `pdf_parser.max_pages`（默认 20）页；发生截断会在输出前说明总页数并提示用 `pages` 继续读取。MinerU 路径（远程精准 API / 扫描件 OCR）暂不支持按页选择，会返回全文并注明。
 
 **解析策略**：本地 PDF 优先用 PDF 库（ledongthuc/pdf）提取文本；无文本层时若开启 `mineru_ocr` 再回退 MinerU OCR。
 - `mineru_ocr: true`：扫描件 / 图片型 PDF 的 OCR 回退（无 Token 走 Agent 轻量 API，≤10MB/20页）

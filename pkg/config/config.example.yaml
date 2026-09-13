@@ -250,6 +250,7 @@ cleanfetch:
 # ==============================================
 pdf_parser:
   enabled: false            # 总开关（默认 false）
+  # max_pages: 20            # 省略 pages 时一次最多解析的页数（默认 20）；工具可用 pages 参数指定页码范围
   # MinerU 解析（可选）
   # 本地 PDF：优先用 PDF 库抽文本；抽不到且 mineru_ocr=true 时回退 MinerU OCR
   # 远程 URL：有 Token 时可用精准解析 API（≤200MB/200页）

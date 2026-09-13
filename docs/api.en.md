@@ -158,10 +158,10 @@ MCP clients use this endpoint for protocol handshake, tool listing, and tool inv
 
 | Tool | Description | Parameters |
 |------|-------------|------------|
-| `smartsearch` | Web search | `query` (required), `intent` (optional, when LLM is enabled), `time_range` (optional, months; default 3) |
+| `smartsearch` | Web search | `query` (required), `intent` (optional, when LLM is enabled), `time_range` (optional, months; default 3), `fetch_top_n` (optional, default 0) |
 | `academicsearch` | Academic paper search (arXiv / Crossref / OpenAlex / PubMed / Europe PMC / DBLP / DOAJ, etc.) | `query` (required), `engines` (optional), `time_range` (optional: `year`/`month`/`week`/`day`), `page` (optional) |
-| `cleanfetch` | Web content fetch, returns Markdown | `url` (required) — requires `cleanfetch.enabled` |
-| `pdf_parser` | PDF parsing with MinerU AI enhancement (table/formula/multi-column recognition) | `path` (required) — requires `pdf_parser.enabled`, optional `mineru_token` |
+| `cleanfetch` | Web content fetch, returns Markdown | `url` (one of `url`/`urls`), `urls` (optional batch, merged & deduped, up to 5) — requires `cleanfetch.enabled` |
+| `pdf_parser` | PDF parsing with MinerU AI enhancement (table/formula/multi-column recognition) | `path` (required, local path or remote URL), `pages` (optional page range, e.g. 1-10) — requires `pdf_parser.enabled`, optional `mineru_token`; when pages omitted, capped by `max_pages` (default 20) |
 
 #### Client Config Examples
 

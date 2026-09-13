@@ -183,6 +183,8 @@ academic:
   disable_europepmc: false
   disable_dblp: false
   disable_doaj: false
+  # Unpaywall 补 OA PDF（有 DOI 且结果无 PDF 时）。环境变量 UNPAYWALL_EMAIL
+  # unpaywall_email: "you@example.com"
   # Semantic Scholar 可选 API key（环境变量 SEMANTIC_SCHOLAR_API_KEY 可覆盖）。
   # 匿名配额限流严格，带 key 连续 429 时引擎自动降级为匿名模式
   # semantic_scholar_api_key: ""
@@ -250,6 +252,7 @@ cleanfetch:
 # ==============================================
 pdf_parser:
   enabled: false            # 总开关（默认 false）
+  # max_pages: 20            # 省略 pages 时一次最多解析的页数（默认 20）；工具可用 pages 参数指定页码范围
   # MinerU 解析（可选）
   # 本地 PDF：优先用 PDF 库抽文本；抽不到且 mineru_ocr=true 时回退 MinerU OCR
   # 远程 URL：有 Token 时可用精准解析 API（≤200MB/200页）

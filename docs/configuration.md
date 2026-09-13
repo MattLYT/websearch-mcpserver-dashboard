@@ -202,6 +202,7 @@ cleanfetch:
 # MinerU AI 增强（可选）：有 Token 用精准 API（远程 URL，≤200MB），无 Token 用 Agent 轻量 API（本地文件，≤10MB）
 # 获取 Token: https://mineru.net/apiManage | 环境变量: MINERU_TOKEN
 pdf_parser:
+  # max_pages: 20            # 省略 pages 时一次最多解析的页数（默认 20）
   enabled: false            # 显式 true 才启用
   # mineru_token: ""        # JWT Token，有则启用精准 API
   # mineru_model: "pipeline" # pipeline(默认) / vlm(推荐)
@@ -345,6 +346,7 @@ log:
 | `cleanfetch.use_system_proxy` | false | 自动使用系统代理（环境变量+注册表） |
 | `cleanfetch.max_retries` | 3 | 仅对 429/502/503 重试 |
 | `pdf_parser.enabled` | false | 独立于 cleanfetch |
+| `pdf_parser.max_pages` | 20 | 省略 pages 时一次最多解析的页数 |
 | `pdf_parser.mineru_model` | pipeline | pipeline / vlm |
 | `pdf_parser.mineru_formula` | true | 公式识别 |
 | `pdf_parser.mineru_table` | true | 表格识别 |

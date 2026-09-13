@@ -3,8 +3,11 @@ package mcpserver
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
+
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"websearch/pkg/config"
 	"websearch/pkg/jina"
@@ -124,8 +127,8 @@ func TestFormatWebFetchResult_Inline(t *testing.T) {
 		Markdown: "Hello **world**",
 	}
 	r := formatWebFetchResult(result)
-	if r == nil || len(r.Content) == 0 {
-		t.Fatal("expected non-empty content")
+	if r == "" {
+		t.Fatal("expected non-empty text")
 	}
 }
 
@@ -139,8 +142,8 @@ func TestFormatWebFetchResult_SavedToFile(t *testing.T) {
 		AgentHint:  "Use read_file to read",
 	}
 	r := formatWebFetchResult(result)
-	if r == nil || len(r.Content) == 0 {
-		t.Fatal("expected non-empty content")
+	if r == "" {
+		t.Fatal("expected non-empty text")
 	}
 }
 
@@ -154,8 +157,8 @@ func TestFormatJinaResult(t *testing.T) {
 		Content:       "Content body",
 	}
 	r := formatJinaResult(result)
-	if r == nil || len(r.Content) == 0 {
-		t.Fatal("expected non-empty content")
+	if r == "" {
+		t.Fatal("expected non-empty text")
 	}
 }
 
@@ -176,6 +179,86 @@ func TestPDFParserHandler_NotInitialized(t *testing.T) {
 	_, _, err := PDFParserHandler(context.Background(), nil, &PDFParserParams{Path: "/tmp/test.pdf"})
 	if err == nil {
 		t.Fatal("expected error when webfetch not initialized")
+	}
+}
+
+func TestResolvePDFPath(t *testing.T) {
+	tests := []struct {
+		in     string
+		want   string
+		remote bool
+	}{
+		{"https://example.com/a.pdf", "https://example.com/a.pdf", true},
+		{"HTTP://example.com/a.pdf", "HTTP://example.com/a.pdf", true},
+		{"file:///C:/docs/a.pdf", "file:///C:/docs/a.pdf", false},
+		{`C:\docs\a.pdf`, "file:///C:/docs/a.pdf", false},
+		{"/tmp/a.pdf", "file:////tmp/a.pdf", false},
+	}
+	for _, tt := range tests {
+		got, remote := resolvePDFPath(tt.in)
+		if got != tt.want || remote != tt.remote {
+			t.Errorf("resolvePDFPath(%q) = %q,%v want %q,%v", tt.in, got, remote, tt.want, tt.remote)
+		}
+	}
+}
+
+func TestPDFParserHandler_RejectsPrivateURL(t *testing.T) {
+	oldWF := webfetchInst
+	webfetchInst = &webfetch.Fetcher{}
+	defer func() { webfetchInst = oldWF }()
+
+	_, _, err := PDFParserHandler(context.Background(), nil, &PDFParserParams{Path: "https://127.0.0.1/secret.pdf"})
+	if err == nil {
+		t.Fatal("expected intranet URL to be rejected")
+	}
+	if !strings.Contains(err.Error(), "内网") && !strings.Contains(err.Error(), "不允许") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestClampFetchTopN(t *testing.T) {
+	if clampFetchTopN(-1) != 0 || clampFetchTopN(0) != 0 || clampFetchTopN(3) != 3 || clampFetchTopN(9) != 5 {
+		t.Fatalf("clampFetchTopN unexpected")
+	}
+}
+
+func TestEnrichTopN(t *testing.T) {
+	in := []search.SearchResult{
+		{Title: "a", Url: "https://a.example/x", Content: "snip-a"},
+		{Title: "b", Url: "https://b.example/x", Content: "snip-b"},
+		{Title: "c", Url: "https://c.example/x", Content: "snip-c"},
+	}
+	fetch := func(_ context.Context, rawURL string) (string, error) {
+		if strings.Contains(rawURL, "b.example") {
+			return "", fmt.Errorf("fail")
+		}
+		return "BODY-" + rawURL, nil
+	}
+	out := enrichTopN(context.Background(), in, 2, fetch)
+	if out[0].Content != "BODY-https://a.example/x" {
+		t.Fatalf("first content = %q", out[0].Content)
+	}
+	if out[1].Content != "snip-b" {
+		t.Fatalf("second should keep snippet, got %q", out[1].Content)
+	}
+	if out[2].Content != "snip-c" {
+		t.Fatalf("third should be untouched, got %q", out[2].Content)
+	}
+	n0 := enrichTopN(context.Background(), in, 0, fetch)
+	if n0[0].Content != "snip-a" {
+		t.Fatal("n=0 must not fetch")
+	}
+}
+
+func TestEnrichTopN_SkipsPrivate(t *testing.T) {
+	old := webfetchInst
+	webfetchInst = &webfetch.Fetcher{}
+	defer func() { webfetchInst = old }()
+
+	in := []search.SearchResult{{Url: "https://127.0.0.1/x", Content: "snip"}}
+	out := enrichTopN(context.Background(), in, 1, fetchPageContent)
+	if out[0].Content != "snip" {
+		t.Fatalf("private URL must keep snippet, got %q", out[0].Content)
 	}
 }
 
@@ -357,5 +440,92 @@ func TestPostSearchFilter_ApipoolNoConfig_GlobalMaxSize(t *testing.T) {
 	out := postSearchFilter(results, "apipool")
 	if len(out) != 10 {
 		t.Fatalf("expected 10 (global max only), got %d", len(out))
+	}
+}
+
+// ── parsePagesSpec 测试（T19）────────────────────────────────────────────────
+
+func TestParsePagesSpec(t *testing.T) {
+	tests := []struct {
+		in   string
+		want []int
+	}{
+		{"", nil},
+		{"3", []int{3}},
+		{"1-3", []int{1, 2, 3}},
+		{"5,1,3-4", []int{1, 3, 4, 5}},
+		{" 2 , 1 - 2 ", []int{1, 2}},
+	}
+	for _, tt := range tests {
+		got, err := parsePagesSpec(tt.in)
+		if err != nil {
+			t.Errorf("parsePagesSpec(%q) unexpected error: %v", tt.in, err)
+			continue
+		}
+		if fmt.Sprint(got) != fmt.Sprint(tt.want) {
+			t.Errorf("parsePagesSpec(%q) = %v, want %v", tt.in, got, tt.want)
+		}
+	}
+	for _, bad := range []string{"abc", "0", "5-2", "1-", "-3", "1..3", "-1"} {
+		if _, err := parsePagesSpec(bad); err == nil {
+			t.Errorf("parsePagesSpec(%q) expected error", bad)
+		}
+	}
+}
+
+func TestPDFParserHandler_PagesOverMax(t *testing.T) {
+	old := pdfMaxPages
+	pdfMaxPages = 5
+	defer func() { pdfMaxPages = old }()
+
+	_, _, err := PDFParserHandler(context.Background(), nil, &PDFParserParams{Path: "x.pdf", Pages: "1-6"})
+	if err == nil || !strings.Contains(err.Error(), "超过单次上限") {
+		t.Fatalf("expected pages-over-max error, got %v", err)
+	}
+}
+
+// ── mergeFetchURLs / 批量抓取测试（T20）──────────────────────────────────────
+
+func TestMergeFetchURLs(t *testing.T) {
+	got := mergeFetchURLs(" https://a.com/1 ", []string{"https://a.com/1", "", "https://b.com/2"})
+	if fmt.Sprint(got) != "[https://a.com/1 https://b.com/2]" {
+		t.Fatalf("mergeFetchURLs = %v", got)
+	}
+	if len(mergeFetchURLs("", nil)) != 0 {
+		t.Fatal("empty inputs should merge to empty")
+	}
+}
+
+func TestCleanFetch_BatchValidation(t *testing.T) {
+	if _, _, err := CleanFetch(context.Background(), nil, &CleanFetchParams{}); err == nil {
+		t.Fatal("expected error when url and urls both empty")
+	}
+	tooMany := &CleanFetchParams{URLs: []string{
+		"https://a.com/1", "https://a.com/2", "https://a.com/3",
+		"https://a.com/4", "https://a.com/5", "https://a.com/6",
+	}}
+	if _, _, err := CleanFetch(context.Background(), nil, tooMany); err == nil || !strings.Contains(err.Error(), "最多") {
+		t.Fatalf("expected over-limit error, got %v", err)
+	}
+}
+
+func TestCleanFetch_BatchPartialFailure(t *testing.T) {
+	// 三个 URL：一个内网（SSRF 拒绝），一个非法协议，全部失败也应分节返回错误
+	urls := []string{"https://127.0.0.1/secret", "ftp://example.com/x", "https://127.0.0.2/y"}
+	res, _, err := CleanFetch(context.Background(), nil, &CleanFetchParams{URLs: urls})
+	if err != nil {
+		t.Fatalf("batch must not fail wholesale: %v", err)
+	}
+	if res == nil || len(res.Content) == 0 {
+		t.Fatal("expected sectioned output")
+	}
+	text := res.Content[0].(*mcp.TextContent).Text
+	for _, u := range urls {
+		if !strings.Contains(text, u) {
+			t.Errorf("output missing section for %s", u)
+		}
+	}
+	if !strings.Contains(text, "抓取失败") {
+		t.Errorf("output should mark failed items:\n%s", text)
 	}
 }

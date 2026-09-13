@@ -262,6 +262,10 @@ type arxivCat struct {
 }
 
 func (e *arxivEngine) parse(data []byte) (*antirobot.SearchResponse, error) {
+	return parseArxivFeed(data)
+}
+
+func parseArxivFeed(data []byte) (*antirobot.SearchResponse, error) {
 	var feed arxivFeed
 	if err := xml.Unmarshal(data, &feed); err != nil {
 		return nil, fmt.Errorf("arxiv parse: %w", err)

@@ -227,7 +227,10 @@ type stubEngine struct{}
 func (e *stubEngine) Fetch(ctx context.Context, rawURL string) (*webfetch.FetchResult, error) {
 	return &webfetch.FetchResult{Title: "stub", Mode: "inline", Markdown: "stub"}, nil
 }
-func (e *stubEngine) ParsePDFFile(ctx context.Context, filePath string) (*webfetch.PDFResult, error) {
+func (e *stubEngine) FetchWithOpts(ctx context.Context, rawURL string, opts webfetch.FetchOptions) (*webfetch.FetchResult, error) {
+	return &webfetch.FetchResult{Title: "stub", Mode: "inline", Markdown: "stub"}, nil
+}
+func (e *stubEngine) ParsePDFFile(ctx context.Context, filePath string, opts ...webfetch.PDFOption) (*webfetch.PDFResult, error) {
 	return &webfetch.PDFResult{Title: "stub", Mode: "inline", Markdown: "stub"}, nil
 }
 func (e *stubEngine) Close() error { return nil }

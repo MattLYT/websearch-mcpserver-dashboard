@@ -40,7 +40,7 @@ func registerTools(server *mcp.Server, conf config.Config) {
 		if conf.LLMEnabled() {
 			searchDesc += "可用 intent 参数说明检索目的以获得更精准的结构化摘要。"
 		}
-		searchDesc += "主引擎不可用时自动回退 Bing。"
+		searchDesc += "可用 fetch_top_n 对评分最高的前 N 条抓取正文（默认 0 不抓，上限 5）。主引擎不可用时自动回退 Bing。"
 
 		if conf.LLMEnabled() {
 			mcp.AddTool(server, &mcp.Tool{
@@ -71,14 +71,14 @@ func registerTools(server *mcp.Server, conf config.Config) {
 	if conf.CleanFetch.Enabled {
 		mcp.AddTool(server, &mcp.Tool{
 			Name:        "cleanfetch",
-			Description: "网页内容抓取工具，获取指定 URL 的干净 Markdown 内容。",
+			Description: "网页内容抓取工具，获取指定 URL 的干净 Markdown 内容。可用 urls 批量抓取（与 url 合并去重，最多 5 个），单条失败不影响其它。",
 		}, CleanFetch)
 		log.Info("Available tool: cleanfetch")
 	}
 
 	// ── 注册 pdf_parser 工具（默认关闭） ──
 	if conf.PDFParser.Enabled && webfetchInst != nil {
-		pdfDesc := "本地 PDF 解析工具，优先用 PDF 库提取文本转为 Markdown；大文档自动存储到临时文件。"
+		pdfDesc := "PDF 解析工具，path 为本地文件路径、file:// 或远程 http(s) PDF URL（学术结果的 pdf_url 可直接传入）。优先用 PDF 库提取文本转为 Markdown；长文档可用 pages 指定页码（如 '1-10'），省略时默认只解析前 20 页（pdf_parser.max_pages）并提示截断；大文档自动存储到临时文件。"
 		if conf.PDFParser.MinerUOCREnabled() {
 			pdfDesc += "本地读不到文本时回退 MinerU OCR（扫描件/图片型 PDF）。"
 		} else if conf.PDFParser.MinerUToken != "" {
