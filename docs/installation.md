@@ -21,6 +21,7 @@
   - [后台常驻](#后台常驻)
   - [健康检查与 Admin 端点](#健康检查与-admin-端点)
 - [排障](#排障)
+  - [自启动报 0x800704C7（杀软 / SmartScreen 拦截）](#自启动报-0x800704c7杀软--smartscreen-拦截)
 
 ---
 
@@ -415,3 +416,33 @@ launchctl list | grep websearch
 | Docker 容器立即退出 | 确认挂载了 `config.yaml`，检查日志输出 |
 | stop 后进程仍在 | 等待最多 10s；若仍在用 `kill` 强制结束 |
 | 搜索无结果或限流 | 检查 `rate_limit` 配置（默认 3/s, 60/min）；Google 等引擎代理不可用时自动跳过 |
+
+### 自启动报 0x800704C7（杀软 / SmartScreen 拦截）
+
+**现象**：开机自启脚本（autostart.vbs / `install` 子命令生成的计划任务）报错误码 `0x800704C7`，指向脚本里 `WshShell.Run` 启动 exe 的那一行，例如：
+
+```vb
+WshShell.Run """D:\Programs\websearch\websearch-mcpserver.exe"" start", 0, False
+```
+
+**含义**：`0x800704C7` = `ERROR_OPERATION_ABORTED`（操作已被用户取消）——要启动的程序在启动瞬间被某个弹窗或拦截动作取消了，**脚本本身没有问题**。常见原因按概率排序：
+
+1. **SmartScreen 拦截（Mark of the Web）**：exe 通过微信/QQ/网盘传输或浏览器下载后带了"来自网络"标记，启动时弹 SmartScreen 警告被点"否"或闪掉。解决：右键 exe → 属性 → 勾选底部"**解除锁定**"；`.vbs` 脚本也顺手解除一次。命令行方式：
+
+   ```powershell
+   Unblock-File .\websearch-mcpserver.exe
+   Unblock-File .utostart.vbs
+   ```
+
+2. **杀软拦截**：360/火绒/卡巴等把无签名 exe 拦截或直接终止。查杀软的拦截记录/隔离区，把安装目录加白。
+
+3. **UAC 提权被拒**：exe 属性 → 兼容性选项卡若勾选了"**以管理员身份运行此程序**"，取消勾选；或启动时 UAC 弹窗被点了"否"。
+
+**定位技巧**：绕过自启脚本，在前台直接跑一次即可看到被"取消"的到底是什么弹窗：
+
+```powershell
+cd D:\Programs\websearch
+.\websearch-mcpserver.exe start
+```
+
+> 注意：文件传输损坏一般报"不是有效的 Win32 程序"，而不是 `0x800704C7`。十有八九是第 1 种——exe 没解除锁定，SmartScreen 弹窗在开机自启场景下被闪掉或点了拒绝。

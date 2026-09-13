@@ -21,6 +21,7 @@
   - [Background Service](#background-service)
   - [Health Check & Admin Endpoints](#health-check--admin-endpoints)
 - [Troubleshooting](#troubleshooting)
+  - [Autostart fails with 0x800704C7 (antivirus / SmartScreen blocking)](#autostart-fails-with-0x800704c7-antivirus--smartscreen-blocking)
 
 ---
 
@@ -416,3 +417,33 @@ launchctl list | grep websearch
 | Docker container exits immediately | Confirm `config.yaml` is mounted, check log output |
 | Process still running after stop | Wait up to 10s; if still running use `kill` to force terminate |
 | No results or rate-limited | Check `rate_limit` config (default 3/s, 60/min); Google etc. auto-skipped when proxy unavailable |
+
+### Autostart fails with 0x800704C7 (antivirus / SmartScreen blocking)
+
+**Symptom**: the autostart script (autostart.vbs / the scheduled task created by the `install` subcommand) reports error code `0x800704C7`, pointing at the `WshShell.Run` line that launches the exe, e.g.:
+
+```vb
+WshShell.Run """D:\Programs\websearch\websearch-mcpserver.exe"" start", 0, False
+```
+
+**Meaning**: `0x800704C7` = `ERROR_OPERATION_ABORTED` — the program was cancelled at launch by a popup or interception action. **The script itself is fine.** Likely causes, in order of probability:
+
+1. **SmartScreen (Mark of the Web)**: an exe transferred via WeChat/QQ/cloud drive or downloaded via browser carries the "from the internet" mark; the SmartScreen prompt is dismissed or clicked "No" at launch. Fix: right-click the exe → Properties → check "**Unblock**" at the bottom; do the same for the `.vbs` script. Or via command line:
+
+   ```powershell
+   Unblock-File .\websearch-mcpserver.exe
+   Unblock-File .\autostart.vbs
+   ```
+
+2. **Antivirus**: 360/Huorong/Kaspersky etc. may block or terminate unsigned exes. Check the antivirus quarantine/block log and whitelist the install directory.
+
+3. **UAC elevation denied**: in exe Properties → Compatibility, uncheck "**Run this program as an administrator**" if set; or the UAC prompt was clicked "No".
+
+**Locating the popup**: bypass the autostart script and run once in the foreground to see exactly which prompt is being "cancelled":
+
+```powershell
+cd D:\Programs\websearch
+.\websearch-mcpserver.exe start
+```
+
+> Note: a corrupted transfer usually reports "not a valid Win32 application" instead of `0x800704C7`. Most likely it is cause #1 — the exe was not unblocked and the SmartScreen prompt got flashed away or denied during logon autostart.
