@@ -6,13 +6,14 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"websearch/pkg/config"
-	"websearch/pkg/jina"
+	"websearch/pkg/fetch/jina"
 	"websearch/pkg/search"
-	"websearch/pkg/webfetch"
+	"websearch/pkg/fetch/webfetch"
+)
+
+import (
+	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // ── CleanFetch handler 回退逻辑测试 ──────────────────────────────────────────

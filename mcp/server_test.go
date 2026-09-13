@@ -16,7 +16,7 @@ import (
 	"websearch/pkg/config"
 	"websearch/pkg/log"
 	"websearch/pkg/search"
-	"websearch/pkg/webfetch"
+	"websearch/pkg/fetch/webfetch"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )

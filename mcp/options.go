@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"websearch/pkg/cache"
 	"websearch/pkg/config"
-	"websearch/pkg/jina"
+	"websearch/pkg/fetch/jina"
 	"websearch/pkg/log"
 	"websearch/pkg/search"
-	"websearch/pkg/summarizer"
-	"websearch/pkg/webfetch"
+	"websearch/pkg/llm"
+	"websearch/pkg/fetch/webfetch"
 )
 
 // ServerOption 服务器组件初始化选项。
@@ -57,7 +57,7 @@ func applySummarizer(conf config.Config) {
 	if !conf.LLMEnabled() {
 		return
 	}
-	summarizerInst = summarizer.NewSummarizer(conf.LLM.BaseURL, conf.LLM.APIKey, conf.LLM.ModelId)
+	summarizerInst = llm.NewSummarizer(conf.LLM.BaseURL, conf.LLM.APIKey, conf.LLM.ModelId)
 	log.Info("LLM 摘要功能已启用")
 }
 

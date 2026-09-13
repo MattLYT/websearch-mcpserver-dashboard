@@ -1,6 +1,7 @@
 package academic
 
 import (
+	"websearch/internal/testenv"
 	"strings"
 	"testing"
 
@@ -8,12 +9,13 @@ import (
 )
 
 func TestArxivSearch(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping network integration test")
-	}
+	testenv.Require(t, testenv.Arxiv)
 	engine := NewArxiv(antirobot.ArxivOpts{Enabled: true}, nil)
 	resp, err := engine.Search("diffusion probabilistic models", 1, antirobot.TimeRangeNone)
 	if err != nil {
+		if testenv.HandleSearchError(t, err) {
+			return
+		}
 		t.Fatalf("search error: %v", err)
 	}
 	if resp.Engine != "arxiv" {
@@ -55,12 +57,13 @@ func TestArxivSearch(t *testing.T) {
 }
 
 func TestCrossrefSearch(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping network integration test")
-	}
+	testenv.Require(t, testenv.Crossref)
 	engine := NewCrossref(antirobot.CrossrefOpts{Enabled: true}, nil)
 	resp, err := engine.Search("graph neural network", 1, antirobot.TimeRangeNone)
 	if err != nil {
+		if testenv.HandleSearchError(t, err) {
+			return
+		}
 		t.Fatalf("search error: %v", err)
 	}
 	if resp.Engine != "crossref" {
@@ -96,12 +99,13 @@ func TestCrossrefSearch(t *testing.T) {
 }
 
 func TestOpenAlexSearch(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping network integration test")
-	}
+	testenv.Require(t, testenv.OpenAlex)
 	engine := NewOpenAlex(antirobot.OpenAlexOpts{Enabled: true}, nil)
 	resp, err := engine.Search("reinforcement learning from human feedback", 1, antirobot.TimeRangeNone)
 	if err != nil {
+		if testenv.HandleSearchError(t, err) {
+			return
+		}
 		t.Fatalf("search error: %v", err)
 	}
 	if resp.Engine != "openalex" {
@@ -137,9 +141,6 @@ func TestOpenAlexSearch(t *testing.T) {
 }
 
 func TestSemanticScholarSearch(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping network integration test")
-	}
 	engine := NewSemanticScholar(antirobot.SemanticScholarOpts{Enabled: true}, nil)
 	resp, err := engine.Search("retrieval augmented generation", 1, antirobot.TimeRangeNone)
 	if err != nil {
