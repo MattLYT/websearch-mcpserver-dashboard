@@ -73,13 +73,29 @@ func BuildBaiduMode(conf config.Config, pool *provider.KeyPool, baiduWeb *adapte
 	return nil
 }
 
+// tavilyOptions 根据 config 组装 Tavily 可选参数（include_raw_content 默认开）。
+func tavilyOptions(conf config.Config) []provider.TavilyOption {
+	if conf.Tavily.IncludeRawContent != nil && !*conf.Tavily.IncludeRawContent {
+		return nil
+	}
+	return []provider.TavilyOption{provider.WithRawContent(true)}
+}
+
+// exaOptions 根据 config 组装 Exa 可选参数（contents.text 默认开）。
+func exaOptions(conf config.Config) []provider.ExaOption {
+	if conf.Exa.IncludeText != nil && !*conf.Exa.IncludeText {
+		return nil
+	}
+	return []provider.ExaOption{provider.WithTextContents(conf.Exa.TextMaxCharacters)}
+}
+
 // BuildTavilyMode Tavily 单引擎模式。
 func BuildTavilyMode(conf config.Config, pool *provider.KeyPool, fallback *adapter.BingSearchAdapter) core.SearchInf {
 	if pool == nil {
 		log.Error("mode=tavily 但未配置 tavily.api_key/sk_list，回退到 engine 模式")
 		return fallback
 	}
-	return provider.NewTavilySearch(pool, conf.BlackListHost)
+	return provider.NewTavilySearch(pool, conf.BlackListHost, tavilyOptions(conf)...)
 }
 
 // BuildExaMode Exa 单引擎模式。
@@ -96,7 +112,7 @@ func BuildExaMode(conf config.Config, pool *provider.KeyPool, fallback *adapter.
 	if lookbackDays <= 0 {
 		lookbackDays = 90
 	}
-	return provider.NewExaSearchWithResults(pool, numResults, lookbackDays, conf.BlackListHost)
+	return provider.NewExaSearchWithResults(pool, numResults, lookbackDays, conf.BlackListHost, exaOptions(conf)...)
 }
 
 // BuildAnysearchMode AnySearch 单引擎模式。
@@ -136,7 +152,7 @@ func BuildApipoolMode(conf config.Config, anysearchPool, baiduPool, tavilyPool, 
 			}
 		case "tavily":
 			if tavilyPool != nil {
-				providers = append(providers, apipool.NewApipoolProvider("tavily", provider.NewTavilySearch(tavilyPool, conf.BlackListHost), tavilyPool))
+				providers = append(providers, apipool.NewApipoolProvider("tavily", provider.NewTavilySearch(tavilyPool, conf.BlackListHost, tavilyOptions(conf)...), tavilyPool))
 			}
 		case "exa":
 			if exaPool != nil {
@@ -148,7 +164,7 @@ func BuildApipoolMode(conf config.Config, anysearchPool, baiduPool, tavilyPool, 
 				if lookbackDays <= 0 {
 					lookbackDays = 90
 				}
-				providers = append(providers, apipool.NewApipoolProvider("exa", provider.NewExaSearchWithResults(exaPool, numResults, lookbackDays, conf.BlackListHost), exaPool))
+				providers = append(providers, apipool.NewApipoolProvider("exa", provider.NewExaSearchWithResults(exaPool, numResults, lookbackDays, conf.BlackListHost, exaOptions(conf)...), exaPool))
 			}
 		case "doubao":
 			if doubaoPool != nil {
@@ -189,7 +205,7 @@ func BuildHybridMode(conf config.Config, anysearchPool, baiduPool, tavilyPool, e
 		engines = append(engines, baiduWeb)
 	}
 	if tavilyPool != nil {
-		engines = append(engines, provider.NewTavilySearch(tavilyPool, conf.BlackListHost))
+		engines = append(engines, provider.NewTavilySearch(tavilyPool, conf.BlackListHost, tavilyOptions(conf)...))
 	}
 	if exaPool != nil {
 		numResults := conf.Exa.NumResults
@@ -200,7 +216,7 @@ func BuildHybridMode(conf config.Config, anysearchPool, baiduPool, tavilyPool, e
 		if lookbackDays <= 0 {
 			lookbackDays = 90
 		}
-		engines = append(engines, provider.NewExaSearchWithResults(exaPool, numResults, lookbackDays, conf.BlackListHost))
+		engines = append(engines, provider.NewExaSearchWithResults(exaPool, numResults, lookbackDays, conf.BlackListHost, exaOptions(conf)...))
 	}
 	if doubaoPool != nil {
 		engines = append(engines, newDoubaoFromConf(doubaoPool, conf))

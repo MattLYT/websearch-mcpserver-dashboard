@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -87,7 +88,16 @@ func isCloudMetadata(ip net.IP) bool {
 	return false
 }
 
+// errUnsafeRedirect 标记重定向目标未通过私网/metadata 安全校验，
+// 与普通网络错误区分：前者必须阻断，后者沿用"HEAD 失败不阻断"的宽松语义。
+var errUnsafeRedirect = errors.New("不安全的重定向目标")
+
+// maxRedirectHops HEAD 预检允许跟随的重定向跳数上限。
+const maxRedirectHops = 5
+
 // headCheck HEAD 预检：检查 Content-Length 防止下载过大文件。
+// 重定向逐跳复跑 validateURLSecurity（F3）：公网 URL 302 到内网/云 metadata
+// 时原实现会跟随并把 HEAD 打到链路本地地址。
 func headCheck(ctx context.Context, rawURL string) error {
 	maxSizeMB := cleanFetchMaxSizeMB
 	if maxSizeMB <= 0 {
@@ -100,10 +110,24 @@ func headCheck(ctx context.Context, rawURL string) error {
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
 
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= maxRedirectHops {
+				return fmt.Errorf("重定向跳数超过 %d", maxRedirectHops)
+			}
+			if err := validateURLSecurity(req.URL.String()); err != nil {
+				return fmt.Errorf("%w: %v", errUnsafeRedirect, err)
+			}
+			return nil
+		},
+	}
 	resp, err := client.Do(req)
 	if err != nil {
-		// HEAD 失败不阻断（某些服务器不支持 HEAD）
+		if errors.Is(err, errUnsafeRedirect) {
+			return fmt.Errorf("HEAD 预检拒绝: %v", err)
+		}
+		// 其它 HEAD 失败不阻断（某些服务器不支持 HEAD）
 		return nil
 	}
 	resp.Body.Close()

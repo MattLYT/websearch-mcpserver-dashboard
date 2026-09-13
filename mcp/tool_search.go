@@ -2,12 +2,14 @@ package mcpserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 	"websearch/pkg/cache"
+	"websearch/pkg/fetch/webfetch"
 	"websearch/pkg/log"
 	searchcore "websearch/pkg/search/core"
 	"websearch/pkg/search"
@@ -35,19 +37,19 @@ func WebSearchNoIntent(ctx context.Context, req *mcp.CallToolRequest, params *Se
 // doWebSearch 通用网页搜索逻辑。
 // timeRangeMonths 控制搜索时间范围（月），默认 3，0 表示不限。
 // 摘要阶段优先流式推送（MCP progress notification），客户端可实时看到生成过程。
-func doWebSearch(ctx context.Context, req *mcp.CallToolRequest, query, intent string, timeRangeMonths, fetchTopN int) (*mcp.CallToolResult, any, error) {
+func doWebSearch(ctx context.Context, req *mcp.CallToolRequest, query, intent string, timeRangeMonths int, fetchTopN *int) (*mcp.CallToolResult, any, error) {
 	if searchapi == nil {
 		return nil, nil, fmt.Errorf("api 初始化未完成")
 	}
 
-	fetchTopN = clampFetchTopN(fetchTopN)
+	n := effectiveFetchTopN(fetchTopN)
 
 	// 默认3个月
 	if timeRangeMonths == 0 {
 		timeRangeMonths = 3
 	}
 	lookbackDays := timeRangeMonths * 30
-	cacheQuery := webSearchCacheQuery(query, fetchTopN)
+	cacheQuery := webSearchCacheQuery(query, n)
 
 	// ---- 缓存查询 ----
 	if cacheInst != nil {
@@ -55,17 +57,17 @@ func doWebSearch(ctx context.Context, req *mcp.CallToolRequest, query, intent st
 		if err != nil {
 			log.Errf("缓存查询异常，跳过缓存: %v", err)
 		} else if rec != nil && !rec.Academic {
-			if result, ok := finishCachedWebSearch(ctx, rec, hitType, query, intent, fetchTopN); ok {
+			if result, ok := finishCachedWebSearch(ctx, rec, hitType, query, intent, n); ok {
 				return result, nil, nil
 			}
 		}
-		if fetchTopN > 0 {
+		if n > 0 {
 			// n 专用 key 未命中时，用未抽取的缓存补抽，避免把无正文结果当成完整命中
 			rec, hitType, err := cacheInst.Lookup(query, intent, false)
 			if err == nil && rec != nil && !rec.Academic && hitType == "query_only" {
 				results, parseErr := rec.GetRawResults()
 				if parseErr == nil {
-					results = enrichFetchedTopN(ctx, results, fetchTopN)
+					results = enrichFetchedTopN(ctx, results, n)
 					return finishWebSearch(ctx, req, query, intent, cacheQuery, results)
 				}
 			}
@@ -99,7 +101,7 @@ func doWebSearch(ctx context.Context, req *mcp.CallToolRequest, query, intent st
 		results = postSearchFilter(results, engineName)
 	}
 
-	results = enrichFetchedTopN(ctx, results, fetchTopN)
+	results = enrichFetchedTopN(ctx, results, n)
 	return finishWebSearch(ctx, req, query, intent, cacheQuery, results)
 }
 
@@ -113,6 +115,17 @@ func clampFetchTopN(n int) int {
 		return maxFetchTopN
 	}
 	return n
+}
+
+// effectiveFetchTopN 解析生效的抓取条数（优先级：agent 显式传参 > 服务端配置）：
+//   - nil（agent 未传）：用 smartsearch.fetch_top_n —— 用户启用后默认一次搜索即含正文；
+//   - 0（agent 明确要轻量）：只保留标题摘要，正文之后按需补抓；
+//   - 1-5：并发抓取前 N 条正文（超过 5 钳制到 5）。
+func effectiveFetchTopN(param *int) int {
+	if param != nil {
+		return clampFetchTopN(*param)
+	}
+	return clampFetchTopN(smartSearchConf.FetchTopN)
 }
 
 func webSearchCacheQuery(query string, n int) string {
@@ -196,6 +209,10 @@ func finishWebSearch(ctx context.Context, req *mcp.CallToolRequest, query, inten
 
 type pageFetcher func(ctx context.Context, rawURL string) (string, error)
 
+// minContentLenForFetch 结果已有足量正文（如 Tavily raw_content / Exa text）时
+// 跳过二次抓取：fetch_top_n 只补 HTML 引擎摘要条目的正文。
+const minContentLenForFetch = 1000
+
 func enrichTopN(ctx context.Context, results []search.SearchResult, n int, fetch pageFetcher) []search.SearchResult {
 	if n <= 0 || fetch == nil || len(results) == 0 {
 		return results
@@ -218,8 +235,19 @@ func enrichTopN(ctx context.Context, results []search.SearchResult, n int, fetch
 			if ctx.Err() != nil {
 				return
 			}
+			// 已有足量正文（API raw_content/text）的条目跳过二次抓取
+			if len(strings.TrimSpace(out[i].Content)) >= minContentLenForFetch {
+				return
+			}
 			body, err := fetch(ctx, u)
-			if err != nil || strings.TrimSpace(body) == "" {
+			if err != nil {
+				log.Warnf("fetch_top_n 抓取失败: %s: %v", u, err)
+				out[i].Content = annotateFetchFailure(out[i].Content, err)
+				return
+			}
+			if strings.TrimSpace(body) == "" {
+				log.Warnf("fetch_top_n 抓取结果为空: %s", u)
+				out[i].Content = annotateFetchFailure(out[i].Content, errors.New("页面内容为空(可能被反爬)"))
 				return
 			}
 			out[i].Content = body
@@ -229,21 +257,91 @@ func enrichTopN(ctx context.Context, results []search.SearchResult, n int, fetch
 	return out
 }
 
+// annotateFetchFailure 抓取失败时把原因显式标注在结果上，防止 agent 把
+// snippet 当成正文；JS 挑战 / WAF / 验证码类防护单独点明。
+func annotateFetchFailure(snippet string, err error) string {
+	var sb strings.Builder
+	if s := strings.TrimSpace(snippet); s != "" {
+		sb.WriteString(s)
+		sb.WriteString("\n\n")
+	}
+	if isAntiBotFailure(err) {
+		sb.WriteString("> ⚠️ 正文抓取被网站反爬防护拦截（JS 挑战/WAF/验证码）：无法获取该页面全文，仅有以上摘要与 URL。请改用其它来源，或稍后用 cleanfetch 重试该页面。")
+	} else {
+		fmt.Fprintf(&sb, "> ⚠️ 正文抓取失败（%v）：仅有以上摘要与 URL。如需正文可用 cleanfetch 重试该页面。", err)
+	}
+	return sb.String()
+}
+
+// isAntiBotFailure 判断抓取错误是否为反爬防护类。
+// webfetch.Fetch 已把底层错误分类为中文描述（webfetch.go classifyError），这里按关键词识别。
+func isAntiBotFailure(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "反爬") || strings.Contains(msg, "WAF") ||
+		strings.Contains(msg, "挑战") || strings.Contains(msg, "验证码")
+}
+
+// fetchPageContent fetch_top_n 的单条抓取路径：SSRF 预检 + HEAD 体积预检 +
+// webfetch 抓取 + 字节上限截断，与 cleanfetch 的 fetchCleanPage 同一套防线（F4）。
+// webfetch 未就绪时惰性初始化，仍失败则报错（fail closed，F1）。
 func fetchPageContent(ctx context.Context, rawURL string) (string, error) {
 	if err := validateURLSecurity(rawURL); err != nil {
 		return "", err
 	}
-	if webfetchInst == nil {
-		return "", fmt.Errorf("webfetch 未初始化")
+	if err := headCheck(ctx, rawURL); err != nil {
+		return "", err
+	}
+	if !ensureWebFetch() {
+		return "", fmt.Errorf("webfetch 未初始化，fetch_top_n 需要 cleanfetch/pdf_parser 至少启用其一")
 	}
 	res, err := webfetchInst.Fetch(ctx, rawURL)
 	if err != nil {
 		return "", err
 	}
-	if res == nil || strings.TrimSpace(res.Markdown) == "" {
+	if res == nil {
 		return "", fmt.Errorf("empty content")
 	}
-	return res.Markdown, nil
+	// 大正文被 webfetch 落盘（超过 max_inline_lines）：Markdown 为空但抓取成功，
+	// 返回文件路径与读取提示，不能误判为抓取失败。
+	if res.Mode == "saved_to_file" && res.FilePath != "" {
+		return formatSavedToFileResult(res), nil
+	}
+	if strings.TrimSpace(res.Markdown) == "" {
+		return "", fmt.Errorf("empty content")
+	}
+	return truncateFetchContent(res.Markdown), nil
+}
+
+// formatSavedToFileResult 将 saved_to_file 模式结果格式化进搜索结果条目，
+// 格式与 cleanfetch 的大文本输出一致：标题 + 统计 + 文件路径 + 读取提示。
+func formatSavedToFileResult(res *webfetch.Result) string {
+	var sb strings.Builder
+	if res.Title != "" {
+		sb.WriteString(res.Title)
+		sb.WriteString("\n\n")
+	}
+	fmt.Fprintf(&sb, "正文较长（共 %d 行，%d 字符），已保存到文件\n\n", res.TotalLines, res.TotalChars)
+	fmt.Fprintf(&sb, "**文件路径**: `%s`", res.FilePath)
+	if res.AgentHint != "" {
+		fmt.Fprintf(&sb, "\n\n**读取提示**: %s", res.AgentHint)
+	}
+	sb.WriteString("\n")
+	return sb.String()
+}
+
+// truncateFetchContent 将超长正文截断到 cleanfetch.max_fetch_size_mb（默认 10MB），
+// 防止搜索引擎命中的大二进制页面把整次搜索结果撑爆。
+func truncateFetchContent(body string) string {
+	maxSizeMB := cleanFetchMaxSizeMB
+	if maxSizeMB <= 0 {
+		maxSizeMB = 10
+	}
+	limit := maxSizeMB * 1024 * 1024
+	if len(body) <= limit {
+		return body
+	}
+	log.Warnf("fetch_top_n 正文超过 %dMB，已截断", maxSizeMB)
+	return body[:limit] + "\n\n（正文超过大小上限，已截断）"
 }
 
 func enrichFetchedTopN(ctx context.Context, results []search.SearchResult, n int) []search.SearchResult {

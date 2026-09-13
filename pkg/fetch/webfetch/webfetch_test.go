@@ -240,6 +240,27 @@ func (e *stubEngine) ParsePDFFile(ctx context.Context, filePath string, opts ...
 }
 func (e *stubEngine) Close() error { return nil }
 
+// TestIdleForCleanup 验证空闲判定：进行中抓取或近期有活动时不可清理，
+// 零值 lastActivity（新启动无流量）视为空闲。
+func TestIdleForCleanup(t *testing.T) {
+	f := &Fetcher{}
+	if !f.idleForCleanup() {
+		t.Fatal("zero-value Fetcher (no activity) should be idle")
+	}
+	f.beginActivity()
+	if f.idleForCleanup() {
+		t.Fatal("in-flight fetch must block cleanup")
+	}
+	f.endActivity()
+	if f.idleForCleanup() {
+		t.Fatal("activity just ended, threshold not elapsed yet")
+	}
+	f.lastActivity.Store(time.Now().Add(-2 * fileCleanupIdleThreshold).UnixNano())
+	if !f.idleForCleanup() {
+		t.Fatal("idle beyond threshold should allow cleanup")
+	}
+}
+
 func TestFetch_MineruOnlyForPDFURL(t *testing.T) {
 	tests := []struct {
 		name            string
@@ -320,5 +341,67 @@ func TestFetchRuanyifengBlog(t *testing.T) {
 		t.Logf("Markdown length: %d chars", len(result.Markdown))
 	} else {
 		t.Logf("File: %s (%d lines, %d chars)", result.FilePath, result.TotalLines, result.TotalChars)
+	}
+}
+
+// TestCleanExpiredFiles_StrictFilter 验证清理只删除"本程序命名模式的过期 .md"：
+// 过期且匹配模式 → 删；同名但未过期 → 留；其它名字/扩展名的用户文件 → 留；
+// 同名目录 → 留。
+func TestCleanExpiredFiles_StrictFilter(t *testing.T) {
+	dir := t.TempDir()
+	f := &Fetcher{outputDir: dir, fileTTL: time.Hour}
+
+	old := time.Now().Add(-2 * time.Hour)
+	fresh := time.Now()
+	files := map[string]time.Time{
+		"20240101_000000_some-title_a1b2c3.md": old,     // 过期 + 匹配 → 删
+		"20260913_194110_rfc-editor_e3b0c4.md": fresh,   // 匹配但未过期 → 留
+		"20240101_000000_notes_a1b2c3.txt":     old,     // 扩展名不符 → 留
+		"notes.md":                             old,     // 用户自己的 md → 留
+		"20240101_000000_bad-hash_a1b2zz.md":   old,     // hash 段非 hex → 留
+		"random-20240101_000000_x_a1b2c3.md":   old,     // 前缀不符 → 留
+	}
+	for name, mt := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(filepath.Join(dir, name), mt, mt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// 同名目录 → 留
+	if err := os.Mkdir(filepath.Join(dir, "20240101_000000_dir_e3b0c4.md"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := f.CleanExpiredFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("expected exactly 1 file removed, got %d", n)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "20240101_000000_some-title_a1b2c3.md")); !os.IsNotExist(err) {
+		t.Fatal("expired matching file should be removed")
+	}
+	for name := range files {
+		if name == "20240101_000000_some-title_a1b2c3.md" {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Fatalf("file %s should be preserved, got %v", name, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "20240101_000000_dir_e3b0c4.md")); err != nil {
+		t.Fatal("directory with matching name must be preserved")
+	}
+}
+
+// TestCleanExpiredFiles_MissingDir 验证输出目录不存在时静默返回 0 而非报错。
+func TestCleanExpiredFiles_MissingDir(t *testing.T) {
+	f := &Fetcher{outputDir: filepath.Join(t.TempDir(), "not-created"), fileTTL: time.Hour}
+	n, err := f.CleanExpiredFiles()
+	if err != nil || n != 0 {
+		t.Fatalf("missing dir should be (0, nil), got (%d, %v)", n, err)
 	}
 }

@@ -13,11 +13,13 @@ const exaAPIEndpoint = "https://api.exa.ai/search"
 
 // ExaSearchImpl 实现 core.SearchInf 接口，通过 Exa Web Search API 搜索。
 type ExaSearchImpl struct {
-	name           string
-	keys           *KeyPool
-	numResults     int
-	lookbackDays   int // 搜索时间范围（天），默认 90
-	excludeDomains []string
+	name              string
+	keys              *KeyPool
+	numResults        int
+	lookbackDays      int // 搜索时间范围（天），默认 90
+	excludeDomains    []string
+	includeText       bool // true=请求 contents.text，让 API 返回页面正文
+	textMaxCharacters int  // 正文最大字符数（默认 3000）
 }
 
 type exaSearchReq struct {
@@ -31,7 +33,12 @@ type exaSearchReq struct {
 }
 
 type exaContents struct {
-	Highlights bool `json:"highlights"`
+	Highlights bool      `json:"highlights"`
+	Text       *exaText  `json:"text,omitempty"`
+}
+
+type exaText struct {
+	MaxCharacters int `json:"maxCharacters,omitempty"`
 }
 
 type exaResult struct {
@@ -39,39 +46,68 @@ type exaResult struct {
 	URL           string   `json:"url"`
 	PublishedDate string   `json:"publishedDate,omitempty"`
 	Highlights    []string `json:"highlights,omitempty"`
+	Text          string   `json:"text,omitempty"`
 }
 
 type exaSearchResp struct {
 	Results []exaResult `json:"results"`
 }
 
-// NewExaSearch 创建 Exa 搜索实例，默认搜索最近 90 天。
-func NewExaSearch(keys *KeyPool, excludeDomains []string) *ExaSearchImpl {
-	return &ExaSearchImpl{
-		name:           "exa",
-		keys:           keys,
-		numResults:     5,
-		lookbackDays:   90,
-		excludeDomains: excludeDomains,
+// ExaOption 可选参数。
+type ExaOption func(*ExaSearchImpl)
+
+// WithTextContents 请求 API 返回页面正文（contents.text），默认关闭（仅 highlights）。
+// maxCharacters <= 0 时取默认 3000。
+func WithTextContents(maxCharacters int) ExaOption {
+	if maxCharacters <= 0 {
+		maxCharacters = 3000
 	}
+	return func(e *ExaSearchImpl) {
+		e.includeText = true
+		e.textMaxCharacters = maxCharacters
+	}
+}
+
+// NewExaSearch 创建 Exa 搜索实例，默认搜索最近 90 天。
+func NewExaSearch(keys *KeyPool, excludeDomains []string, opts ...ExaOption) *ExaSearchImpl {
+	return newExaSearch(keys, 5, 90, excludeDomains, opts...)
 }
 
 // NewExaSearchWithResults 创建指定配置的 Exa 搜索实例。
 // lookbackDays 控制搜索时间范围（天），<=0 时使用默认 90 天。
-func NewExaSearchWithResults(keys *KeyPool, numResults, lookbackDays int, excludeDomains []string) *ExaSearchImpl {
+func NewExaSearchWithResults(keys *KeyPool, numResults, lookbackDays int, excludeDomains []string, opts ...ExaOption) *ExaSearchImpl {
+	return newExaSearch(keys, numResults, lookbackDays, excludeDomains, opts...)
+}
+
+func newExaSearch(keys *KeyPool, numResults, lookbackDays int, excludeDomains []string, opts ...ExaOption) *ExaSearchImpl {
 	if numResults <= 0 {
 		numResults = 5
 	}
 	if lookbackDays <= 0 {
 		lookbackDays = 90
 	}
-	return &ExaSearchImpl{
+	e := &ExaSearchImpl{
 		name:           "exa",
 		keys:           keys,
 		numResults:     numResults,
 		lookbackDays:   lookbackDays,
 		excludeDomains: excludeDomains,
 	}
+	for _, opt := range opts {
+		opt(e)
+	}
+	return e
+}
+
+// textContent 返回 contents.text 的请求体；未启用正文时返回 nil。
+func (e *ExaSearchImpl) textContent() *exaText {
+	if !e.includeText {
+		return nil
+	}
+	if e.textMaxCharacters <= 0 {
+		return &exaText{MaxCharacters: 3000}
+	}
+	return &exaText{MaxCharacters: e.textMaxCharacters}
 }
 
 func (e *ExaSearchImpl) Name() string { return e.name }
@@ -106,7 +142,7 @@ func (e *ExaSearchImpl) SearchRaw(query string) ([]core.SearchResult, error) {
 		EndPublishedDate:   now.Format(time.RFC3339),
 		ExcludeDomains:     e.excludeDomains,
 		Type:               "auto",
-		Contents:           exaContents{Highlights: true},
+		Contents:           exaContents{Highlights: true, Text: e.textContent()},
 	}
 
 	var resp exaSearchResp
@@ -129,7 +165,10 @@ func (e *ExaSearchImpl) SearchRaw(query string) ([]core.SearchResult, error) {
 
 	ret := make([]core.SearchResult, 0, len(resp.Results))
 	for _, r := range resp.Results {
-		content := strings.Join(r.Highlights, "\n")
+		content := strings.TrimSpace(r.Text)
+		if content == "" {
+			content = strings.Join(r.Highlights, "\n")
+		}
 		ret = append(ret, core.SearchResult{
 			Title:       r.Title,
 			Url:         strings.TrimSpace(r.URL),

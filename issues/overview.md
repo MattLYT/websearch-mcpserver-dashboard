@@ -103,4 +103,6 @@ P1  ──►  T18 复用 summarizer → T19 pages → T20 批量 URL
 | P0 | 不传新参数时与 v3.4.0 一致；`fetch_top_n=3` 时 Top-3 带正文且失败跳过；`path=https://.../x.pdf` 不拼 `file://`；query 为 DOI 时不打九路关键词；无邮箱则不打 Unpaywall |
 | P1 | LLM 开且 cleanfetch `intent` 非空时走同一 summarizer；`urls` 上限 5、单条失败不影响其它；`pages`/`max_pages` 截断可见 |
 
+P0/P1 任务卡已标完成，但默认部署上 `fetch_top_n` 仍可能静默等于 0，`pages` 解析可在 `max_pages` 前无界分配。复核见 [absorb-followup.md](absorb-followup.md)。
+
 各工具的现状、方案、测试见同目录分册。落地任务见 [`../tasks/README.md`](../tasks/README.md)。

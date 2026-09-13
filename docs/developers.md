@@ -27,7 +27,7 @@ mcp/ searxng/ ──► pkg/search（组合根）；pkg/cache  pkg/llm ──►
 | `cmd/` | 入口：配置加载、平台初始化（Windows 代理检测等） | `main` |
 | `server/` | HTTP 服务生命周期、路由、优雅关停 | `Run`、关机顺序引用 `mcp.GetWebFetch/GetCache` |
 | `searxng/` | SearXNG 兼容端点，复用同一套引擎组 | `mcp.GetSearchGroup()` |
-| `mcp/` | MCP 协议层：4 个工具的注册、schema、handler、缓存与摘要编排 | `server.go registerTools`、`tool.go`（参数/装配）、`tool_search.go`、`tool_academic.go`、`tool_cleanfetch.go`、`tool_pdf.go`、`tool_summarize.go`、`security.go`（SSRF/HEAD 预检）、`options.go` 按需装配 |
+| `mcp/` | MCP 协议层：4 个工具的注册、schema、handler、缓存与摘要编排 | `server.go registerTools`、`tool.go`（参数/装配）、`tool_search.go`、`tool_academic.go`、`tool_cleanfetch.go`、`tool_pdf.go`、`tool_summarize.go`、`security.go`（SSRF/HEAD 预检 + 重定向逐跳复查）、`options.go` 按需装配（webfetch 支持 fetch_top_n 惰性初始化） |
 
 ### pkg/search — 搜索编排（分 7 个子包）
 
@@ -96,7 +96,8 @@ mcp/server.go registerTools（按 LLM 开关注册 With/NoIntent 两套 schema�
         │          每个 provider/adapter ─► pkg/search/engine/* 或外部 API
         │                                  ─► pkg/antirobot（限流/TLS/UA）
         ├► postSearchFilter（单引擎模式的 score/maxsize 过滤，FilterByScore 来自 core）
-        ├► enrichFetchedTopN ─► pkg/fetch/webfetch（fetch_top_n 抓正文）
+        ├► enrichFetchedTopN ─► ensureWebFetch（未启用 cleanfetch/pdf_parser 时惰性初始化）
+        │                      └► pkg/fetch/webfetch（fetch_top_n 抓正文，SSRF+HEAD 预检+字节上限）
         └► finishWebSearch ─► pkg/llm Summarizer（流式 progress，失败回退原文）
                              ─► cacheInst.Store
 ```

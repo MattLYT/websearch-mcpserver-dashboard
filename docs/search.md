@@ -28,10 +28,10 @@
 | `engine` | 百度网页搜索 + Bing 并发（代理可用时自动加入 DuckDuckGo，启用时加入 Google） | **无需** |
 | `baidu` | 百度千帆搜索（`enable_ai_search` 控制端点），失败自动回退百度网页搜索；无 SK 时直接用百度网页搜索 | `BAIDU_SK`（可选） |
 | `apipool` | API Key 池轮转：每次只调一个供应商，失败自动切换；支持 `round-robin` / `priority` / `weighted` 策略；百度网页搜索兜底 | 各 Key 可选 |
-| `tavily` | Tavily Search API | `TAVILY_SK` |
-| `exa` | Exa Web Search API | `EXA_API_KEY` |
-| `anysearch` | AnySearch API（[anysearch.com](https://www.anysearch.com/docs)） | `ANYSEARCH_API_KEY` |
-| `doubao` | 豆包联网搜索 Global / Custom（[火山引擎文档](https://docs.volcengine.com/docs/87772/2272949)） | `DOUBAO_SEARCH_API_KEY` |
+| `tavily` | Tavily Search API（[获取 Key](https://app.tavily.com/home)） | `TAVILY_SK` |
+| `exa` | Exa Web Search API（[获取 Key](https://dashboard.exa.ai/api-keys)） | `EXA_API_KEY` |
+| `anysearch` | AnySearch API（[获取 Key](https://www.anysearch.com/console/api-keys)） | `ANYSEARCH_API_KEY` |
+| `doubao` | 豆包联网搜索 Global / Custom（[获取 Key](https://console.volcengine.com/search-infinity/api-key)） | `DOUBAO_SEARCH_API_KEY` |
 | `hybrid` | 全引擎混合（Anysearch + 百度智能搜索 + 百度网页搜索 + Tavily + Exa + 豆包(有 Key 时) + Bing + DuckDuckGo + Google） | 各 Key 可选 |
 
 > 所有模式主引擎失败均自动回退。无 Key 时自动降级为 `engine`。`baidu`/`tavily`/`exa`/`anysearch`/`doubao` 均支持 `sk_list` 多 Key 轮询（同供应商重复 Key 自动去重），`sk_list` 为空时自动用 `api_key` 作为单元素列表。
@@ -132,6 +132,8 @@ smartsearch:
 ```yaml
 smartsearch:
   max_size: 10           # 全局最大结果数（按 score 排序后截断），0 = 不限
+  fetch_top_n: 0         # 服务端默认抓取正文条数（agent 未传 fetch_top_n 时生效），默认 0 = 与旧版一致不抓取；
+                         # 设 1-5 = agent 未传参时也默认获取正文（API 引擎走原文传参快速路径，网页引擎内部抓取）
   show_meta: true        # 输出中显示引擎来源和相关性分数（默认 true）
   enhance: true          # 本地评分增强（RRF 融合 + 词汇对齐 + 域名品质 + 多层 Boost + 阀值过滤），默认 true
   relevance_threshold: 0.05  # 增强后相关性阀值，低于此值过滤（Top-1 保护），默认 0.05
@@ -211,7 +213,7 @@ apipool:
 | `query` | string | ✅ | 搜索关键词 |
 | `intent` | string | ❌ | 搜索意图（仅 LLM 启用时生效，未启用时自动移除该参数节省上下文） |
 | `time_range` | int | ❌ | 搜索时间范围（月），默认 3。`1`=近 1 个月，`6`=近半年，`12`=近一年，`0`=不限。豆包 Custom 会映射为 `OneDay`/`OneWeek`/`OneMonth`/`OneYear`；Global 无时间过滤接口，忽略 |
-| `fetch_top_n` | int | ❌ | 评分截断后对前 N 条并发抓取正文（默认 `0` 不抓，上限 5）。单条失败保留 snippet |
+| `fetch_top_n` | int | ❌ | 正文抓取模式：不传时与旧版一致，只返回引擎/供应商自带内容（服务端 `smartsearch.fetch_top_n` 可改默认，默认 `0` 不抓）；传 `0` 表示只要标题摘要和 URL；传 `1-5` 表示为前 N 条获取页面原文——支持原文传参的 API 引擎（Tavily/Exa/豆包）直接走快速路径，网页引擎内部抓取（无需 `cleanfetch.enabled`，webfetch 惰性初始化）；已有足量正文的条目自动跳过；抓取被反爬防护（JS 挑战/WAF）拦截时在该条结果上显式标注 |
 
 返回结果默认附带来源引擎和相关性分数（Tavily / 豆包 Custom 等支持 score 的引擎）。可通过 `smartsearch.show_meta: false` 关闭。
 
@@ -221,7 +223,7 @@ apipool:
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `query` | string | ✅ | 搜索关键词 |
+| `query` | string | ✅ | 搜索关键词；也可直接传入 DOI 或 arXiv id 走单篇精确查询（见下） |
 | `engines` | []string | ❌ | 引擎子集：`arxiv` `crossref` `openalex` `pubmed` `europepmc` `dblp` `doaj` `semantic_scholar` `google_scholar` |
 | `time_range` | string | ❌ | `year` / `month` / `week` / `day` |
 | `page` | int | ❌ | 页码，默认 1 |
@@ -234,6 +236,8 @@ apipool:
 | DOAJ | `bibjson.year:[起始年 TO 当前 UTC 年]`（禁止 `*`；`day`/`week`/`month` 退化成年粒度） |
 | arXiv | `submittedDate:[YYYYMMDDHHMM TO YYYYMMDDHHMM]`（UTC/GMT） |
 
+**单篇精确查询（DOI / arXiv id 短路）**：已持有 DOI 或 arXiv id 时直接将其作为 `query`，如 `10.1038/s41586-020-2649-2`、`doi:10.1038/s41586-020-2649-2`、`https://doi.org/10.1038/s41586-020-2649-2`，或 `2401.04085`、`arXiv:2401.04085`、`https://arxiv.org/abs/2401.04085`。此时走单篇精确查询并忽略 `engines` / `time_range` / `page`；拿到结果中的 `pdf_url` 后，可将该 URL 作为 `pdf_parser` 工具的 `path` 参数解析全文，不要再用标题做关键词搜索。
+
 结果按学术评分增强排序（默认开启）：RRF 融合排名 + 引用数 / 期刊权威 / PDF 全文 / 新鲜度信号，低分论文自动过滤（Top-1 + 每引擎保底）。配置项：`academic.enhance`（默认 true）、`academic.threshold`（默认 0.02）。
 
 ### `cleanfetch` — 网页内容抓取
@@ -243,7 +247,7 @@ apipool:
 | `url` | string | 与 `urls` 至少一者 | 网页 URL |
 | `urls` | string[] | 与 `url` 至少一者 | 批量抓取，与 `url` 合并去重后最多 5 个 |
 
-需配置 `cleanfetch.enabled: true`。基于 go-webfetch，无需代理；内置 DNS rebinding 防护和 HEAD 预检防大文件（`max_fetch_size_mb` 控制阈值，默认 10MB）；失败时自动回退 Jina Reader（需配置 `jina.api_key`，代理自动检测）。
+需配置 `cleanfetch.enabled: true`。基于 go-webfetch，无需代理；内置 DNS rebinding 防护和 HEAD 预检防大文件（`max_fetch_size_mb` 控制阈值，默认 10MB；重定向逐跳复跑私网/metadata 校验，最多 5 跳）；失败时自动回退 Jina Reader（需配置 `jina.api_key`，代理自动检测）。
 
 批量模式（`urls`）下每条 URL 独立预检与抓取，单条失败不影响其它，结果按 URL 分节返回；只传 `url` 时输出与旧版一致。
 
@@ -252,9 +256,9 @@ apipool:
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `path` | string | ✅ | 本地 PDF 文件路径或远程 http(s) URL（学术结果的 `pdf_url` 可直接传入） |
-| `pages` | string | ❌ | 页码范围（1-based），如 `1-10`、`1,3,5-7`；非法格式报参数错误，显式页数超过 `max_pages` 时报错并要求拆分 |
+| `pages` | string | ❌ | 页码范围（1-based），如 `1-10`、`1,3,5-7`；非法格式报参数错误，显式页数超过 `max_pages` 或单个区间宽度超过 1000 页时报错并要求拆分 |
 
-需配置 `pdf_parser.enabled: true`。大文档自动存储到临时文件。远程 URL 走与 `cleanfetch` 相同的 SSRF 预检，不会被拼成 `file://`。
+需配置 `pdf_parser.enabled: true`。大文档自动存储到临时文件。远程 URL 走与 `cleanfetch` 相同的 SSRF 预检和 HEAD 预检（含重定向逐跳复查），不会被拼成 `file://`。
 
 省略 `pages` 时只解析前 `pdf_parser.max_pages`（默认 20）页；发生截断会在输出前说明总页数并提示用 `pages` 继续读取。MinerU 路径（远程精准 API / 扫描件 OCR）暂不支持按页选择，会返回全文并注明。
 

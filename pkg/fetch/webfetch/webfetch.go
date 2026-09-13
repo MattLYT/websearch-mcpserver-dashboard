@@ -7,7 +7,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 	"websearch/pkg/config"
 	"websearch/pkg/log"
@@ -50,13 +52,32 @@ type Fetcher struct {
 	mineru          mineruParser
 	mineruOCR       bool // 本地 PDF 库读不到文本时是否回退 MinerU OCR
 	mineruRemotePDF bool // 远程 PDF URL 是否走 MinerU 精准 API（配置 pdf_parser.mineru_remote_pdf）
+
+	outputDir string        // 大文本落盘目录（清理范围仅限此目录）
+	fileTTL   time.Duration // 落盘文件保留时长
+
+	cleanupStop  chan struct{} // 关闭以停止过期文件清理协程
+	inflight     atomic.Int64  // 进行中的抓取数（空闲判定用）
+	lastActivity atomic.Int64  // 最近一次抓取活动的 UnixNano 时间戳
 }
+
+// 文件清理只在空闲期执行：距上次抓取活动超过 idleThreshold 且无进行中抓取。
+const (
+	fileCleanupIdleThreshold = 1 * time.Minute
+	fileCleanupCheckInterval = 1 * time.Minute
+)
+
+// savedFileRe 匹配本程序落盘的文件名（buildFilename：日期_时间_标题slug_6位hash.md，
+// slug 由上游 slugify 生成、不含下划线）。清理只删除匹配该模式的过期文件，
+// 用户放在输出目录里的其它文件（任意 .md/.txt 等）一律不动。
+var savedFileRe = regexp.MustCompile(`^\d{8}_\d{6}_.+_[0-9a-f]{6}\.md$`)
 
 // NewFromConfig 根据配置创建 Fetcher。proxyURL 为代理地址，空字符串表示不使用代理（仍回退到环境变量）。
 func NewFromConfig(cfg config.CleanFetchConfig, pdfCfg config.PDFParserConfig, proxyURL string) (*Fetcher, error) {
 	outputDir := cfg.FileOutputDir
 	if outputDir == "" {
-		outputDir = filepath.Join(os.TempDir(), "webfetch")
+		// 默认 exe 同目录的 fetchdata 子目录（配置未指定时）
+		outputDir = filepath.Join(config.ExeBaseDir(), "fetchdata")
 	}
 
 	fileTTL := time.Duration(cfg.FileTTL) * time.Hour
@@ -91,7 +112,14 @@ func NewFromConfig(cfg config.CleanFetchConfig, pdfCfg config.PDFParserConfig, p
 
 	log.Infof("WebFetch 引擎已启用 (output_dir=%s, ttl=%s, max_inline_lines=%d, timeout=%s)", outputDir, fileTTL, maxInlineLines, timeout)
 
-	f := &Fetcher{engine: engine, mineruOCR: pdfCfg.MinerUOCREnabled(), mineruRemotePDF: pdfCfg.MinerURemotePDF}
+	f := &Fetcher{
+		engine:          engine,
+		mineruOCR:       pdfCfg.MinerUOCREnabled(),
+		mineruRemotePDF: pdfCfg.MinerURemotePDF,
+		outputDir:       outputDir,
+		fileTTL:         fileTTL,
+	}
+	f.startFileJanitor(fileTTL)
 
 	// 初始化 MinerU 客户端（有 Token 或开启 OCR 回退时）
 	if pdfCfg.MinerUEnabled() {
@@ -116,6 +144,9 @@ func NewFromConfig(cfg config.CleanFetchConfig, pdfCfg config.PDFParserConfig, p
 
 // Fetch 抓取网页或解析 PDF（自动检测 file:// 路径）。
 func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (*Result, error) {
+	f.beginActivity()
+	defer f.endActivity()
+
 	// 本地 PDF 文件：先本地 PDF 库抽文本，读不到再按需走 MinerU OCR
 	if strings.HasPrefix(rawURL, "file://") {
 		return f.parseLocalPDF(ctx, localPathFromFileURL(rawURL))
@@ -175,6 +206,9 @@ func localPathFromFileURL(rawURL string) string {
 // MinerU 路径（远程精准 API / 本地 OCR 回退）无页范围 API，返回全文并加说明。
 // 无页约束时与 Fetch 的 PDF 分支行为一致。
 func (f *Fetcher) FetchPDFWithPages(ctx context.Context, rawURL string, pages []int, maxPages int) (*Result, error) {
+	f.beginActivity()
+	defer f.endActivity()
+
 	if strings.HasPrefix(rawURL, "file://") {
 		return f.parseLocalPDFWithPages(ctx, localPathFromFileURL(rawURL), pages, maxPages)
 	}
@@ -342,9 +376,89 @@ func cleanAgentHint(hint string) string {
 	return hint
 }
 
-// Close 关闭引擎。
+// Close 停止过期文件清理协程并关闭引擎。
 func (f *Fetcher) Close() error {
+	if f.cleanupStop != nil {
+		close(f.cleanupStop)
+		f.cleanupStop = nil
+	}
 	return f.engine.Close()
+}
+
+// beginActivity / endActivity 记录抓取活动，供清理协程判定空闲。
+func (f *Fetcher) beginActivity() {
+	f.inflight.Add(1)
+	f.lastActivity.Store(time.Now().UnixNano())
+}
+
+func (f *Fetcher) endActivity() {
+	f.inflight.Add(-1)
+	f.lastActivity.Store(time.Now().UnixNano())
+}
+
+// idleForCleanup 判定当前是否处于可清理的空闲态：无进行中抓取，
+// 且距上次抓取活动超过 fileCleanupIdleThreshold（lastActivity 零值视为长期空闲）。
+func (f *Fetcher) idleForCleanup() bool {
+	return f.inflight.Load() == 0 &&
+		time.Since(time.Unix(0, f.lastActivity.Load())) >= fileCleanupIdleThreshold
+}
+
+// startFileJanitor 启动空闲期过期文件清理协程。上游引擎从不自行清理，
+// TTL 若无人驱动就形同虚设：本协程按固定节奏检查，仅在空闲态
+// （idleForCleanup）时执行清理，避免与正常抓取抢磁盘 I/O。
+func (f *Fetcher) startFileJanitor(ttl time.Duration) {
+	f.cleanupStop = make(chan struct{})
+	stop := f.cleanupStop
+	go func() {
+		ticker := time.NewTicker(fileCleanupCheckInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+				if !f.idleForCleanup() {
+					continue
+				}
+				n, err := f.CleanExpiredFiles()
+				if err != nil {
+					log.Warnf("webfetch 过期文件清理失败: %v", err)
+				} else if n > 0 {
+					log.Infof("webfetch 空闲期清理完成: 删除 %d 个过期文件 (ttl=%s)", n, ttl)
+				}
+			}
+		}
+	}()
+}
+
+// CleanExpiredFiles 立即清理输出目录中超过 TTL 的落盘文件，返回清理数量。
+// 只删除文件名匹配本程序保存模式（savedFileRe）的 .md 文件；
+// 目录、子目录、其它名字或扩展名的文件一律不动，防止误伤。
+func (f *Fetcher) CleanExpiredFiles() (int, error) {
+	entries, err := os.ReadDir(f.outputDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	deadline := time.Now().Add(-f.fileTTL)
+	count := 0
+	for _, entry := range entries {
+		if entry.IsDir() || !savedFileRe.MatchString(entry.Name()) {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil || info.ModTime().After(deadline) {
+			continue
+		}
+		if rmErr := os.Remove(filepath.Join(f.outputDir, entry.Name())); rmErr == nil {
+			count++
+		} else {
+			log.Warnf("webfetch 过期文件删除失败: %s: %v", entry.Name(), rmErr)
+		}
+	}
+	return count, nil
 }
 
 // classifyError 将 go-webfetch 的错误分类为用户友好的错误信息。

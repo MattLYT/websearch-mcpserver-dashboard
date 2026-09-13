@@ -6,6 +6,8 @@
 
 现状对静态页够用：TLS 指纹、SSRF 双层、大文件 HEAD、Jina 备选。缺口是 **SPA 空壳、一次只能一个 URL、整页灌进上下文、输出未标明不可信**。Firecrawl scrape/map/batch、Exa Highlights、Rover nonce 包裹是对标点。
 
+`headCheck` 跟随 302 不复查私网/metadata，T15 远程 PDF 把这条暴露得更大，见 [absorb-followup.md](absorb-followup.md) F3。
+
 P0 的不可信包裹先做（所有工具共用）。摘录 / 批量 / JS / map 放后面，避免和 `smartsearch.fetch_top_n` 抢同一 PR。
 
 ---

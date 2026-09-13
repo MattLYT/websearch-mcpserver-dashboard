@@ -167,5 +167,6 @@ func buildAcademicToolDescription() string {
 		sb.WriteString(fmt.Sprintf("  - %s: %s\n", name, desc))
 	}
 	sb.WriteString("\n引擎选择建议：医学/生物 → pubmed, europepmc | CS/AI → arxiv, semantic_scholar, dblp | 全学科 → crossref, openalex, google_scholar | 开放获取 → doaj")
+	sb.WriteString("\n\n已持有 DOI 或 arXiv id 时，直接将其作为 query（如 '10.1038/s41586-020-2649-2'、'doi:10.1038/s41586-020-2649-2'、'https://doi.org/10.1038/s41586-020-2649-2' 或 '2401.04085'、'arXiv:2401.04085'、'https://arxiv.org/abs/2401.04085'），将走单篇精确查询（忽略 engines/time_range/page）；拿到结果中的 pdf_url 后，可将该 URL 作为 pdf_parser 工具的 path 参数解析全文。")
 	return sb.String()
 }

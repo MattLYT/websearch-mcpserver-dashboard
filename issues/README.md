@@ -12,7 +12,8 @@
 | [academicsearch.md](academicsearch.md) | OA PDF、DOI 详情、引用一跳、年份/OA 过滤 |
 | [cleanfetch.md](cleanfetch.md) | 复用 LLM 摘要（非 Jaccard）、批量 URL、不可信包裹、可选 JS 回退、轻量 map |
 | [pdf-parser.md](pdf-parser.md) | 远程 URL、页范围、结构保留、Docling 仅作可选 CPU 备选 |
+| [absorb-followup.md](absorb-followup.md) | T15–T20 落地后评审：`fetch_top_n` 静默 no-op、`pages` 无界分配、redirect SSRF、文档缺口 |
 
 建议落地顺序见 [overview.md §分期](overview.md#分期)。一次会话只做一波，不要把 P0–P2 塞进同一个 PR。
 
-已拆任务见 [`tasks/README.md`](../tasks/README.md)（T15–T20）。仍未拆：工具层域名/news/lang、Tavily depth、引用图、年份闭区间、不可信包裹、JS/map、Docling、Brave。
+已拆任务见 [`tasks/README.md`](../tasks/README.md)（T15–T20）。落地后缺口见 [absorb-followup.md](absorb-followup.md)（F1–F7，尚未拆任务卡）。仍未拆：工具层域名/news/lang、Tavily depth、引用图、年份闭区间、不可信包裹、JS/map、Docling、Brave。

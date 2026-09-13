@@ -103,6 +103,7 @@ tavily:
   sk_list: []               # 多 Key 轮询列表（优先级高于 api_key）
 
 # Exa（mode=exa/apipool/hybrid 时需要）
+# 获取地址: https://dashboard.exa.ai/api-keys
 exa:
   api_key: ""               # 环境变量: EXA_API_KEY（sk_list 为空时自动作为单元素列表）
   sk_list: []               # 多 Key 轮询列表（优先级高于 api_key）
@@ -110,6 +111,7 @@ exa:
   lookback_days: 90         # 搜索时间范围（天），默认 90
 
 # AnySearch（mode=anysearch/apipool/hybrid 时需要）
+# 获取地址: https://www.anysearch.com/console/api-keys
 anysearch:
   api_key: ""               # 环境变量: ANYSEARCH_API_KEY（sk_list 为空时自动作为单元素列表）
   sk_list: []               # 多 Key 轮询列表（优先级高于 api_key；重复 Key 自动去重）
@@ -117,6 +119,7 @@ anysearch:
 
 # 豆包联网搜索 Global / Custom（mode=doubao/hybrid；apipool 需显式加入 engines）
 # 开通: https://console.volcengine.com/search-infinity/web-search
+# API Key 获取: https://console.volcengine.com/search-infinity/api-key
 # 免费档每月默认 500 积分；apipool.weights.doubao 默认 500
 doubao:
   api_key: ""               # 环境变量: DOUBAO_SEARCH_API_KEY（兼容 ASK_ECHO_SEARCH_INFINITY_API_KEY）
@@ -154,6 +157,8 @@ academic:
   threshold: 0.02           # 学术结果阀值（比通用搜索更宽松），默认 0.02
   # Semantic Scholar 可选 API key（匿名限流严格，带 key 连续 429 自动降级匿名）
   # semantic_scholar_api_key: ""   # 环境变量: SEMANTIC_SCHOLAR_API_KEY
+  # Unpaywall 邮箱：结果有 DOI 且无 PDF 时补 OA 全文链接；留空则跳过、不报错
+  # unpaywall_email: "you@example.com"   # 环境变量: UNPAYWALL_EMAIL
   disable_arxiv: false
   disable_crossref: false
   disable_openalex: false
@@ -175,10 +180,10 @@ llm:
   api_key: ""                               # 环境变量: LLM_API_KEY
   model_id: "gpt-4o-mini"
 
-# 缓存
+# 缓存（默认关闭）
 cache:
-  # enabled: true            # 不设置时按 storage_path 判断；显式 false 强制禁用
-  storage_path: "./data/search_cache.db"
+  # enabled: true            # 不设置时默认关闭（v3.4.1 起）；显式 true 启用
+  # storage_path: ""         # 未配置时默认 exe 同目录 cache/websearch-cache.db
   cleanup_interval: 30      # 清理间隔（分钟），最大 360
 
 # Jina Reader（可选，cleanfetch 失败时回退）
@@ -188,13 +193,13 @@ jina:
 
 # 增强型网页抓取（默认关闭）
 cleanfetch:
-  enabled: false            # 显式 true 才启用
-  file_output_dir: ""       # 默认 系统临时目录/webfetch/
+  enabled: false            # 显式 true 才启用 cleanfetch 工具；smartsearch 的 fetch_top_n 不受此开关约束，会按当前配置惰性初始化 webfetch
+  file_output_dir: ""       # 默认 exe 同目录 fetchdata/
   file_ttl_hours: 24        # 临时文件保留时长（小时）
   max_inline_lines: 100     # 超过此行数存文件
   max_inline_chars: 0       # 超过此字符数存文件，0=不限
   timeout_sec: 30           # 单次请求超时（秒），默认 30
-  max_fetch_size_mb: 10     # HEAD 预检最大文件大小（MB），超过拒绝抓取（默认 10）
+  max_fetch_size_mb: 10     # HEAD 预检最大文件大小（MB），超过拒绝抓取（默认 10）；也是 fetch_top_n 单条正文字节上限
   use_system_proxy: false   # 自动使用系统代理（环境变量+注册表），默认 false
   max_retries: 3            # 最大重试次数（仅 429/502/503），默认 3
 
@@ -292,9 +297,9 @@ log:
 |----------|---------|------|
 | `WEBSEARCH_CONFIG` | 配置文件路径 | 最高优先级 |
 | `BAIDU_SK` | `baidu.api_key` | |
-| `TAVILY_SK` | `tavily.api_key` | |
-| `EXA_API_KEY` | `exa.api_key` | Exa Web Search API Key |
-| `ANYSEARCH_API_KEY` | `anysearch.api_key` | AnySearch API Key（[anysearch.com](https://www.anysearch.com/docs)） |
+| `TAVILY_SK` | `tavily.api_key` | Tavily API Key（[获取地址](https://app.tavily.com/home)） |
+| `EXA_API_KEY` | `exa.api_key` | Exa Web Search API Key（[获取地址](https://dashboard.exa.ai/api-keys)） |
+| `ANYSEARCH_API_KEY` | `anysearch.api_key` | AnySearch API Key（[获取地址](https://www.anysearch.com/console/api-keys)） |
 | `DOUBAO_SEARCH_API_KEY` | `doubao.api_key` | 豆包联网搜索 API Key（[控制台](https://console.volcengine.com/search-infinity/api-key)） |
 | `ASK_ECHO_SEARCH_INFINITY_API_KEY` | `doubao.api_key` | 火山官方 MCP 兼容变量名 |
 | `LLM_BASE_URL` | `llm.base_url` | |
@@ -322,6 +327,10 @@ log:
 | `doubao.version` | global | Global / Custom；两版并发走 hybrid，适配器内不提供 both |
 | `doubao.num_results` | 10 | Global 最大 20；Custom 最大 50 |
 | `doubao.time_range` | "" | Custom 默认时间范围；MCP 请求级 `time_range` 优先（映射 OneDay/OneWeek/OneMonth/OneYear） |
+| `doubao.need_content` | true | Custom 请求网页正文（API 快速路径）；显式 false 退回摘要 |
+| `tavily.include_raw_content` | true | Tavily 请求返回页面原文（raw_content，快速路径）；显式 false 退回摘要片段 |
+| `exa.include_text` | true | Exa 请求返回页面正文（contents.text） |
+| `exa.text_max_characters` | 3000 | Exa 正文最大字符数 |
 | `baidu.enable_ai_search` | true | true=智能搜索 chat/completions，false=网页搜索 web_search；不传 model 不产生 LLM 费用 |
 | `bing.enabled` | true | |
 | `duckduckgo.enabled` | true | 需代理，代理可用时自动参与 |
@@ -333,30 +342,32 @@ log:
 | `academic.disable_semantic_scholar` | true | 默认禁用，开启后自动走代理 |
 | `academic.disable_google_scholar` | true | 默认禁用，开启后自动走代理 |
 | `academic.semantic_scholar_api_key` | "" | 可选 API key，带 key 连续 429 自动降级匿名（环境变量 `SEMANTIC_SCHOLAR_API_KEY`） |
+| `academic.unpaywall_email` | "" | Unpaywall OA 补链邮箱（结果有 DOI 且无 PDF 时补全）；空=跳过且不报错（环境变量 `UNPAYWALL_EMAIL`） |
 | `academic.disable_europepmc` | false | Europe PMC 生物医学增补源，国内可直连 |
 | `academic.disable_dblp` | false | DBLP CS 会议/期刊索引，国内可直连 |
 | `academic.disable_doaj` | false | DOAJ 开放获取期刊，国内可直连 |
 | `proxy.enabled` | 未设置 | 未设置时自动检测系统代理；显式 false 禁用；显式 true 使用 endpoint |
 | `proxy.endpoint` | `http://127.0.0.1:7897` | 仅 `enabled: true` 时生效 |
-| `cleanfetch.enabled` | false | 旧配置不启用，需显式开启 |
+| `cleanfetch.enabled` | false | 旧配置不启用，需显式开启；仅约束 cleanfetch 工具，`fetch_top_n` 不受限（惰性初始化 webfetch） |
 | `cleanfetch.file_ttl_hours` | 24 | |
 | `cleanfetch.max_inline_lines` | 100 | |
 | `cleanfetch.timeout_sec` | 30 | |
-| `cleanfetch.max_fetch_size_mb` | 10 | HEAD 预检阈值 |
+| `cleanfetch.max_fetch_size_mb` | 10 | HEAD 预检阈值；也是 `fetch_top_n` 单条正文字节上限 |
 | `cleanfetch.use_system_proxy` | false | 自动使用系统代理（环境变量+注册表） |
 | `cleanfetch.max_retries` | 3 | 仅对 429/502/503 重试 |
 | `pdf_parser.enabled` | false | 独立于 cleanfetch |
-| `pdf_parser.max_pages` | 20 | 省略 pages 时一次最多解析的页数 |
+| `pdf_parser.max_pages` | 20 | 省略 pages 时一次最多解析的页数；单个 pages 区间宽度上限 1000 页 |
 | `pdf_parser.mineru_model` | pipeline | pipeline / vlm |
 | `pdf_parser.mineru_formula` | true | 公式识别 |
 | `pdf_parser.mineru_table` | true | 表格识别 |
 | `pdf_parser.mineru_lang` | ch | 文档语言 |
 | `smartsearch.show_meta` | true | 输出中显示引擎来源和相关性分数 |
+| `smartsearch.fetch_top_n` | 0 | 服务端默认抓取正文条数（agent 未传 `fetch_top_n` 参数时生效）；默认 0 = 与旧版一致不抓取，1-5 = 一次搜索即含正文（API 引擎走原文传参快速路径，网页引擎内部抓取） |
 | `smartsearch.enhance` | true | 本地评分增强 |
 | `smartsearch.relevance_threshold` | 0.05 | 增强后相关性阀值 |
 | `smartsearch.mmr.enabled` | true | MMR 多样性重排 |
 | `smartsearch.mmr.lambda` | 0.7 | 相关性-多样性权衡系数 |
-| `cache.enabled` | nil | 不设置时按 storage_path 判断；显式 false 强制禁用；显式 true 强制启用 |
+| `cache.enabled` | false | 不设置时默认关闭（v3.4.1 起）；显式 true 启用（storage_path 默认 exe 同目录 cache/websearch-cache.db） |
 | `cache.cleanup_interval` | 30 (min) | 最大 360 |
 | 缓存过期 | 6 小时 | 基于最近命中时间，硬编码不可配置 |
 | `log.max_size` | 1 (MB) | |

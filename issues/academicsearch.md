@@ -66,7 +66,7 @@ arxiv_id  string  同上，打 arXiv id 查询
 - 再走 P1-A 补 PDF。
 - 缓存 key 用 `doi|...` / `arxiv|...`，不要和关键词搜索混。
 
-工具描述写清：「已有 DOI 时用 doi，不要再用标题搜索。」
+工具描述写清：「已有 DOI 时用 doi，不要再用标题搜索。」落地后改为 query 识别、不加独立字段，但描述与 `docs/search.md` 仍未写清，见 [absorb-followup.md](absorb-followup.md) F5；Unpaywall 配置文档见 F6。
 
 ### 不做
 

@@ -46,6 +46,10 @@ fetch_top_n  int  默认 0（保持现行为）。评分/截断之后，对前 N
 - mock webfetch：N=2 时只有前 2 条 `Content` 被替换；第 2 条失败时第 1 条仍有正文、第 2 条保留 snippet。
 - 安全：内网 URL 不得因抽取被打到。
 
+### 落地缺口
+
+见 [absorb-followup.md](absorb-followup.md) F1（webfetch 跟工具开关绑死，默认部署 `fetch_top_n>0` 静默 no-op）和 F4（未走 cleanfetch 的 HEAD 体积预检）。
+
 ---
 
 ## P0-2 工具层收窄参数

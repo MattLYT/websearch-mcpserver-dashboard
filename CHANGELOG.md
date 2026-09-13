@@ -2,6 +2,27 @@
 
 [English](CHANGELOG.en.md) | [中文](CHANGELOG.md)
 
+## Unreleased
+
+### 新增
+- **`fetch_top_n` 三分语义 + 双路径取正文**：不传 = 与旧版完全一致（只返回引擎/供应商自带内容，服务端 `smartsearch.fetch_top_n` 可改默认，默认 0）；传 0 = 只要标题摘要和 URL；传 1-5 = 为前 N 条获取页面原文——**支持原文传参的 API 引擎走快速路径**（Tavily `include_raw_content`、Exa `contents.text`（`exa.text_max_characters` 默认 3000）、豆包 Custom `need_content`，均默认开启、可显式关闭），**其余引擎内部抓取页面**（webfetch 惰性初始化，无需 cleanfetch 开启）；已有足量正文（≥1000 字符）的条目自动跳过内嵌抓取
+- **抓取失败显式告知**：内嵌抓取被反爬防护（JS 挑战/WAF/验证码）拦截或失败时，在该条结果上标注原因与建议（换来源 / cleanfetch 重试），不再静默吞掉
+- 工具参数 `fetch_top_n` 改为可区分「未传」与「显式传 0」，schema 写明语义；两个 smartsearch 参数定义改用匿名嵌入结构体共用字段，schema 单处维护
+
+- **`fetch_top_n` 大正文落盘不再误判失败**：正文超过 `max_inline_lines` 时 webfetch 落盘返回 `saved_to_file`（`Markdown` 为空），此前被当成"抓取结果为空"标注失败；现在把文件路径与读取提示写回该条结果（与 cleanfetch 大文本输出格式一致）
+- **cleanfetch 落盘文件 TTL 从未生效**：上游 `CleanFiles()` 从未被调用，输出目录无限堆积临时文件；新增空闲期清理协程（无进行中抓取且距上次活动 ≥1 分钟时执行，1 分钟检查一次，随引擎关闭停止）；只删除文件名匹配本程序保存模式（日期_时间_slug_6位hash.md）且超过 TTL 的文件，目录里的其它用户文件一律不动
+### 修复
+- **`smartsearch` 的 `fetch_top_n` 默认部署上真正生效**：webfetch 不再要求 `cleanfetch.enabled` / `pdf_parser.enabled` 显式开启，`fetch_top_n>0` 时按当前配置惰性初始化；抓取路径与 cleanfetch 对齐（SSRF 预检 + HEAD 体积预检），并新增单条正文字节上限（`cleanfetch.max_fetch_size_mb`，默认 10MB）；单条失败打 warning 日志并保留 snippet，不再静默吞掉
+- **`pdf_parser` 的 `pages` 区间先限宽再分配**：单个区间宽度超过 1000 页（如 `pages="1-2147483647"`）立即报参数错误，不再先展开切片导致内存暴涨
+- **HEAD 预检重定向逐跳安全复查**：HEAD 跟随重定向（最多 5 跳）时对每一跳目标复跑私网/云 metadata 校验；公网 URL 302 到 `169.254.169.254` 等内网地址会被拒绝，不再被当成未鉴权探针
+
+- **缓存默认关闭（v3.4.1 起）**：`cache.enabled` 不设置时不再按 `storage_path` 判断；显式 `enabled: true` 启用，`storage_path` 未配置时默认 exe 同目录 `cache/websearch-cache.db`
+- **cleanfetch 落盘目录默认 exe 同目录 `fetchdata/`**：不再用系统临时目录 `webfetch/`
+- **配置示例 / 配置说明 / 模式表补齐 API Key 获取地址**：Tavily / Exa / AnySearch / 豆包（`config.example.yaml`、`docs/configuration`、`docs/search`、README，中英双语）
+### 变更
+- **`pdf_parser` 省略 `pages` 的行为自 v3.4.0 起为「前 `max_pages`（默认 20）页 + 截断提示」**，不再解析全文；文档已对齐，长文档请显式传 `pages`
+- **`academicsearch` 工具描述与 `docs/search` 补充 DOI / arXiv id 短路查询用法**（query 直接传 id 时忽略 `engines`/`time_range`/`page`，`pdf_url` 可交给 `pdf_parser`）；配置文档补充 `academic.unpaywall_email`（环境变量 `UNPAYWALL_EMAIL`，空=跳过 Unpaywall OA 补链且不报错）
+
 ## v3.4.0 — 2026-09-11
 
 ### 新增

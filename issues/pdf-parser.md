@@ -56,7 +56,8 @@ url   string  http(s) PDF；与 path 互斥，必须有一者
 ### 方案
 
 ```text
-pages  string  可选。例：`1-10`、`1,3,5-7`。省略 = 全部（现行为）。
+pages  string  可选。例：`1-10`、`1,3,5-7`。省略 = 前 max_pages（默认 20）页
+               并提示截断（落地行为，v3.4.0 起生效；本句已按 F7 更正）。
                上限可配，默认最多 20 页/次（MinerU Agent 本就有 20 页档）。
 ```
 
@@ -68,7 +69,11 @@ pages  string  可选。例：`1-10`、`1,3,5-7`。省略 = 全部（现行为�
 
 - `pages=1-2` 的输出明显短于全文（用仓库里现有测试 PDF 或最小夹具）。
 - 非法 `pages=abc` → 参数错误。
-- 省略 `pages` = 旧行为。
+- 省略 `pages` = 前 20 页（max_pages 默认值），见下方落地缺口 F7。
+
+### 落地缺口
+
+见 [absorb-followup.md](absorb-followup.md) F2（`parsePagesSpec` 先展开 `"1-N"` 再比 `max_pages`，可 OOM）和 F7（省略 `pages` 实际是前 20 页，不是「全部」；上表方案句已过时）。远程 URL 的 HEAD 重定向缺口见 F3。
 
 ---
 

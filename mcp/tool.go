@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"fmt"
+	"sync"
 	"websearch/pkg/cache"
 	"websearch/pkg/config"
 	"websearch/pkg/fetch/jina"
@@ -10,18 +11,22 @@ import (
 	"websearch/pkg/search"
 )
 
+// searchBaseParams smartsearch 两个工具定义（LLM 摘要开/关）共用的参数集合，
+// 通过匿名嵌入组合：字段与 jsonschema 描述只在一处维护，SDK 会提升嵌入字段。
+type searchBaseParams struct {
+	Query     string `json:"query" jsonschema:"description,搜索关键词：需精准凝练地表达核心检索意图（建议 2-6 个关键词或一个短句），只保留最能定位目标的词；不要把同义词、过程词、修饰词一股脑堆砌成关键词列表，否则会稀释相关性。例如用 'Go 泛型 性能' 而非 'Go 泛型 类型参数 编译 运行时 性能 基准 对比 优化 使用方法'"`
+	TimeRange int    `json:"time_range,omitempty" jsonschema:"description,搜索时间范围（月），限制搜索最近N个月的内容。例如 1=近1个月，3=近3个月，6=近半年，12=近一年。默认3，0表示不限"`
+	FetchTopN *int   `json:"fetch_top_n,omitempty" jsonschema:"description,正文抓取模式：不传时与旧版一致，只返回引擎/供应商自带的内容（服务端 smartsearch.fetch_top_n 可改默认，默认 0 不抓）；传 0 表示只要标题摘要和 URL；传 1-5 表示为前 N 条获取页面原文——支持原文传参的 API 引擎直接走快速路径，其余引擎内部抓取页面。抓取被反爬防护（JS 挑战/WAF）拦截时会在该条结果上标注"`
+}
+
 type SearchParamsWithIntent struct {
-	Query      string `json:"query" jsonschema:"description,搜索关键词：需精准凝练地表达核心检索意图（建议 2-6 个关键词或一个短句），只保留最能定位目标的词；不要把同义词、过程词、修饰词一股脑堆砌成关键词列表，否则会稀释相关性。例如用 'Go 泛型 性能' 而非 'Go 泛型 类型参数 编译 运行时 性能 基准 对比 优化 使用方法'"`
-	Intent     string `json:"intent" jsonschema:"description,搜索意图，描述你希望通过搜索解决什么问题或获取什么信息。例如 '了解goroutine调度原理' '对比React和Vue的生态差异' '查找某API的用法示例'。提供意图后可获得更精准的结构化摘要"`
-	TimeRange  int    `json:"time_range,omitempty" jsonschema:"description,搜索时间范围（月），限制搜索最近N个月的内容。例如 1=近1个月，3=近3个月，6=近半年，12=近一年。默认3，0表示不限"`
-	FetchTopN  int    `json:"fetch_top_n,omitempty" jsonschema:"description,搜索并评分后对前 N 条并发抓取正文（默认 0 不抓，上限 5）。单条失败保留原 snippet，不导致整次搜索失败"`
+	searchBaseParams
+	Intent string `json:"intent" jsonschema:"description,搜索意图，描述你希望通过搜索解决什么问题或获取什么信息。例如 '了解goroutine调度原理' '对比React和Vue的生态差异' '查找某API的用法示例'。提供意图后可获得更精准的结构化摘要"`
 }
 
 // SearchParamsNoIntent LLM 摘要未启用时使用的参数（无 intent，节省上下文 token）。
 type SearchParamsNoIntent struct {
-	Query     string `json:"query" jsonschema:"description,搜索关键词：需精准凝练地表达核心检索意图（建议 2-6 个关键词或一个短句），只保留最能定位目标的词；不要把同义词、过程词、修饰词一股脑堆砌成关键词列表，否则会稀释相关性。例如用 'Go 泛型 性能' 而非 'Go 泛型 类型参数 编译 运行时 性能 基准 对比 优化 使用方法'"`
-	TimeRange int    `json:"time_range,omitempty" jsonschema:"description,搜索时间范围（月），限制搜索最近N个月的内容。例如 1=近1个月，3=近3个月，6=近半年，12=近一年。默认3，0表示不限"`
-	FetchTopN int    `json:"fetch_top_n,omitempty" jsonschema:"description,搜索并评分后对前 N 条并发抓取正文（默认 0 不抓，上限 5）。单条失败保留原 snippet，不导致整次搜索失败"`
+	searchBaseParams
 }
 
 // AcademicSearchParams 学术搜索参数。
@@ -53,6 +58,11 @@ var (
 	smartSearchConf     config.SmartSearchConfig
 	cleanFetchMaxSizeMB int
 	pdfMaxPages         int
+
+	// webfetchLazyCfg 保存 Init 时的配置，供 fetch_top_n 在
+	// cleanfetch/pdf_parser 均未启用时惰性初始化 webfetch（F1）。
+	webfetchLazyCfg *config.Config
+	webfetchMu      sync.Mutex
 )
 
 // Init 初始化 MCP 服务组件，通过 Option 模式按需加载。

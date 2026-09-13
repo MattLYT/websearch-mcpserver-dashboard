@@ -31,7 +31,7 @@ all packages ──► pkg/config  pkg/log  pkg/client  pkg/proxy  pkg/antirobot
 | `cmd/` | Entry point: config loading, platform init (Windows proxy detection etc.) | `main` |
 | `server/` | HTTP lifecycle, routing, graceful shutdown | `Run`; shutdown order references `mcp.GetWebFetch/GetCache` |
 | `searxng/` | SearXNG-compatible endpoint, reuses the same engine group | `mcp.GetSearchGroup()` |
-| `mcp/` | MCP protocol layer: registration & schemas & handlers of the 4 tools, cache & summary orchestration | `server.go registerTools`, `tool.go` (params/wiring), `tool_search.go`, `tool_academic.go`, `tool_cleanfetch.go`, `tool_pdf.go`, `tool_summarize.go`, `security.go` (SSRF/HEAD pre-checks), `options.go` |
+| `mcp/` | MCP protocol layer: registration & schemas & handlers of the 4 tools, cache & summary orchestration | `server.go registerTools`, `tool.go` (params/wiring), `tool_search.go`, `tool_academic.go`, `tool_cleanfetch.go`, `tool_pdf.go`, `tool_summarize.go`, `security.go` (SSRF/HEAD pre-checks + per-hop redirect re-checks), `options.go` (webfetch lazily initializes for fetch_top_n) |
 
 ### pkg/search — search orchestration (7 subpackages)
 
@@ -100,7 +100,8 @@ mcp/server.go registerTools (registers With/NoIntent schema pair depending on LL
         │          each provider/adapter ─► pkg/search/engine/* or external APIs
         │                                  ─► pkg/antirobot (rate limit/TLS/UA)
         ├► postSearchFilter (single-engine score/maxsize filtering, FilterByScore from core)
-        ├► enrichFetchedTopN ─► pkg/fetch/webfetch (fetch_top_n body extraction)
+        ├► enrichFetchedTopN ─► ensureWebFetch (lazily initializes when cleanfetch/pdf_parser are off)
+        │                      └► pkg/fetch/webfetch (fetch_top_n body extraction, SSRF+HEAD pre-checks+byte cap)
         └► finishWebSearch ─► pkg/llm Summarizer (streamed progress, falls back to raw)
                              ─► cacheInst.Store
 ```

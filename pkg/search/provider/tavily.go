@@ -9,51 +9,66 @@ import (
 
 // TavilySearchImpl 实现 core.SearchInf 接口，通过 Tavily Search API 搜索。
 type TavilySearchImpl struct {
-	name           string
-	keys           *KeyPool
-	timeRange      string // "day", "week", "month", "year"，空表示不限
-	includeDomains []string
-	excludeDomains []string
+	name              string
+	keys              *KeyPool
+	timeRange         string // "day", "week", "month", "year"，空表示不限
+	includeDomains    []string
+	excludeDomains    []string
+	includeRawContent bool // true=请求 include_raw_content，让 API 返回页面原文
 }
 
 type tavilySearchReq struct {
-	Query          string   `json:"query"`
-	SearchDepth    string   `json:"search_depth"`
-	TimeRange      string   `json:"time_range,omitempty"`
-	StartDate      string   `json:"start_date,omitempty"`
-	EndDate        string   `json:"end_date,omitempty"`
-	IncludeDomains []string `json:"include_domains,omitempty"`
-	ExcludeDomains []string `json:"exclude_domains,omitempty"`
+	Query             string   `json:"query"`
+	SearchDepth       string   `json:"search_depth"`
+	TimeRange         string   `json:"time_range,omitempty"`
+	StartDate         string   `json:"start_date,omitempty"`
+	EndDate           string   `json:"end_date,omitempty"`
+	IncludeDomains    []string `json:"include_domains,omitempty"`
+	ExcludeDomains    []string `json:"exclude_domains,omitempty"`
+	IncludeRawContent bool     `json:"include_raw_content,omitempty"`
 }
 
 type tavilyResult struct {
-	Title   string  `json:"title"`
-	URL     string  `json:"url"`
-	Content string  `json:"content"`
-	Score   float64 `json:"score"`
+	Title      string  `json:"title"`
+	URL        string  `json:"url"`
+	Content    string  `json:"content"`
+	RawContent string  `json:"raw_content,omitempty"`
+	Score      float64 `json:"score"`
 }
 
 type tavilySearchResp struct {
 	Results []tavilyResult `json:"results"`
 }
 
+// TavilyOption 可选参数。
+type TavilyOption func(*TavilySearchImpl)
+
+// WithRawContent 请求 API 返回页面原文（raw_content），默认关闭（仅摘要片段）。
+func WithRawContent(on bool) TavilyOption {
+	return func(t *TavilySearchImpl) { t.includeRawContent = on }
+}
+
 // NewTavilySearch 创建 Tavily 搜索实例，支持 KeyPool 轮询。
-func NewTavilySearch(keys *KeyPool, excludeDomains []string) *TavilySearchImpl {
-	return &TavilySearchImpl{
-		name:           "tavily_api",
-		keys:           keys,
-		excludeDomains: excludeDomains,
-	}
+func NewTavilySearch(keys *KeyPool, excludeDomains []string, opts ...TavilyOption) *TavilySearchImpl {
+	return newTavilySearch(keys, nil, excludeDomains, opts...)
 }
 
 // NewTavilySearchWithDomains 创建支持限定域名的 Tavily 搜索实例。
-func NewTavilySearchWithDomains(keys *KeyPool, includeDomains, excludeDomains []string) *TavilySearchImpl {
-	return &TavilySearchImpl{
+func NewTavilySearchWithDomains(keys *KeyPool, includeDomains, excludeDomains []string, opts ...TavilyOption) *TavilySearchImpl {
+	return newTavilySearch(keys, includeDomains, excludeDomains, opts...)
+}
+
+func newTavilySearch(keys *KeyPool, includeDomains, excludeDomains []string, opts ...TavilyOption) *TavilySearchImpl {
+	t := &TavilySearchImpl{
 		name:           "tavily_api",
 		keys:           keys,
 		includeDomains: includeDomains,
 		excludeDomains: excludeDomains,
 	}
+	for _, opt := range opts {
+		opt(t)
+	}
+	return t
 }
 
 func (t *TavilySearchImpl) Name() string { return t.name }
@@ -93,11 +108,12 @@ func lookbackDaysToTavilyRange(days int) string {
 
 func (t *TavilySearchImpl) SearchRaw(query string) ([]core.SearchResult, error) {
 	req := tavilySearchReq{
-		Query:          query,
-		SearchDepth:    "basic",
-		TimeRange:      t.timeRange,
-		IncludeDomains: t.includeDomains,
-		ExcludeDomains: t.excludeDomains,
+		Query:             query,
+		SearchDepth:       "basic",
+		TimeRange:         t.timeRange,
+		IncludeDomains:    t.includeDomains,
+		ExcludeDomains:    t.excludeDomains,
+		IncludeRawContent: t.includeRawContent,
 	}
 	var resp tavilySearchResp
 	key := t.keys.Next()
@@ -121,7 +137,7 @@ func (t *TavilySearchImpl) SearchRaw(query string) ([]core.SearchResult, error) 
 		ret = append(ret, core.SearchResult{
 			Title:   val.Title,
 			Url:     strings.TrimSpace(val.URL),
-			Content: val.Content,
+			Content: firstNonEmpty(val.RawContent, val.Content),
 			Score:   val.Score,
 			Engine:  t.name,
 		})

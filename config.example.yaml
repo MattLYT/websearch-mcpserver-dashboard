@@ -90,6 +90,7 @@ rate_limit:
 #   sk_list:              # 多 Key 轮询列表（优先级高于 api_key）
 #     - "tvly-xxxx"
 #     - "tvly-yyyy"
+#   include_raw_content: true   # 请求 API 返回页面原文（raw_content），默认 true；显式 false 退回摘要片段
 
 # ==============================================
 # Exa Web Search API（mode=exa/apipool/hybrid 时需要）
@@ -103,9 +104,12 @@ rate_limit:
 #     - "exa-yyyy"
 #   num_results: 5        # 单次搜索结果数量（默认 5）
 #   lookback_days: 90     # 搜索时间范围（天），默认 90
+#   include_text: true          # 请求 API 返回页面正文（contents.text），默认 true
+#   text_max_characters: 3000   # 正文最大字符数（默认 3000）
 
 # ==============================================
 # AnySearch Search API（mode=anysearch/apipool/hybrid 时需要）
+# 获取地址: https://www.anysearch.com/console/api-keys
 # 文档: https://www.anysearch.com/docs
 # 环境变量: ANYSEARCH_API_KEY
 # ==============================================
@@ -210,14 +214,14 @@ proxy:
 #   model_id: "gpt-4o-mini"
 
 # ==============================================
-# 缓存配置（可选）
-# enabled 不设置时按 storage_path 是否非空判断（向后兼容）
-# 显式 false 可强制禁用缓存（忽略 storage_path）
-# 显式 true 强制启用（需配合 storage_path）
+# 缓存配置（可选，默认关闭）
+# enabled 不设置时默认关闭（v3.4.1 起）
+# 显式 true 启用：storage_path 未配置时默认 exe 同目录 cache/websearch-cache.db
+# 显式 false 可强制禁用缓存
 # ==============================================
 cache:
   # enabled: true
-  storage_path: "D:/data/search_cache.db"
+  # storage_path: "D:/data/search_cache.db"
   cleanup_interval: 30
 
 # ==============================================
@@ -236,13 +240,13 @@ cache:
 # 启用后无需代理即可抓取网页，失败时回退到 Jina Reader（需代理）
 # ==============================================
 cleanfetch:
-  enabled: false            # 总开关（默认 false，旧配置不启用）
-  file_output_dir: ""       # 大文本文件输出目录（默认 系统临时目录/webfetch/）
+  enabled: false            # 总开关（默认 false，旧配置不启用）；smartsearch 的 fetch_top_n 不受此开关约束，会按当前配置惰性初始化 webfetch
+  file_output_dir: ""       # 大文本文件输出目录（默认 exe 同目录 fetchdata/）
   file_ttl_hours: 24        # 临时文件保留时长（小时），默认 24
   max_inline_lines: 100     # 内联返回最大行数，超过则存文件（默认 100）
   max_inline_chars: 0       # 内联返回最大字符数，0=不限（默认 0）
   timeout_sec: 30           # 单次请求超时（秒），默认 30；经代理访问海外站点建议 30~60
-  max_fetch_size_mb: 10     # HEAD 预检最大文件大小（MB），超过拒绝抓取（默认 10）
+  max_fetch_size_mb: 10     # HEAD 预检最大文件大小（MB），超过拒绝抓取（默认 10）；也是 fetch_top_n 单条正文字节上限
   use_system_proxy: false   # 自动使用系统代理（环境变量+注册表），默认 false
   max_retries: 3            # 最大重试次数（仅 429/502/503），默认 3
 
@@ -280,6 +284,8 @@ log:
 # ==============================================
 # smartsearch:
 #   max_size: 10          # 全局最大结果数（按 score 排序后截断），0 = 不限
+#   fetch_top_n: 0        # 服务端默认抓取正文条数（agent 未传 fetch_top_n 时生效），默认 0 = 与旧版一致不抓取；
+#                         # 设 1-5 = agent 未传参时也默认获取正文（API 引擎走原文传参快速路径，网页引擎内部抓取）
 #   show_meta: true       # 输出中是否显示引擎来源和相关性分数（默认 true）
 #   enhance: true         # 是否启用本地评分增强（RRF 融合 + 词汇对齐 + 域名品质 + 多层 Boost + 阀值过滤），默认 true
 #   relevance_threshold: 0.05  # 增强后相关性阀值，final_score < 该值的结果被过滤（Top-1/每引擎保底不受影响），默认 0.05

@@ -44,7 +44,7 @@ func PDFParserHandler(ctx context.Context, req *mcp.CallToolRequest, params *PDF
 		return nil, nil, fmt.Errorf("path 参数不能为空")
 	}
 
-	pages, err := parsePagesSpec(params.Pages)
+	pages, err := parsePagesSpec(params.Pages, pageSpecWidthCap)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -77,9 +77,13 @@ func PDFParserHandler(ctx context.Context, req *mcp.CallToolRequest, params *PDF
 	return textResult(formatWebFetchResult(result)), nil, nil
 }
 
+// pageSpecWidthCap 页码区间展开宽度的硬顶（F2）：防止 pages="1-2147483647"
+// 这类巨大递增区间在 max_pages 校验前被展开分配导致 OOM。
+const pageSpecWidthCap = 1000
+
 // parsePagesSpec 解析页码表达式："3"、"1-10"、"1,3,5-7"（1-based）。
-// 返回去重升序页码列表；非法格式返回错误。
-func parsePagesSpec(spec string) ([]int, error) {
+// 返回去重升序页码列表；非法格式或区间宽度超过 widthCap 返回错误。
+func parsePagesSpec(spec string, widthCap int) ([]int, error) {
 	spec = strings.TrimSpace(spec)
 	if spec == "" {
 		return nil, nil
@@ -96,6 +100,9 @@ func parsePagesSpec(spec string) ([]int, error) {
 			to, err2 := strconv.Atoi(strings.TrimSpace(hi))
 			if err1 != nil || err2 != nil || from < 1 || to < from {
 				return nil, fmt.Errorf("pages 参数格式非法: %q，示例：1-10 或 1,3,5-7", spec)
+			}
+			if to-from+1 > widthCap {
+				return nil, fmt.Errorf("pages 区间 %d-%d 展开后超过 %d 页上限，请用 pages 指定具体页码（如 \"1-%d\"）", from, to, widthCap, widthCap)
 			}
 			for p := from; p <= to; p++ {
 				if !seen[p] {

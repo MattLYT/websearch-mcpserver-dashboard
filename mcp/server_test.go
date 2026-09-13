@@ -86,6 +86,7 @@ func restoreGlobals(t *testing.T) {
 	oldJina := jinaInst
 	oldFallback := fallbackSearch
 	oldSmart := smartSearchConf
+	oldLazyCfg := webfetchLazyCfg
 	t.Cleanup(func() {
 		searchapi = oldSearch
 		academicSearcher = oldAcad
@@ -95,6 +96,7 @@ func restoreGlobals(t *testing.T) {
 		jinaInst = oldJina
 		fallbackSearch = oldFallback
 		smartSearchConf = oldSmart
+		webfetchLazyCfg = oldLazyCfg
 	})
 }
 
@@ -275,6 +277,12 @@ func TestBuildAcademicToolDescription_MockEngines(t *testing.T) {
 	}
 	if !strings.Contains(desc, "custom_engine") {
 		t.Errorf("unknown engine should still be listed: %s", desc)
+	}
+	if !strings.Contains(desc, "DOI") || !strings.Contains(desc, "arXiv") {
+		t.Errorf("description should document DOI/arXiv id as query (F5): %s", desc)
+	}
+	if !strings.Contains(desc, "pdf_parser") {
+		t.Errorf("description should point to pdf_parser for pdf_url: %s", desc)
 	}
 }
 
