@@ -2,6 +2,13 @@
 
 [English](CHANGELOG.en.md) | [中文](CHANGELOG.md)
 
+## v3.5.1 — 2026-09-14
+
+### Fixed
+- **CLI help no longer requires a config file**: `websearch-mcpserver -h` / `--help` / `help` now print full usage without any config present (previously `help` failed with "failed to load config" unless `-c` pointed to a valid config, and `-h` only printed the flag package's default listing)
+- **`-c` now works after the subcommand**: Go's flag package stops at the first non-flag argument, so `-c` in `start -c /path/config.yaml` was silently ignored; flags following the command are now parsed in a second pass — `-c`/`--config` works before or after the command (`websearch-mcp-cli init -c` fixed the same way)
+- **Usage examples aligned with actual behavior**: both binaries' help now documents `-c, --config` lookup order (`./config.yaml` / `$WEBSEARCH_CONFIG`) and command examples
+
 ## v3.5.0 — 2026-09-13
 
 ### Added

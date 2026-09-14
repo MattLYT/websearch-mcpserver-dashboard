@@ -2,6 +2,13 @@
 
 [English](CHANGELOG.en.md) | [中文](CHANGELOG.md)
 
+## v3.5.1 — 2026-09-14
+
+### 修复
+- **CLI 帮助不再依赖配置文件**：`websearch-mcpserver -h` / `--help` / `help` 在无配置文件时即可查看完整用法（此前 `help` 在配置加载失败后直接报错退出，必须 `-c` 指向有效配置才能用；`-h` 则只打印 flag 包默认参数列表）
+- **`-c` 支持放在子命令之后**：Go flag 遇到首个非 flag 参数即停止，此前 `start -c /path/config.yaml` 中的 `-c` 被静默忽略；现在子命令后的 flag 会二次解析，`-c`/`--config` 置于命令前或命令后均生效（`websearch-mcp-cli` 的 `init -c` 同步修复）
+- **usage 示例对齐实际行为**：两个二进制的 help 补齐 `-c, --config` 默认查找顺序（`./config.yaml` / `$WEBSEARCH_CONFIG`）与命令示例
+
 ## v3.5.0 — 2026-09-13
 
 ### 新增

@@ -19,7 +19,7 @@ import (
 var version = "dev"
 
 func printUsage() {
-	fmt.Fprintln(os.Stderr, "Usage: websearch-mcp-cli [command]")
+	fmt.Fprintln(os.Stderr, "Usage: websearch-mcp-cli [-c <config.yaml>] [command]")
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, "Commands:")
 	fmt.Fprintln(os.Stderr, "  (none)      Start MCP server over stdio")
@@ -28,7 +28,11 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "  help        Show this help")
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, "Flags:")
-	fmt.Fprintln(os.Stderr, "  -c, --config   config file path")
+	fmt.Fprintln(os.Stderr, "  -c, --config   config file path; may appear before or after the command")
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, "Examples:")
+	fmt.Fprintln(os.Stderr, "  websearch-mcp-cli")
+	fmt.Fprintln(os.Stderr, "  websearch-mcp-cli init -c /path/to/config.yaml")
 }
 
 func runInit(configPath string) error {
@@ -107,12 +111,19 @@ func main() {
 	flag.BoolVar(&showHelp, "help", false, "show help")
 	flag.Parse()
 
+	// flag 包遇到首个非 flag 参数即停止，子命令后的 -c 需要二次解析；
+	// 命令名取自首轮解析结果，二次解析只负责补充 flag
+	firstArgs := flag.Args()
+	if len(firstArgs) > 1 {
+		_ = flag.CommandLine.Parse(firstArgs[1:])
+	}
+
 	if showHelp {
 		printUsage()
 		return
 	}
 
-	args := flag.Args()
+	args := firstArgs
 	cmd := ""
 	if len(args) > 0 {
 		cmd = args[0]
