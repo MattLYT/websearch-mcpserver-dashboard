@@ -1,0 +1,88 @@
+# Local Docker deployment for websearch-mcpserver v3.3.0.
+# The host port is bound to loopback in docker-compose.yml, so the MCP
+# endpoint is not published to the LAN. No API keys are required in engine
+# mode; add provider keys through environment variables only when needed.
+
+port: 8338
+host: "0.0.0.0"
+# Try every configured API/free web engine; unavailable providers are
+# skipped/fallback automatically by the upstream hybrid implementation.
+mode: hybrid
+network: international
+log_level: info
+upstream_timeout_sec: 30
+
+# Keep the cache in the named Docker volume declared by docker-compose.yml.
+cache:
+  enabled: true
+  storage_path: "/data/search_cache.db"
+  cleanup_interval: 30
+
+rate_limit:
+  per_sec: 3
+  per_min: 60
+
+bing:
+  enabled: true
+  blocked: []
+
+duckduckgo:
+  enabled: true
+  blocked: []
+
+google:
+  enabled: true
+  blocked: []
+
+academic:
+  enabled: true
+  bing_fallback: true
+  enhance: true
+  threshold: 0.02
+  disable_semantic_scholar: false
+  disable_google_scholar: false
+
+# 豆包搜索 Global / Custom 版。没有 API Key 时该引擎自动跳过。
+# Key 通过 DOUBAO_SEARCH_API_KEY 或 ASK_ECHO_SEARCH_INFINITY_API_KEY 注入。
+doubao:
+  version: global
+  num_results: 10
+  max_snippet_length: 500
+  max_image_count_per_doc: 0
+  icp_host_only: false
+  time_range: ""
+  auth_level: 0
+  query_rewrite: false
+  need_content: false
+
+cleanfetch:
+  enabled: true
+  file_output_dir: /data/fetchdata
+  file_ttl_hours: 24
+  max_inline_lines: 100
+  timeout_sec: 30
+  max_fetch_size_mb: 10
+  use_system_proxy: true
+  max_retries: 3
+
+pdf_parser:
+  enabled: true
+  mineru_ocr: false
+  mineru_remote_pdf: true
+
+smartsearch:
+  max_size: 10
+  show_meta: true
+  enhance: true
+  relevance_threshold: 0.05
+  mmr:
+    enabled: true
+    lambda: 0.7
+    target_count: 0
+
+jina:
+  api_key: ""
+
+log:
+  max_size: 1
+  max_age: 1

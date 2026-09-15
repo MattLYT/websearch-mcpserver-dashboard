@@ -1,4 +1,9 @@
 # Binaries for programs and plugins
+# Local deployment runtime state
+/ops/*.log
+/ops/*.disabled
+/backups/
+
 *.exe
 *.exe~
 *.dll

@@ -1,0 +1,26 @@
+# Local deployment overlay for upstream v3.5.1.
+# Keep the China-accessible module proxy and mount runtime configuration from
+# the host instead of baking config.yaml into the image.
+FROM golang:1.26-alpine AS builder
+
+ARG VERSION=v3.5.1-upstream-local
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go env -w GOPROXY=https://goproxy.cn,direct \
+    && go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/websearch ./cmd/
+
+FROM alpine:3.22
+RUN apk --no-cache add ca-certificates tzdata
+
+WORKDIR /app
+COPY --from=builder /out/websearch /app/websearch
+
+RUN mkdir -p /data
+EXPOSE 8338
+
+ENTRYPOINT ["/app/websearch"]
+CMD ["start"]
