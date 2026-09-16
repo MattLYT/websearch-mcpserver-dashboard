@@ -73,15 +73,27 @@ type DailyUsage struct {
 }
 
 type Health struct {
-	Name          string  `json:"name"`
-	Kind          string  `json:"kind"`
-	Status        string  `json:"status"`
-	LastSuccessAt string  `json:"last_success_at,omitempty"`
-	LastFailureAt string  `json:"last_failure_at,omitempty"`
-	LastSeenAt    string  `json:"last_seen_at,omitempty"`
-	FailureRate   float64 `json:"failure_rate"`
-	SampleSize    int     `json:"sample_size"`
-	LastError     string  `json:"last_error,omitempty"`
+	Name                string     `json:"name"`
+	Kind                string     `json:"kind"`
+	Status              string     `json:"status"`
+	LastSuccessAt       string     `json:"last_success_at,omitempty"`
+	LastFailureAt       string     `json:"last_failure_at,omitempty"`
+	LastSeenAt          string     `json:"last_seen_at,omitempty"`
+	FailureRate         float64    `json:"failure_rate"`
+	SampleSize          int        `json:"sample_size"`
+	ConsecutiveFailures int        `json:"consecutive_failures"`
+	RecentOutcomes      []bool     `json:"recent_outcomes"`
+	Today               DailyUsage `json:"today"`
+	LastError           string     `json:"last_error,omitempty"`
+}
+
+// EventFilter selects privacy-preserving event metadata. Source is matched
+// against provider for provider events and tool for tool events.
+type EventFilter struct {
+	Kind   string
+	Status string
+	Source string
+	Limit  int
 }
 
 type Overview struct {
@@ -223,17 +235,47 @@ func (s *Store) Cleanup() error {
 }
 
 func (s *Store) Recent(limit int) ([]StoredEvent, error) {
+	return s.RecentFiltered(EventFilter{Limit: limit})
+}
+
+func (s *Store) RecentFiltered(filter EventFilter) ([]StoredEvent, error) {
+	limit := filter.Limit
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	rows, err := s.db.Query(`SELECT id,occurred_at,kind,tool,provider,success,duration_ms,cache_hit,result_count,
+	where := []string{"1=1"}
+	args := make([]any, 0, 4)
+	if filter.Kind == "provider" || filter.Kind == "tool" {
+		where = append(where, "kind=?")
+		args = append(args, filter.Kind)
+	}
+	if filter.Status == "success" {
+		where = append(where, "success=1")
+	} else if filter.Status == "failure" {
+		where = append(where, "success=0")
+	}
+	if filter.Source != "" {
+		if filter.Kind == "provider" {
+			where = append(where, "provider=?")
+			args = append(args, filter.Source)
+		} else if filter.Kind == "tool" {
+			where = append(where, "tool=?")
+			args = append(args, filter.Source)
+		} else {
+			where = append(where, "(provider=? OR tool=?)")
+			args = append(args, filter.Source, filter.Source)
+		}
+	}
+	args = append(args, limit)
+	query := `SELECT id,occurred_at,kind,tool,provider,success,duration_ms,cache_hit,result_count,
 		error_summary,query_hash,query_chars,query_language,query_topic,query_keywords
-		FROM usage_events ORDER BY occurred_at DESC LIMIT ?`, limit)
+		FROM usage_events WHERE ` + strings.Join(where, " AND ") + ` ORDER BY occurred_at DESC,id DESC LIMIT ?`
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []StoredEvent
+	out := make([]StoredEvent, 0, limit)
 	for rows.Next() {
 		var e StoredEvent
 		var ts int64
@@ -312,17 +354,22 @@ func (s *Store) health(kind string, now time.Time) ([]Health, error) {
 	}
 	rows.Close()
 	var out []Health
+	today, err := s.todayByName(kind, now)
+	if err != nil {
+		return nil, err
+	}
 	for _, name := range names {
-		query := fmt.Sprintf(`SELECT occurred_at,success,error_summary FROM usage_events WHERE kind=? AND %s=? ORDER BY occurred_at DESC LIMIT 20`, field)
+		query := fmt.Sprintf(`SELECT occurred_at,success,error_summary FROM usage_events WHERE kind=? AND %s=? ORDER BY occurred_at DESC,id DESC LIMIT 20`, field)
 		r, err := s.db.Query(query, kind, name)
 		if err != nil {
 			return nil, err
 		}
-		h := Health{Name: name, Kind: kind, Status: "unknown"}
+		h := Health{Name: name, Kind: kind, Status: "unknown", Today: today[name]}
 		var latestSuccess bool
 		var lastTS int64
 		consecutiveFailures := 0
 		countingConsecutive := true
+		var newestFirst []bool
 		for r.Next() {
 			var ts int64
 			var ok int
@@ -332,6 +379,7 @@ func (s *Store) health(kind string, now time.Time) ([]Health, error) {
 				return nil, err
 			}
 			h.SampleSize++
+			newestFirst = append(newestFirst, ok == 1)
 			if h.SampleSize == 1 {
 				lastTS, latestSuccess, h.LastError = ts, ok == 1, msg
 				h.LastSeenAt = time.Unix(ts, 0).In(s.location).Format(time.RFC3339)
@@ -351,6 +399,10 @@ func (s *Store) health(kind string, now time.Time) ([]Health, error) {
 			}
 		}
 		r.Close()
+		h.ConsecutiveFailures = consecutiveFailures
+		for i := len(newestFirst) - 1; i >= 0; i-- {
+			h.RecentOutcomes = append(h.RecentOutcomes, newestFirst[i])
+		}
 		if h.SampleSize > 0 {
 			h.FailureRate /= float64(h.SampleSize)
 			age := now.Sub(time.Unix(lastTS, 0))
@@ -369,6 +421,37 @@ func (s *Store) health(kind string, now time.Time) ([]Health, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
+}
+
+func (s *Store) todayByName(kind string, now time.Time) (map[string]DailyUsage, error) {
+	field := "provider"
+	if kind == "tool" {
+		field = "tool"
+	}
+	day := now.In(s.location).Format("2006-01-02")
+	query := fmt.Sprintf(`SELECT %s,requests,successes,failures,cache_hits,duration_ms,result_count
+		FROM daily_usage WHERE day=? AND kind=? AND %s<>''`, field, field)
+	rows, err := s.db.Query(query, day, kind)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]DailyUsage{}
+	for rows.Next() {
+		var name string
+		var d DailyUsage
+		if err := rows.Scan(&name, &d.Requests, &d.Successes, &d.Failures, &d.CacheHits, &d.DurationMS, &d.ResultCount); err != nil {
+			return nil, err
+		}
+		d.Day, d.Kind = day, kind
+		if kind == "provider" {
+			d.Provider = name
+		} else {
+			d.Tool = name
+		}
+		out[name] = d
+	}
+	return out, rows.Err()
 }
 
 func boolInt(v bool) int {
