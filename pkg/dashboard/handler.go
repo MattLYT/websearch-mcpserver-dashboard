@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"websearch/pkg/cache"
@@ -19,6 +20,8 @@ import (
 
 //go:embed web/*
 var webFiles embed.FS
+
+const defaultEventLimit = 50
 
 type Handler struct {
 	conf    config.Config
@@ -63,12 +66,45 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "dashboard telemetry disabled"})
 		return
 	}
-	out, err := h.store.Overview()
+	observed, err := h.store.Overview()
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, buildDashboardOverview(h.conf, observed))
+}
+
+// eventLimit accepts the dashboard page sizes 20/50/100; any other value
+// (including a missing or unparsable one) falls back to 50.
+func eventLimit(raw string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil {
+		return defaultEventLimit
+	}
+	switch n {
+	case 20, 50, 100:
+		return n
+	}
+	return defaultEventLimit
+}
+
+// eventKind accepts kind=provider|tool; empty or unknown values mean "all".
+func eventKind(raw string) string {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	if value == "provider" || value == "tool" {
+		return value
+	}
+	return ""
+}
+
+// eventStatus accepts status=all|success|failure; empty or unknown values
+// mean "all".
+func eventStatus(raw string) string {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	if value == "success" || value == "failure" {
+		return value
+	}
+	return ""
 }
 
 func (h *Handler) events(w http.ResponseWriter, r *http.Request) {
@@ -76,8 +112,17 @@ func (h *Handler) events(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w)
 		return
 	}
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	out, err := h.store.Recent(limit)
+	if h.store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "dashboard telemetry disabled"})
+		return
+	}
+	query := r.URL.Query()
+	out, err := h.store.RecentFiltered(telemetry.EventFilter{
+		Kind:   eventKind(query.Get("kind")),
+		Status: eventStatus(query.Get("status")),
+		Source: strings.TrimSpace(query.Get("source")),
+		Limit:  eventLimit(query.Get("limit")),
+	})
 	if err != nil {
 		writeError(w, err)
 		return

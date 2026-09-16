@@ -11,63 +11,198 @@
     <aside>
       <div class="brand"><span class="brand-mark">W</span><div><strong>WebSearch</strong><small>Control Center</small></div></div>
       <nav>
-        <button class="nav active" data-page="overview"><span>◫</span>总览</button>
-        <button class="nav" data-page="sources"><span>⌁</span>搜索源</button>
-        <button class="nav" data-page="usage"><span>⌁</span>调用记录</button>
-        <button class="nav" data-page="settings"><span>⚙</span>设置</button>
+        <button class="nav active" type="button" data-page="overview"><span aria-hidden="true">◫</span>总览</button>
+        <button class="nav" type="button" data-page="sources"><span aria-hidden="true">⌁</span>搜索源</button>
+        <button class="nav" type="button" data-page="usage"><span aria-hidden="true">⌁</span>调用记录</button>
+        <button class="nav" type="button" data-page="settings"><span aria-hidden="true">⚙</span>设置</button>
       </nav>
       <div class="privacy"><span class="dot healthy"></span><div><b>仅限本机</b><small>查询全文不会被保存</small></div></div>
     </aside>
+
     <main>
       <header>
         <div><p class="eyebrow">LOCAL OBSERVABILITY</p><h1 id="page-title">运行总览</h1></div>
-        <div class="header-actions"><span id="updated">尚未刷新</span><button id="refresh" class="icon-btn" title="刷新">↻</button></div>
+        <div class="header-actions">
+          <span id="updated" class="updated">尚未刷新</span>
+          <button id="refresh" class="icon-btn" type="button" title="立即刷新全部数据" aria-label="立即刷新全部数据">↻</button>
+        </div>
       </header>
 
       <section id="page-overview" class="page active">
-        <div class="hero-grid">
-          <article class="metric primary"><span>今日调用</span><strong id="today-requests">—</strong><small id="today-success">等待数据</small></article>
-          <article class="metric"><span>异常搜索源</span><strong id="down-count">—</strong><small>基于真实调用，被动判断</small></article>
-          <article class="metric"><span>缓存命中</span><strong id="cache-hits">—</strong><small>今日避免的重复检索</small></article>
-          <article class="metric"><span>官方剩余额度</span><strong id="quota-total">—</strong><small id="quota-caption">仅官方 API</small></article>
+        <div class="overview-grid">
+          <div class="stack">
+            <article class="panel">
+              <div class="panel-head"><div><p class="eyebrow">SYSTEM</p><h2>系统状态</h2></div><span id="system-dot" class="dot unknown"></span></div>
+              <p class="sys-value" id="system-status">—</p>
+              <p class="panel-note" id="system-note"></p>
+              <dl class="kv">
+                <div><dt>启用来源</dt><dd id="system-enabled">—</dd></div>
+                <div><dt>已观测</dt><dd id="system-observed">—</dd></div>
+                <div><dt>不稳定</dt><dd id="system-degraded">—</dd></div>
+                <div><dt>异常</dt><dd id="system-down">—</dd></div>
+              </dl>
+            </article>
+            <div class="kpi-stack" id="tool-kpis"></div>
+          </div>
+
+          <article class="panel">
+            <div class="panel-head"><div><p class="eyebrow">WEB SOURCES</p><h2>Web 来源</h2></div><a class="mini-link" href="#sources" data-jump="sources">全部来源 →</a></div>
+            <p class="panel-note" id="web-sources-note"></p>
+            <div class="table-scroll table-compact">
+              <table class="data-table">
+                <thead><tr><th>来源</th><th>状态</th><th>健康</th><th>最近 20 次</th><th class="num">今日尝试</th><th class="num">成功率</th><th class="num">平均耗时</th><th>额度</th></tr></thead>
+                <tbody id="web-sources-body"></tbody>
+              </table>
+            </div>
+          </article>
+
+          <div class="stack">
+            <article class="panel">
+              <div class="panel-head"><div><p class="eyebrow">OFFICIAL QUOTA</p><h2>Tavily 额度</h2></div><span id="tavily-dot" class="dot unknown"></span></div>
+              <p class="sys-value" id="tavily-value">—</p>
+              <p class="panel-note" id="tavily-note"></p>
+              <dl class="kv" id="tavily-details"></dl>
+            </article>
+            <article class="panel">
+              <div class="panel-head"><div><p class="eyebrow">EFFECTIVE CONFIG</p><h2>运行配置</h2></div></div>
+              <p class="panel-note" id="config-note"></p>
+              <dl class="kv" id="config-list"></dl>
+              <p class="secret-line" id="config-secrets"></p>
+            </article>
+          </div>
         </div>
-        <div class="two-col">
-          <article class="panel"><div class="panel-head"><div><p class="eyebrow">PASSIVE HEALTH</p><h2>搜索源状态</h2></div><a href="#sources" data-jump="sources">查看全部 →</a></div><div id="source-preview" class="source-list skeleton"></div></article>
-          <article class="panel"><div class="panel-head"><div><p class="eyebrow">14 DAYS</p><h2>调用趋势</h2></div><span class="legend"><i></i>调用次数</span></div><div class="chart-wrap"><canvas id="trend-chart"></canvas><div id="chart-empty" class="empty">有真实调用后，这里会出现趋势</div></div></article>
-        </div>
-        <article class="panel quota-panel"><div class="panel-head"><div><p class="eyebrow">OFFICIAL ONLY</p><h2>额度与套餐</h2></div><span class="muted">不估算，不抓取网页</span></div><div id="quota-grid" class="quota-grid"></div></article>
+
+        <article class="panel">
+          <div class="panel-head"><div><p class="eyebrow">REDACTED METADATA</p><h2>最近 Provider 事件</h2></div><span class="muted">最近 6 条 · 查询全文不保存</span></div>
+          <p class="panel-note" id="overview-events-note"></p>
+          <div class="table-scroll">
+            <table class="data-table">
+              <thead><tr><th>时间</th><th>来源</th><th>状态</th><th class="num">耗时</th><th class="num">结果数</th><th>主题 / 语言</th><th>关键词</th><th>错误摘要</th></tr></thead>
+              <tbody id="overview-events-body"></tbody>
+            </table>
+          </div>
+        </article>
       </section>
 
       <section id="page-sources" class="page">
-        <article class="panel"><div class="panel-head"><div><p class="eyebrow">SOURCE MATRIX</p><h2>搜索源与工具</h2></div><div class="status-key"><span><i class="healthy"></i>正常</span><span><i class="degraded"></i>不稳定</span><span><i class="down"></i>异常</span><span><i class="unknown"></i>未知</span></div></div><div id="sources-table"></div></article>
+        <div class="status-key">
+          <span><i class="tag-dot active"></i>当前启用</span>
+          <span><i class="tag-dot inactive"></i>已配置未使用</span>
+          <span><i class="tag-dot not_configured"></i>未配置</span>
+          <span><i class="dot healthy"></i>正常</span>
+          <span><i class="dot degraded"></i>不稳定</span>
+          <span><i class="dot down"></i>异常</span>
+          <span><i class="dot unknown"></i>未知</span>
+        </div>
+
+        <article class="panel">
+          <div class="panel-head"><div><p class="eyebrow">WEB GROUP</p><h2>Web 搜索源</h2></div><span class="muted" id="sources-web-counts">—</span></div>
+          <p class="panel-note" id="sources-web-note"></p>
+          <div class="table-scroll">
+            <table class="data-table">
+              <thead><tr><th>来源</th><th>启用状态</th><th>健康</th><th>最近 20 次</th><th class="num">今日尝试</th><th class="num">成功 / 失败</th><th class="num">成功率</th><th class="num">平均耗时</th><th>最近观测</th><th>额度</th><th>最近错误</th></tr></thead>
+              <tbody id="sources-web-body"></tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head"><div><p class="eyebrow">ACADEMIC GROUP</p><h2>学术来源</h2></div><span class="muted" id="sources-academic-counts">—</span></div>
+          <p class="panel-note" id="sources-academic-note"></p>
+          <div class="table-scroll">
+            <table class="data-table">
+              <thead><tr><th>来源</th><th>启用状态</th><th>健康</th><th>最近 20 次</th><th class="num">今日尝试</th><th class="num">成功 / 失败</th><th class="num">成功率</th><th class="num">平均耗时</th><th>最近观测</th><th>额度</th><th>最近错误</th></tr></thead>
+              <tbody id="sources-academic-body"></tbody>
+            </table>
+          </div>
+        </article>
       </section>
 
       <section id="page-usage" class="page">
-        <article class="panel"><div class="panel-head"><div><p class="eyebrow">REDACTED METADATA</p><h2>最近调用</h2></div><span class="muted">保存 30 天明细</span></div><div class="table-scroll"><table><thead><tr><th>时间</th><th>层级</th><th>工具 / 来源</th><th>状态</th><th>耗时</th><th>脱敏摘要</th><th>错误</th></tr></thead><tbody id="events-body"></tbody></table></div></article>
+        <article class="panel">
+          <div class="panel-head"><div><p class="eyebrow">REDACTED METADATA</p><h2>调用记录</h2></div><span class="muted">明细保留 30 天</span></div>
+          <div class="toolbar">
+            <label class="field"><span>层级</span>
+              <select id="filter-kind">
+                <option value="">全部</option>
+                <option value="tool">工具</option>
+                <option value="provider" selected>来源</option>
+              </select>
+            </label>
+            <label class="field"><span>状态</span>
+              <select id="filter-status">
+                <option value="">全部</option>
+                <option value="success">成功</option>
+                <option value="failure">失败</option>
+              </select>
+            </label>
+            <label class="field"><span>来源 / 工具</span>
+              <select id="filter-source"><option value="">全部</option></select>
+            </label>
+            <label class="field"><span>条数</span>
+              <select id="filter-limit">
+                <option value="20">20</option>
+                <option value="50" selected>50</option>
+                <option value="100">100</option>
+              </select>
+            </label>
+            <div class="toolbar-actions">
+              <button id="reload-events" type="button" class="primary-btn">应用筛选</button>
+              <button id="export-csv" type="button">导出 CSV</button>
+            </div>
+          </div>
+          <p class="panel-note" id="events-note"></p>
+          <div class="table-scroll">
+            <table class="data-table">
+              <thead><tr><th>时间</th><th>层级</th><th>来源 / 工具</th><th>状态</th><th class="num">耗时</th><th class="num">结果数</th><th>缓存</th><th>主题 / 语言</th><th>关键词</th><th>查询哈希</th><th>错误摘要</th></tr></thead>
+              <tbody id="usage-body"></tbody>
+            </table>
+          </div>
+        </article>
       </section>
 
       <section id="page-settings" class="page">
         <div class="settings-grid">
-          <article class="panel"><div class="panel-head"><div><p class="eyebrow">SAFE SETTINGS</p><h2>常用设置</h2></div><span id="settings-dirty" class="pill hidden">有未保存更改</span></div><form id="settings-form" class="form-grid">
-            <label>搜索模式<select data-key="mode"><option>hybrid</option><option>engine</option><option>apipool</option><option>baidu</option><option>tavily</option><option>exa</option><option>anysearch</option><option>doubao</option></select></label>
-            <label>网络区域<select data-key="network"><option value="china">中国</option><option value="international">国际</option></select></label>
-            <label>上游超时（秒）<input type="number" min="0" max="120" data-key="upstream_timeout_sec"></label>
-            <label>最大结果数<input type="number" min="1" max="50" data-key="smartsearch.max_size"></label>
-            <label>相关性阈值<input type="number" min="0" max="1" step="0.01" data-key="smartsearch.relevance_threshold"></label>
-            <label>MMR λ<input type="number" min="0" max="1" step="0.05" data-key="smartsearch.mmr.lambda"></label>
-            <label class="toggle"><input type="checkbox" data-key="cache.enabled"><span></span>启用缓存</label>
-            <label class="toggle"><input type="checkbox" data-key="academic.enabled"><span></span>学术检索</label>
-            <label class="toggle"><input type="checkbox" data-key="cleanfetch.enabled"><span></span>网页抓取</label>
-            <label class="toggle"><input type="checkbox" data-key="pdf_parser.enabled"><span></span>PDF 解析</label>
-            <div class="form-actions"><button type="button" id="save-settings" class="primary-btn">预览并保存</button></div>
-          </form></article>
-          <article class="panel"><div class="panel-head"><div><p class="eyebrow">CREDENTIALS</p><h2>API Key 状态</h2></div><span class="muted">永不回显原值</span></div><div id="secret-list" class="secret-list"></div></article>
-          <article class="panel danger-zone"><div class="panel-head"><div><p class="eyebrow">ADVANCED</p><h2>高级操作</h2></div></div><div class="advanced-actions"><div><b>重启服务</b><small>应用已保存的设置或新密钥</small><button id="restart-service">确认并重启</button></div><div><b>清空搜索缓存</b><small>监控历史不会被删除</small><button id="clear-cache" class="danger">确认并清空</button></div></div></article>
+          <article class="panel">
+            <div class="panel-head"><div><p class="eyebrow">SAFE SETTINGS</p><h2>常用设置</h2></div><span id="settings-dirty" class="pill hidden">有未保存更改</span></div>
+            <form id="settings-form" class="form-grid">
+              <label>搜索模式<select data-key="mode"><option>hybrid</option><option>engine</option><option>apipool</option><option>baidu</option><option>tavily</option><option>exa</option><option>anysearch</option><option>doubao</option></select></label>
+              <label>网络区域<select data-key="network"><option value="china">中国</option><option value="international">国际</option></select></label>
+              <label>上游超时（秒）<input type="number" min="0" max="120" data-key="upstream_timeout_sec"></label>
+              <label>最大结果数<input type="number" min="1" max="50" data-key="smartsearch.max_size"></label>
+              <label>相关性阈值<input type="number" min="0" max="1" step="0.01" data-key="smartsearch.relevance_threshold"></label>
+              <label>MMR λ<input type="number" min="0" max="1" step="0.05" data-key="smartsearch.mmr.lambda"></label>
+              <label class="toggle"><input type="checkbox" data-key="cache.enabled"><span></span>启用缓存</label>
+              <label class="toggle"><input type="checkbox" data-key="academic.enabled"><span></span>学术检索</label>
+              <label class="toggle"><input type="checkbox" data-key="cleanfetch.enabled"><span></span>网页抓取</label>
+              <label class="toggle"><input type="checkbox" data-key="pdf_parser.enabled"><span></span>PDF 解析</label>
+              <div class="form-actions"><button type="button" id="save-settings" class="primary-btn">预览并保存</button></div>
+            </form>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><div><p class="eyebrow">CREDENTIALS</p><h2>API Key 状态</h2></div><span class="muted">永不回显原值</span></div>
+            <div id="secret-list" class="secret-list"></div>
+          </article>
+          <article class="panel danger-zone">
+            <div class="panel-head"><div><p class="eyebrow">ADVANCED</p><h2>高级操作</h2></div></div>
+            <div class="advanced-actions">
+              <div><b>重启服务</b><small>应用已保存的设置或新密钥</small><button id="restart-service" type="button">确认并重启</button></div>
+              <div><b>清空搜索缓存</b><small>监控历史不会被删除</small><button id="clear-cache" type="button" class="danger">确认并清空</button></div>
+            </div>
+          </article>
         </div>
       </section>
     </main>
   </div>
-  <dialog id="confirm-dialog"><form method="dialog"><h3 id="dialog-title">确认操作</h3><p id="dialog-copy"></p><pre id="dialog-diff"></pre><div><button value="cancel">取消</button><button value="confirm" class="primary-btn">确认</button></div></form></dialog>
+
+  <dialog id="confirm-dialog">
+    <form method="dialog">
+      <h3 id="dialog-title">确认操作</h3>
+      <p id="dialog-copy"></p>
+      <pre id="dialog-diff"></pre>
+      <div><button value="cancel">取消</button><button value="confirm" class="primary-btn">确认</button></div>
+    </form>
+  </dialog>
   <div id="toast" role="status"></div>
   <script src="app.js"></script>
 </body>

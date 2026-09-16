@@ -1,23 +1,790 @@
-const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];let state={overview:null,settings:null,events:[],quotas:[]};
-const api=async(path,opt={})=>{const r=await fetch(path,{headers:{'Content-Type':'application/json'},...opt});const body=await r.json().catch(()=>({}));if(!r.ok)throw new Error(body.error||`HTTP ${r.status}`);return body};
-function toast(msg,bad=false){const e=$('#toast');e.textContent=msg;e.style.background=bad?'#9e342f':'#17231c';e.classList.add('show');setTimeout(()=>e.classList.remove('show'),2600)}
-function nav(page){$$('.page').forEach(x=>x.classList.remove('active'));$$('.nav').forEach(x=>x.classList.toggle('active',x.dataset.page===page));$(`#page-${page}`).classList.add('active');$('#page-title').textContent={overview:'运行总览',sources:'搜索源',usage:'调用记录',settings:'设置'}[page];history.replaceState(null,'',`#${page}`)}
-$$('.nav').forEach(b=>b.onclick=()=>nav(b.dataset.page));$$('[data-jump]').forEach(b=>b.onclick=e=>{e.preventDefault();nav(b.dataset.jump)});
-const fmt=n=>new Intl.NumberFormat('zh-CN').format(n||0);const displayTime={hour12:false,timeZone:'Asia/Shanghai'};const time=s=>s?new Date(s).toLocaleString('zh-CN',displayTime):'—';
-function statusLabel(s){return{healthy:'正常',degraded:'不稳定',down:'异常',unknown:'未知'}[s]||s}function dot(s){return `<i class="dot ${s}"></i>`}
-function renderOverview(){const o=state.overview||{},t=o.today||{},providers=o.providers||[];$('#today-requests').textContent=fmt(t.requests);$('#today-success').textContent=`成功 ${fmt(t.successes)} · 失败 ${fmt(t.failures)}`;const broken=providers.filter(x=>x.status==='down'||x.status==='degraded');$('#down-count').textContent=fmt(broken.length);$('#cache-hits').textContent=fmt(t.cache_hits);const qs=(state.quotas||[]).filter(x=>x.status==='available'&&x.remaining!=null);$('#quota-total').textContent=qs.length?qs.map(x=>`${x.provider} ${fmt(x.remaining)}`).join(' · '):'暂无';$('#quota-caption').textContent=qs.length?'官方实时返回':'未发现可查询的已配置额度';$('#source-preview').classList.remove('skeleton');$('#source-preview').innerHTML=providers.slice(0,6).map(sourceRow).join('')||'<div class="empty">有真实调用后开始判断</div>';renderChart(o.trend||[]);renderSources();}
-function sourceRow(x){return `<div class="source-row">${dot(x.status)}<b>${x.name}</b><small>${statusLabel(x.status)}</small><small>${x.last_seen_at?time(x.last_seen_at):'尚无调用'}</small></div>`}
-function renderSources(){const all=[...(state.overview?.providers||[]),...(state.overview?.tools||[])];$('#sources-table').innerHTML=`<div class="source-table-row head"><span></span><span>名称</span><span>层级</span><span>状态</span><span>失败率</span><span>最近错误</span></div>`+all.map(x=>`<div class="source-table-row">${dot(x.status)}<b>${x.name}</b><span>${x.kind==='provider'?'Provider':'MCP 工具'}</span><span>${statusLabel(x.status)}</span><span>${Math.round((x.failure_rate||0)*100)}% / ${x.sample_size}</span><span class="error">${x.last_error||'—'}</span></div>`).join('');}
-function renderChart(data){const c=$('#trend-chart'),empty=$('#chart-empty');if(!data.length){empty.style.display='grid';return}empty.style.display='none';const dpr=devicePixelRatio||1,w=c.clientWidth,h=c.clientHeight;c.width=w*dpr;c.height=h*dpr;const x=c.getContext('2d');x.scale(dpr,dpr);x.clearRect(0,0,w,h);const max=Math.max(...data.map(d=>d.requests),1),pad=28;x.strokeStyle='#dfe5df';x.lineWidth=1;for(let i=0;i<4;i++){const y=pad+(h-pad*2)*i/3;x.beginPath();x.moveTo(pad,y);x.lineTo(w-pad,y);x.stroke()}x.strokeStyle='#177a4d';x.lineWidth=2.5;x.beginPath();data.forEach((d,i)=>{const px=pad+(w-pad*2)*(i/Math.max(data.length-1,1)),py=h-pad-(h-pad*2)*(d.requests/max);i?x.lineTo(px,py):x.moveTo(px,py)});x.stroke();x.fillStyle='#177a4d';data.forEach((d,i)=>{const px=pad+(w-pad*2)*(i/Math.max(data.length-1,1)),py=h-pad-(h-pad*2)*(d.requests/max);x.beginPath();x.arc(px,py,3.5,0,Math.PI*2);x.fill()})}
-function renderQuotas(){const q=state.quotas;$('#quota-grid').innerHTML=q.map(x=>{const pct=x.limit?Math.min(100,(x.used/x.limit)*100):0;const value=x.status==='available'?`${fmt(x.remaining)} ${x.unit}`:x.status==='not_configured'?'未配置':'官方接口不可用';return `<div class="quota-card"><header><b>${x.provider}</b>${dot(x.status==='available'?'healthy':'unknown')}</header><strong>${value}</strong><small>${x.status==='available'?`已用 ${fmt(x.used)} / ${fmt(x.limit)}${x.plan?' · '+x.plan:''}`:(x.error||'')}</small>${x.status==='available'?`<div class="progress"><i style="width:${pct}%"></i></div>`:''}</div>`}).join('')}
-function renderEvents(){const rows=state.events;$('#events-body').innerHTML=rows.map(e=>`<tr><td>${time(e.occurred_at)}</td><td>${e.kind==='provider'?'来源':'工具'}</td><td><b>${e.provider||e.tool}</b></td><td class="${e.success?'ok-text':'bad-text'}">${e.success?'成功':'失败'}</td><td>${e.duration_ms} ms</td><td>${[e.query_topic,e.query_language,e.query_keywords].filter(Boolean).join(' · ')||'—'}<small style="display:block;color:#9aa29c">${e.query_hash||''}</small></td><td class="bad-text">${e.error_summary||'—'}</td></tr>`).join('')||'<tr><td colspan="7">暂无调用记录</td></tr>'}
-function renderSettings(){const v=state.settings.values;$$('[data-key]').forEach(el=>{const val=v[el.dataset.key];if(el.type==='checkbox')el.checked=!!val;else el.value=val??''});const names={BAIDU_SK:'百度',TAVILY_SK:'Tavily',EXA_API_KEY:'Exa',ANYSEARCH_API_KEY:'AnySearch',DOUBAO_SEARCH_API_KEY:'豆包',JINA_API_KEY:'Jina Reader',MINERU_TOKEN:'MinerU'};$('#secret-list').innerHTML=Object.entries(state.settings.secrets).map(([k,on])=>`<div class="secret-row">${dot(on?'healthy':'unknown')}<div><b>${names[k]}</b><small>${on?'已配置':'未配置'}</small></div><button data-secret="${k}">${on?'替换':'设置'}</button></div>`).join('');$$('[data-secret]').forEach(b=>b.onclick=()=>editSecret(b.dataset.secret));}
-function changes(){const out={};$$('[data-key]').forEach(el=>{let v=el.type==='checkbox'?el.checked:el.type==='number'?Number(el.value):el.value;if(JSON.stringify(v)!==JSON.stringify(state.settings.values[el.dataset.key]))out[el.dataset.key]=v});return out}
-$$('[data-key]').forEach(el=>el.addEventListener('change',()=>$('#settings-dirty').classList.toggle('hidden',!Object.keys(changes()).length)));
-async function confirmDialog(title,copy,diff=''){const d=$('#confirm-dialog');$('#dialog-title').textContent=title;$('#dialog-copy').textContent=copy;$('#dialog-diff').textContent=diff;$('#dialog-diff').style.display=diff?'block':'none';d.showModal();return new Promise(res=>d.addEventListener('close',()=>res(d.returnValue==='confirm'),{once:true}))}
-$('#save-settings').onclick=async()=>{try{const c=changes();if(!Object.keys(c).length)return toast('没有需要保存的更改');await api('/__admin/api/settings',{method:'POST',body:JSON.stringify({changes:c,confirm:false})});if(!await confirmDialog('保存设置','将备份当前 YAML，再写入以下更改。重启后生效。',JSON.stringify(c,null,2)))return;const r=await api('/__admin/api/settings',{method:'POST',body:JSON.stringify({changes:c,confirm:true})});toast(`已保存，备份：${r.backup}`);$('#settings-dirty').classList.add('hidden')}catch(e){toast(e.message,true)}};
-async function editSecret(name){const value=prompt(`输入 ${name} 新值。内容不会回显或写入 YAML；留空表示删除。`);if(value===null)return;if(!await confirmDialog('更新私密凭据','新值将保存到 Docker 持久卷的私密覆盖文件，重启后生效。'))return;try{await api('/__admin/api/secrets',{method:'POST',body:JSON.stringify({name,value,confirm:true})});toast('凭据已保存，需要重启服务')}catch(e){toast(e.message,true)}}
-$('#restart-service').onclick=async()=>{if(!await confirmDialog('重启 WebSearch','当前请求会短暂中断，Docker 将自动重新启动服务。'))return;try{await api('/__admin/api/restart',{method:'POST',body:'{"confirm":true}'});toast('正在重启…');setTimeout(()=>location.reload(),3500)}catch(e){toast(e.message,true)}};
-$('#clear-cache').onclick=async()=>{if(!await confirmDialog('清空搜索缓存','此操作不可撤销，但不会删除监控历史。'))return;try{const r=await api('/__admin/api/cache/clear',{method:'POST',body:'{"confirm":true}'});toast(`已清理 ${r.cleared} 条缓存`)}catch(e){toast(e.message,true)}};
-async function load(){try{const [overview,quotas,events,settings]=await Promise.all([api('/__admin/api/overview'),api('/__admin/api/quotas'),api('/__admin/api/events?limit=100'),api('/__admin/api/settings')]);state={overview,quotas,events,settings};renderOverview();renderQuotas();renderEvents();renderSettings();$('#updated').textContent=`更新于 ${new Date().toLocaleTimeString('zh-CN',displayTime)}`}catch(e){toast(e.message,true)}}
-$('#refresh').onclick=load;window.addEventListener('resize',()=>state.overview&&renderChart(state.overview.trend||[]));nav(location.hash.slice(1)||'overview');load();setInterval(load,60000);
+'use strict';
+/* WebSearch Control Center - dependency-free frontend. */
+
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
+const REFRESH_MS = 60000;
+const TZ = { hour12: false, timeZone: 'Asia/Shanghai' };
+const PAGES = { overview: '运行总览', sources: '搜索源', usage: '调用记录', settings: '设置' };
+const HEALTH = { healthy: '正常', degraded: '不稳定', down: '异常', unknown: '未知' };
+const SYSTEM = { healthy: '运行正常', degraded: '部分降级', down: '部分异常', waiting: '等待真实调用' };
+const DOT = { healthy: 'healthy', degraded: 'degraded', down: 'down', unknown: 'unknown' };
+const DISPLAY = {
+  smartsearch: '智能搜索', academicsearch: '学术检索', cleanfetch: '网页抓取', pdf_parser: 'PDF 解析',
+  anysearch: 'AnySearch', baidu: '百度千帆', tavily: 'Tavily', exa: 'Exa', doubao: '豆包搜索',
+  baidu_web: '百度网页', bing: 'Bing', google: 'Google', duckduckgo: 'DuckDuckGo',
+  arxiv: 'arXiv', crossref: 'Crossref', openalex: 'OpenAlex', pubmed: 'PubMed', europepmc: 'Europe PMC',
+  dblp: 'DBLP', doaj: 'DOAJ', semantic_scholar: 'Semantic Scholar', google_scholar: 'Google Scholar',
+  webfetch: '网页抓取器', jina: 'Jina Reader', pdf_pipeline: 'PDF 流水线',
+};
+const SECRETS = {
+  BAIDU_SK: '百度', TAVILY_SK: 'Tavily', EXA_API_KEY: 'Exa', ANYSEARCH_API_KEY: 'AnySearch',
+  DOUBAO_SEARCH_API_KEY: '豆包', JINA_API_KEY: 'Jina Reader', MINERU_TOKEN: 'MinerU',
+};
+
+const state = {
+  overview: null, overviewError: null, overviewStale: false,
+  quotas: null, quotaError: null,
+  settings: null, settingsError: null, settingsDirty: false, settingsLoaded: false,
+  events: { rows: null, error: null, serverFiltered: true },
+  providerEvents: { rows: null, error: null },
+  filters: { kind: 'provider', status: '', source: '', limit: 50 },
+  lastLoad: 0,
+};
+
+/* ---------- helpers ---------- */
+
+const ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+function esc(value) {
+  if (value === null || value === undefined) return '';
+  return String(value).replace(/[&<>"']/g, ch => ESCAPES[ch]);
+}
+function num(value) {
+  return typeof value === 'number' && isFinite(value) ? value : null;
+}
+function fmtInt(value) {
+  const n = num(value);
+  return n === null ? '—' : new Intl.NumberFormat('zh-CN').format(n);
+}
+function fmtMS(value) {
+  const n = num(value);
+  return n === null ? '—' : n + ' ms';
+}
+function fmtPct(rate, sample) {
+  const n = num(rate);
+  return n === null || !sample ? '—' : Math.round(n * 100) + '%';
+}
+function fmtAt(value) {
+  if (!value) return '—';
+  const d = new Date(value);
+  return isNaN(d.getTime()) ? '—' : d.toLocaleString('zh-CN', TZ);
+}
+function fmtClock() {
+  return new Date().toLocaleTimeString('zh-CN', TZ);
+}
+function displayName(id) {
+  return DISPLAY[id] || id || '';
+}
+function dot(status) {
+  return `<i class="dot ${DOT[status] || 'unknown'}"></i>`;
+}
+function setText(sel, text) {
+  const el = $(sel);
+  if (el) el.textContent = text;
+}
+function setNote(el, text, cls) {
+  if (!el) return;
+  el.textContent = text || '';
+  el.className = 'panel-note' + (cls ? ' ' + cls : '');
+}
+function emptyRow(cols, text) {
+  return `<tr><td class="empty" colspan="${cols}">${esc(text)}</td></tr>`;
+}
+function hasFilter() {
+  const f = state.filters;
+  return Boolean(f.kind || f.status || f.source);
+}
+function matchesFilters(e) {
+  const f = state.filters;
+  if (f.kind && e.kind !== f.kind) return false;
+  if (f.status === 'success' && !e.success) return false;
+  if (f.status === 'failure' && e.success) return false;
+  if (f.source) {
+    const src = e.kind === 'provider' ? e.provider : e.tool;
+    if (src !== f.source) return false;
+  }
+  return true;
+}
+function sourceOf(e) {
+  return e.kind === 'provider' ? (e.provider || '') : (e.tool || '');
+}
+function activationOf(s) {
+  if (s.configured === false) return { key: 'not_configured', label: '未配置' };
+  if (s.active === true) return { key: 'active', label: '当前启用' };
+  if (s.active === false) return { key: 'inactive', label: '已配置未使用' };
+  return { key: 'unknown', label: '未知' };
+}
+function healthOf(s) {
+  if (s.active === false || s.configured === false) return { dot: 'unknown', label: '—' };
+  if (!s.last_seen_at) return { dot: 'unknown', label: '尚无调用' };
+  return { dot: DOT[s.status] || 'unknown', label: HEALTH[s.status] || '未知' };
+}
+
+/* ---------- transport ---------- */
+
+async function fetchJSON(path, options = {}) {
+  const headers = Object.assign({ Accept: 'application/json' }, options.headers || {});
+  const res = await fetch(path, Object.assign({ cache: 'no-store' }, options, { headers }));
+  let body = null;
+  try { body = await res.json(); } catch (e) { body = null; }
+  if (!res.ok) {
+    const msg = body && body.error ? body.error : 'HTTP ' + res.status;
+    throw new Error(msg);
+  }
+  if (body === null) throw new Error('响应不是有效的 JSON');
+  return body;
+}
+
+/* ---------- loaders (each panel fails on its own) ---------- */
+
+async function loadOverview() {
+  try {
+    const data = await fetchJSON('/__admin/api/overview');
+    state.overview = data;
+    // The source catalog is the schema this page is built around; older
+    // payloads are shown as-is but flagged so they are never read as current.
+    state.overviewStale = !(data && data.system && Array.isArray(data.sources));
+    state.overviewError = null;
+  } catch (e) {
+    state.overviewError = e.message;
+  }
+  renderSystem();
+  renderToolKpis();
+  renderWebSources();
+  renderSourcePages();
+  renderUsageSourceOptions();
+  renderConfig();
+}
+
+async function loadQuotas() {
+  try {
+    const data = await fetchJSON('/__admin/api/quotas');
+    state.quotas = Array.isArray(data) ? data : [];
+    state.quotaError = null;
+  } catch (e) {
+    state.quotaError = e.message;
+  }
+  renderTavily();
+  renderWebSources();
+  renderSourcePages();
+}
+
+async function loadSettings() {
+  try {
+    const data = await fetchJSON('/__admin/api/settings');
+    if (!data || !data.values) throw new Error('设置响应缺少 values 字段');
+    state.settings = data;
+    state.settingsError = null;
+  } catch (e) {
+    state.settingsError = e.message;
+  }
+  renderConfig();
+  if (!state.settingsLoaded || !state.settingsDirty) renderSettingsForm();
+}
+
+async function loadEvents() {
+  const f = state.filters;
+  const params = new URLSearchParams();
+  params.set('limit', String(f.limit));
+  if (f.kind) params.set('kind', f.kind);
+  if (f.status) params.set('status', f.status);
+  if (f.source) params.set('source', f.source);
+  try {
+    const rows = await fetchJSON('/__admin/api/events?' + params.toString());
+    state.events.rows = Array.isArray(rows) ? rows : [];
+    state.events.error = null;
+    state.events.serverFiltered = !hasFilter() || state.events.rows.every(matchesFilters);
+  } catch (e) {
+    state.events.error = e.message;
+  }
+  renderUsage();
+  renderUsageSourceOptions();
+}
+
+async function loadProviderEvents() {
+  try {
+    const rows = await fetchJSON('/__admin/api/events?limit=20&kind=provider');
+    state.providerEvents.rows = (Array.isArray(rows) ? rows : []).filter(e => e && e.kind === 'provider');
+    state.providerEvents.error = null;
+  } catch (e) {
+    state.providerEvents.error = e.message;
+  }
+  renderOverviewEvents();
+}
+
+async function loadAll() {
+  await Promise.allSettled([loadOverview(), loadQuotas(), loadSettings(), loadEvents(), loadProviderEvents()]);
+  state.lastLoad = Date.now();
+  renderUpdated();
+}
+
+function anyFailure() {
+  return Boolean(state.overviewError || state.quotaError || state.settingsError || state.events.error || state.providerEvents.error || state.overviewStale);
+}
+
+function renderUpdated() {
+  const el = $('#updated');
+  if (!el) return;
+  el.textContent = '更新于 ' + fmtClock() + (anyFailure() ? ' · 部分数据可能已过期' : '');
+  el.classList.toggle('warn', anyFailure());
+}
+
+/* ---------- overview: system + tool KPIs ---------- */
+
+function renderSystem() {
+  const o = state.overview;
+  const sys = o && o.system ? o.system : null;
+  const label = $('#system-status');
+  const d = $('#system-dot');
+  const note = $('#system-note');
+  if (!o) {
+    label.textContent = '—';
+    d.className = 'dot unknown';
+    setNote(note, state.overviewError ? '读取失败：' + state.overviewError : '正在读取…', state.overviewError ? 'bad' : '');
+  } else if (!sys) {
+    label.textContent = '未知';
+    d.className = 'dot unknown';
+    setNote(note, '数据可能已过期：概览接口未返回系统摘要（system）', 'warn');
+  } else {
+    label.textContent = SYSTEM[sys.status] || '未知';
+    d.className = 'dot ' + (sys.status === 'waiting' ? 'unknown' : (DOT[sys.status] || 'unknown'));
+    const summary = `已启用 ${fmtInt(sys.enabled)} 个 · 已观察 ${fmtInt(sys.observed)} 个 · 异常 ${fmtInt(sys.down)} 个`;
+    if (state.overviewError) setNote(note, summary + ' · 数据可能已过期：' + state.overviewError, 'warn');
+    else if (sys.status === 'waiting') setNote(note, summary + ' · 尚未观察到近期真实调用', '');
+    else setNote(note, summary, '');
+  }
+  const has = o && sys;
+  setText('#system-enabled', has ? fmtInt(sys.enabled) : '—');
+  setText('#system-observed', has ? fmtInt(sys.observed) : '—');
+  setText('#system-degraded', has ? fmtInt(sys.degraded) : '—');
+  setText('#system-down', has ? fmtInt(sys.down) : '—');
+}
+
+function renderToolKpis() {
+  const raw = state.overview && state.overview.today;
+  const today = raw && raw.day ? raw : null;
+  const avg = today && num(today.requests) > 0 ? Math.round(today.duration_ms / today.requests) : null;
+  const cards = [
+    ['今日调用总数', today ? fmtInt(today.requests) : '—', today ? `缓存命中 ${fmtInt(today.cache_hits)} 次` : '暂无工具层调用'],
+    ['今日成功次数', today ? fmtInt(today.successes) : '—', '仅统计 MCP 工具层事件'],
+    ['今日失败次数', today ? fmtInt(today.failures) : '—', '仅统计 MCP 工具层事件'],
+    ['今日平均响应时间', avg === null ? '—' : fmtMS(avg), today && num(today.requests) > 0 ? '工具层总耗时 ÷ 调用数' : '无调用时不计算'],
+  ];
+  $('#tool-kpis').innerHTML = cards.map(([label, value, detail]) =>
+    `<article class="kpi"><header><b>${esc(label)}</b></header><strong>${esc(value)}</strong><small class="dim">${esc(detail)}</small></article>`
+  ).join('');
+}
+
+/* ---------- sources ---------- */
+
+function webSources() {
+  const o = state.overview;
+  if (!o) return null;
+  if (Array.isArray(o.sources)) return o.sources;
+  // Legacy payload: show observed health rows without inventing a catalog.
+  return (Array.isArray(o.providers) ? o.providers : []).map(h => Object.assign({}, h, {
+    id: h.name, name: displayName(h.name), group: 'web', configured: null, active: null,
+  }));
+}
+
+function academicSources() {
+  const o = state.overview;
+  if (!o) return null;
+  return Array.isArray(o.academic_sources) ? o.academic_sources : null;
+}
+
+function tavilyItem() {
+  if (!Array.isArray(state.quotas)) return null;
+  return state.quotas.find(q => q && q.provider === 'tavily') || null;
+}
+
+function quotaCell(s) {
+  if (!s || s.quota_queryable !== true) return '<span class="dim">不可查询</span>';
+  const q = tavilyItem();
+  if (!q) return state.quotaError ? '<span class="dim">查询失败</span>' : '<span class="dim">尚未返回</span>';
+  if (q.status === 'available') return `${esc(fmtInt(q.remaining))} / ${esc(fmtInt(q.limit))} ${esc(q.unit || '')}`.trim();
+  if (q.status === 'not_configured') return '未配置';
+  if (q.status === 'query_failed') return '<span class="bad-text">查询失败</span>';
+  return '未知';
+}
+
+function healthStrip(s) {
+  const outcomes = Array.isArray(s.recent_outcomes) ? s.recent_outcomes.slice(-20) : [];
+  const cells = Array(Math.max(0, 20 - outcomes.length)).fill(null).concat(outcomes);
+  const title = outcomes.length ? `最近 ${outcomes.length} 次真实调用` : '暂无真实调用';
+  return `<span class="health-strip" title="${esc(title)}" aria-label="${esc(title)}">` +
+    cells.map(ok => `<i class="${ok === null ? 'empty' : ok ? 'ok' : 'fail'}"></i>`).join('') + '</span>';
+}
+
+function sourceRowHtml(s, detailed) {
+  const act = activationOf(s);
+  const health = healthOf(s);
+  const today = s.today && s.today.day ? s.today : null;
+  const name = s.name || displayName(s.id);
+  const id = s.id || '';
+  const cells = [
+    `<td class="src-name"><b>${esc(name)}</b>${id ? `<small class="dim">${esc(id)}</small>` : ''}</td>`,
+    `<td><span class="tag ${esc(act.key)}">${esc(act.label)}</span></td>`,
+    `<td class="nowrap">${s.active === false || s.configured === false ? '<span class="dim">—</span>' : dot(health.dot) + ' ' + esc(health.label)}</td>`,
+    `<td>${healthStrip(s)}</td>`,
+    `<td class="num">${today ? fmtInt(today.requests) : '<span class="dim">—</span>'}</td>`,
+  ];
+  if (detailed) {
+    cells.push(`<td class="num">${today ? fmtInt(today.successes) + ' / ' + fmtInt(today.failures) : '<span class="dim">—</span>'}</td>`);
+  }
+  const successRate = today && num(today.requests) > 0 ? today.successes / today.requests : null;
+  cells.push(`<td class="num">${successRate === null ? '<span class="dim">—</span>' : esc(Math.round(successRate * 100) + '%')}</td>`);
+  cells.push(`<td class="num">${today && num(today.requests) > 0 ? esc(fmtMS(Math.round(today.duration_ms / today.requests))) : '<span class="dim">—</span>'}</td>`);
+  if (detailed) {
+    cells.push(`<td class="nowrap">${esc(fmtAt(s.last_seen_at))}</td>`);
+  }
+  cells.push(`<td>${quotaCell(s)}</td>`);
+  if (detailed) {
+    cells.push(`<td class="wrap-any">${s.last_error ? '<span class="bad-text">' + esc(s.last_error) + '</span>' : '<span class="dim">—</span>'}</td>`);
+  }
+  return `<tr class="${s.active === true && s.status === 'down' ? 'row-down' : ''}">${cells.join('')}</tr>`;
+}
+
+function countsLabel(list) {
+  let active = 0, inactive = 0, unconfigured = 0;
+  list.forEach(s => {
+    if (s.configured === false) unconfigured++;
+    else if (s.active === true) active++;
+    else if (s.active === false) inactive++;
+    else unconfigured++;
+  });
+  return `启用 ${active} · 已配置未用 ${inactive} · 未配置 ${unconfigured}`;
+}
+
+function renderWebSources() {
+  const body = $('#web-sources-body');
+  const note = $('#web-sources-note');
+  const list = webSources();
+  if (list === null) {
+    body.innerHTML = emptyRow(6, state.overviewError ? '读取失败' : '正在读取…');
+    setNote(note, state.overviewError ? '读取失败：' + state.overviewError : '', state.overviewError ? 'bad' : '');
+    return;
+  }
+  const active = list.filter(s => s.active === true);
+  const shown = active;
+  body.innerHTML = shown.length ? shown.map(s => sourceRowHtml(s, false)).join('') : emptyRow(8, '当前模式没有已启用的 Web 来源');
+  if (state.overviewError) setNote(note, '数据可能已过期：' + state.overviewError, 'warn');
+  else if (!Array.isArray(state.overview.sources)) setNote(note, '数据可能已过期：接口未返回来源清单（sources），按已观测 Provider 展示', 'warn');
+  else setNote(note, '', '');
+}
+
+function renderSourcePages() {
+  const webList = webSources();
+  const acadList = academicSources();
+
+  const webBody = $('#sources-web-body');
+  if (webList === null) {
+    webBody.innerHTML = emptyRow(11, state.overviewError ? '读取失败' : '正在读取…');
+    setNote($('#sources-web-note'), state.overviewError ? '读取失败：' + state.overviewError : '', state.overviewError ? 'bad' : '');
+    setText('#sources-web-counts', '—');
+  } else {
+    webBody.innerHTML = webList.length ? webList.map(s => sourceRowHtml(s, true)).join('') : emptyRow(11, '暂无 Web 来源');
+    setText('#sources-web-counts', countsLabel(webList));
+    if (state.overviewError) setNote($('#sources-web-note'), '数据可能已过期：' + state.overviewError, 'warn');
+    else if (!Array.isArray(state.overview.sources)) setNote($('#sources-web-note'), '数据可能已过期：接口未返回来源清单（sources）', 'warn');
+    else setNote($('#sources-web-note'), '', '');
+  }
+
+  const acadBody = $('#sources-academic-body');
+  if (acadList === null) {
+    acadBody.innerHTML = emptyRow(11, state.overviewError ? '读取失败' : '正在读取…');
+    setText('#sources-academic-counts', '—');
+    setNote($('#sources-academic-note'), state.overviewError
+      ? '读取失败：' + state.overviewError
+      : '数据可能已过期：概览接口未返回学术来源清单（academic_sources）', state.overviewError ? 'bad' : 'warn');
+  } else {
+    acadBody.innerHTML = acadList.length ? acadList.map(s => sourceRowHtml(s, true)).join('') : emptyRow(11, '暂无学术来源');
+    setText('#sources-academic-counts', countsLabel(acadList));
+    setNote($('#sources-academic-note'), state.overviewError ? '数据可能已过期：' + state.overviewError : '', state.overviewError ? 'warn' : '');
+  }
+}
+
+/* ---------- Tavily quota card ---------- */
+
+function renderTavily() {
+  const value = $('#tavily-value');
+  const note = $('#tavily-note');
+  const dotEl = $('#tavily-dot');
+  const details = $('#tavily-details');
+  const q = tavilyItem();
+  const kv = (pairs) => pairs.filter(p => p[1]).map(p => `<div><dt>${esc(p[0])}</dt><dd>${esc(p[1])}</dd></div>`).join('');
+  if (state.quotaError && !q) {
+    value.textContent = '查询失败';
+    dotEl.className = 'dot down';
+    setNote(note, '数据可能已过期：' + state.quotaError, 'warn');
+    details.innerHTML = '';
+    return;
+  }
+  if (!q) {
+    value.textContent = '—';
+    dotEl.className = 'dot unknown';
+    setNote(note, state.quotas ? '官方额度接口未返回 Tavily 条目' : '正在读取…', state.quotas ? 'bad' : '');
+    details.innerHTML = '';
+    return;
+  }
+  details.innerHTML = kv([
+    ['已用', num(q.used) === null ? '' : fmtInt(q.used) + ' ' + (q.unit || '')],
+    ['上限', num(q.limit) === null ? '' : fmtInt(q.limit) + ' ' + (q.unit || '')],
+    ['套餐', q.plan || ''],
+    ['更新时间', q.updated_at ? fmtAt(q.updated_at) : ''],
+    ['官方接口', q.source || ''],
+  ]);
+  switch (q.status) {
+    case 'available':
+      value.textContent = `${fmtInt(q.remaining)} / ${fmtInt(q.limit)} ${q.unit || ''}`.trim();
+      dotEl.className = 'dot healthy';
+      setNote(note, state.quotaError ? '数据可能已过期：' + state.quotaError : '来自官方额度接口，非本地估算', state.quotaError ? 'warn' : '');
+      break;
+    case 'not_configured':
+      value.textContent = '未配置';
+      dotEl.className = 'dot unknown';
+      setNote(note, '未配置 Tavily Key，无法查询官方额度', '');
+      break;
+    case 'query_failed':
+      value.textContent = '查询失败';
+      dotEl.className = 'dot down';
+      setNote(note, q.error || '官方额度接口未返回可用数据', 'bad');
+      break;
+    default:
+      value.textContent = '未知';
+      dotEl.className = 'dot unknown';
+      setNote(note, q.error || '官方额度接口返回了未识别的状态', 'warn');
+  }
+}
+
+/* ---------- effective config summary ---------- */
+
+function renderConfig() {
+  const list = $('#config-list');
+  const note = $('#config-note');
+  const secrets = $('#config-secrets');
+  const s = state.settings;
+  if (!s) {
+    list.innerHTML = '';
+    secrets.textContent = '';
+    setNote(note, state.settingsError ? '读取失败：' + state.settingsError : '正在读取…', state.settingsError ? 'bad' : '');
+    return;
+  }
+  const v = s.values || {};
+  const yn = value => value === true ? '启用' : value === false ? '关闭' : '未知';
+  const rows = [
+    ['搜索模式', typeof v.mode === 'string' ? v.mode : ''],
+    ['网络区域', v.network === 'china' ? '中国' : v.network === 'international' ? '国际' : ''],
+    ['上游超时', num(v.upstream_timeout_sec) === null ? '' : String(v.upstream_timeout_sec) + ' 秒'],
+    ['缓存', yn(v['cache.enabled'])],
+    ['已启用来源', state.overview && state.overview.system ? fmtInt(state.overview.system.enabled) + ' 个' : ''],
+  ];
+  list.innerHTML = rows.filter(r => r[1]).map(r => `<div><dt>${esc(r[0])}</dt><dd>${esc(r[1])}</dd></div>`).join('');
+  secrets.textContent = '';
+  if (state.settingsError) setNote(note, '数据可能已过期：' + state.settingsError, 'warn');
+  else setNote(note, '重启后生效的当前配置', '');
+}
+
+/* ---------- events ---------- */
+
+function eventCells(e, cols) {
+  const out = [`<td class="nowrap">${esc(fmtAt(e.occurred_at))}</td>`];
+  if (cols !== 'overview') {
+    out.push(`<td>${esc(e.kind === 'provider' ? '来源' : '工具')}</td>`);
+  }
+  out.push(
+    `<td>${esc(displayName(sourceOf(e)) || '—')}</td>`,
+    `<td class="${e.success ? 'ok-text' : 'bad-text'}">${e.success ? '成功' : '失败'}</td>`,
+    `<td class="num">${esc(fmtMS(e.duration_ms))}</td>`,
+    `<td class="num">${fmtInt(e.result_count)}</td>`,
+  );
+  if (cols === 'overview') {
+    out.push(`<td>${esc([e.query_topic, e.query_language].filter(Boolean).join(' / ') || '—')}</td>`);
+    out.push(`<td class="wrap-any">${esc(e.query_keywords || '—')}</td>`);
+    out.push(`<td class="wrap-any">${e.error_summary ? '<span class="bad-text">' + esc(e.error_summary) + '</span>' : '<span class="dim">—</span>'}</td>`);
+  } else {
+    out.push(`<td>${e.cache_hit ? '是' : '否'}</td>`);
+    out.push(`<td>${esc([e.query_topic, e.query_language].filter(Boolean).join(' / ') || '—')}</td>`);
+    out.push(`<td class="wrap-any">${esc(e.query_keywords || '—')}</td>`);
+    out.push(`<td class="mono">${esc(e.query_hash || '—')}</td>`);
+    out.push(`<td class="wrap-any">${e.error_summary ? '<span class="bad-text">' + esc(e.error_summary) + '</span>' : '<span class="dim">—</span>'}</td>`);
+  }
+  return out;
+}
+
+function renderOverviewEvents() {
+  const body = $('#overview-events-body');
+  const note = $('#overview-events-note');
+  const rows = state.providerEvents.rows;
+  if (rows === null) {
+    body.innerHTML = emptyRow(8, state.providerEvents.error ? '读取失败' : '正在读取…');
+    setNote(note, state.providerEvents.error ? '读取失败：' + state.providerEvents.error : '', state.providerEvents.error ? 'bad' : '');
+    return;
+  }
+  const top = rows.slice(0, 6);
+  body.innerHTML = top.length
+    ? top.map(e => `<tr>${eventCells(e, 'overview').join('')}</tr>`).join('')
+    : emptyRow(8, '暂无 Provider 事件（明细保留 30 天）');
+  if (state.providerEvents.error) setNote(note, '数据可能已过期：' + state.providerEvents.error, 'warn');
+  else if (!top.length) setNote(note, '来源层调用后才会出现真实事件，不做模拟', '');
+  else setNote(note, '', '');
+}
+
+function renderUsage() {
+  const body = $('#usage-body');
+  const note = $('#events-note');
+  const rows = state.events.rows;
+  const exportBtn = $('#export-csv');
+  if (rows === null) {
+    body.innerHTML = emptyRow(11, state.events.error ? '读取失败' : '正在读取…');
+    exportBtn.disabled = true;
+    setNote(note, state.events.error ? '读取失败：' + state.events.error : '', state.events.error ? 'bad' : '');
+    return;
+  }
+  const filtered = rows.filter(matchesFilters);
+  body.innerHTML = filtered.length
+    ? filtered.map(e => `<tr>${eventCells(e, 'usage').join('')}</tr>`).join('')
+    : emptyRow(11, rows.length ? '当前筛选条件下没有匹配记录' : '暂无调用记录');
+  exportBtn.disabled = filtered.length === 0;
+  const parts = [];
+  if (state.events.error) parts.push(['数据可能已过期：' + state.events.error, 'warn']);
+  if (hasFilter() && !state.events.serverFiltered) parts.push(['后端未应用筛选参数，当前按已获取的 ' + rows.length + ' 条在本地筛选', 'warn']);
+  parts.push(['匹配 ' + filtered.length + ' 条 / 已获取 ' + rows.length + ' 条 · 查询全文不保存', '']);
+  note.innerHTML = parts.filter(p => p[0]).map(p => `<span${p[1] ? ' class="' + p[1] + '"' : ''}>${esc(p[0])}</span>`).join(' · ');
+}
+
+/* ---------- CSV export (UTF-8 BOM) ---------- */
+
+function csvCell(value) {
+  const s = value === null || value === undefined ? '' : String(value);
+  return '"' + s.replace(/"/g, '""').replace(/[\r\n]+/g, ' ') + '"';
+}
+function stamp() {
+  const d = new Date();
+  const p = n => String(n).padStart(2, '0');
+  return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+}
+function exportCSV() {
+  const rows = (state.events.rows || []).filter(matchesFilters);
+  if (!rows.length) {
+    toast('当前没有可导出的记录', true);
+    return;
+  }
+  const head = ['时间', '层级', '来源/工具', '状态', '耗时(ms)', '结果数', '缓存命中', '主题', '语言', '关键词', '查询哈希', '查询字符数', '错误摘要'];
+  const lines = [head.map(csvCell).join(',')];
+  rows.forEach(e => {
+    lines.push([
+      fmtAt(e.occurred_at),
+      e.kind === 'provider' ? '来源' : '工具',
+      displayName(sourceOf(e)),
+      e.success ? '成功' : '失败',
+      num(e.duration_ms) === null ? '' : e.duration_ms,
+      num(e.result_count) === null ? '' : e.result_count,
+      e.cache_hit ? '是' : '否',
+      e.query_topic || '',
+      e.query_language || '',
+      e.query_keywords || '',
+      e.query_hash || '',
+      num(e.query_chars) === null ? '' : e.query_chars,
+      e.error_summary || '',
+    ].map(csvCell).join(','));
+  });
+  const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'websearch-events-' + stamp() + '.csv';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  toast('已导出 ' + rows.length + ' 条记录（UTF-8 BOM）');
+}
+
+/* ---------- usage filters ---------- */
+
+function knownSources() {
+  const map = new Map();
+  const o = state.overview;
+  const add = (id, label) => { if (id) map.set(id, label || displayName(id)); };
+  if (o) {
+    (Array.isArray(o.providers) ? o.providers : []).forEach(h => h && add(h.name));
+    (Array.isArray(o.tools) ? o.tools : []).forEach(h => h && add(h.name));
+    (Array.isArray(o.sources) ? o.sources : []).forEach(s => s && add(s.id, s.name));
+    (Array.isArray(o.academic_sources) ? o.academic_sources : []).forEach(s => s && add(s.id, s.name));
+  }
+  [state.events.rows, state.providerEvents.rows].forEach(list => {
+    (list || []).forEach(e => add(sourceOf(e)));
+  });
+  return Array.from(map.entries()).sort((a, b) => String(a[1]).localeCompare(String(b[1]), 'zh-CN'));
+}
+
+function renderUsageSourceOptions() {
+  const sel = $('#filter-source');
+  if (!sel) return;
+  const entries = knownSources();
+  const known = new Set(entries.map(e => e[0]));
+  const current = state.filters.source;
+  const options = ['<option value="">全部</option>'];
+  if (current && !known.has(current)) {
+    options.push(`<option value="${esc(current)}">${esc(displayName(current))}</option>`);
+  }
+  entries.forEach(([id, label]) => {
+    const text = label && label !== id ? label + '（' + id + '）' : id;
+    options.push(`<option value="${esc(id)}">${esc(text)}</option>`);
+  });
+  sel.innerHTML = options.join('');
+  sel.value = current;
+}
+
+/* ---------- settings & advanced actions ---------- */
+
+function renderSettingsForm() {
+  const s = state.settings;
+  if (!s || !s.values) return;
+  $$('[data-key]').forEach(el => {
+    const value = s.values[el.dataset.key];
+    if (el.type === 'checkbox') el.checked = value === true;
+    else el.value = value === null || value === undefined ? '' : value;
+  });
+  $('#settings-dirty').classList.add('hidden');
+  state.settingsDirty = false;
+
+  const flags = s.secrets || {};
+  $('#secret-list').innerHTML = Object.keys(flags).map(key => {
+    const on = flags[key] === true;
+    return `<div class="secret-row">${dot(on ? 'healthy' : 'unknown')}` +
+      `<div><b>${esc(SECRETS[key] || key)}</b><small>${on ? '已配置' : '未配置'}</small></div>` +
+      `<button type="button" data-secret="${esc(key)}">${on ? '替换' : '设置'}</button></div>`;
+  }).join('');
+  $$('[data-secret]').forEach(b => { b.onclick = () => editSecret(b.dataset.secret); });
+  state.settingsLoaded = true;
+}
+
+function changes() {
+  if (!state.settings) return {};
+  const out = {};
+  $$('[data-key]').forEach(el => {
+    const value = el.type === 'checkbox' ? el.checked : el.type === 'number' ? Number(el.value) : el.value;
+    const before = state.settings.values[el.dataset.key];
+    if (JSON.stringify(value) !== JSON.stringify(before)) out[el.dataset.key] = value;
+  });
+  return out;
+}
+
+function markDirty() {
+  const dirty = Object.keys(changes()).length > 0;
+  state.settingsDirty = dirty;
+  $('#settings-dirty').classList.toggle('hidden', !dirty);
+}
+
+async function confirmDialog(title, copy, diff) {
+  const d = $('#confirm-dialog');
+  $('#dialog-title').textContent = title;
+  $('#dialog-copy').textContent = copy;
+  const pre = $('#dialog-diff');
+  pre.textContent = diff || '';
+  pre.style.display = diff ? 'block' : 'none';
+  d.showModal();
+  return new Promise(resolve => {
+    d.addEventListener('close', () => resolve(d.returnValue === 'confirm'), { once: true });
+  });
+}
+
+function toast(message, bad) {
+  const el = $('#toast');
+  el.textContent = message;
+  el.style.background = bad ? '#9e342f' : '#17231c';
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2600);
+}
+
+async function postJSON(path, payload) {
+  return fetchJSON(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+async function saveSettings() {
+  const diff = changes();
+  if (!Object.keys(diff).length) {
+    toast('没有需要保存的更改');
+    return;
+  }
+  try {
+    await postJSON('/__admin/api/settings', { changes: diff, confirm: false });
+    if (!(await confirmDialog('保存设置', '将备份当前 YAML，再写入以下更改。重启后生效。', JSON.stringify(diff, null, 2)))) return;
+    const res = await postJSON('/__admin/api/settings', { changes: diff, confirm: true });
+    toast(res.backup ? '已保存，备份：' + res.backup : '已保存');
+    await loadSettings();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function editSecret(name) {
+  const label = SECRETS[name] || name;
+  const value = prompt('输入 ' + label + ' 的新值。内容不会回显，也不会写入 YAML；留空表示删除。');
+  if (value === null) return;
+  if (!(await confirmDialog('更新私密凭据', '新值将保存到 Docker 持久卷的私密覆盖文件，重启后生效。'))) return;
+  try {
+    await postJSON('/__admin/api/secrets', { name: name, value: value, confirm: true });
+    toast(label + ' 已保存，需要重启服务');
+    await loadSettings();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+/* ---------- navigation & wiring ---------- */
+
+function nav(page, push) {
+  if (!PAGES[page]) page = 'overview';
+  $$('.page').forEach(el => el.classList.toggle('active', el.id === 'page-' + page));
+  $$('.nav').forEach(el => el.classList.toggle('active', el.dataset.page === page));
+  $('#page-title').textContent = PAGES[page];
+  if (push !== false) history.replaceState(null, '', '#' + page);
+}
+
+function wire() {
+  $$('.nav').forEach(btn => btn.addEventListener('click', () => nav(btn.dataset.page)));
+  $$('[data-jump]').forEach(link => link.addEventListener('click', e => { e.preventDefault(); nav(link.dataset.jump); }));
+  $('#refresh').addEventListener('click', () => loadAll());
+  $('#reload-events').addEventListener('click', () => loadEvents());
+  $('#export-csv').addEventListener('click', exportCSV);
+  $('#save-settings').addEventListener('click', saveSettings);
+  $('#restart-service').addEventListener('click', async () => {
+    if (!(await confirmDialog('重启 WebSearch', '当前请求会短暂中断，Docker 将自动重新启动服务。'))) return;
+    try {
+      await postJSON('/__admin/api/restart', { confirm: true });
+      toast('正在重启…');
+      setTimeout(() => location.reload(), 3500);
+    } catch (e) {
+      toast(e.message, true);
+    }
+  });
+  $('#clear-cache').addEventListener('click', async () => {
+    if (!(await confirmDialog('清空搜索缓存', '此操作不可撤销，但不会删除监控历史。'))) return;
+    try {
+      const res = await postJSON('/__admin/api/cache/clear', { confirm: true });
+      toast('已清理 ' + fmtInt(res.cleared) + ' 条缓存');
+    } catch (e) {
+      toast(e.message, true);
+    }
+  });
+  $$('[data-key]').forEach(el => el.addEventListener('change', markDirty));
+  const applyFilter = () => {
+    state.filters.kind = $('#filter-kind').value;
+    state.filters.status = $('#filter-status').value;
+    state.filters.source = $('#filter-source').value;
+    state.filters.limit = Number($('#filter-limit').value) || 20;
+    loadEvents();
+  };
+  ['#filter-kind', '#filter-status', '#filter-source', '#filter-limit'].forEach(sel => {
+    $(sel).addEventListener('change', applyFilter);
+  });
+  $('#filter-limit').value = String(state.filters.limit);
+  $('#filter-kind').value = state.filters.kind;
+  $('#filter-status').value = state.filters.status;
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && Date.now() - state.lastLoad > REFRESH_MS) loadAll();
+  });
+}
+
+wire();
+nav(location.hash.slice(1) || 'overview', false);
+loadAll();
+setInterval(() => { if (!document.hidden) loadAll(); }, REFRESH_MS);
