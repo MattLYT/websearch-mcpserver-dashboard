@@ -86,3 +86,11 @@ jina:
 log:
   max_size: 1
   max_age: 1
+
+# Local-only functional prototype. It records real calls passively and never
+# stores raw queries or URLs. Detail rows expire after 30 days; daily totals remain.
+dashboard:
+  enabled: true
+  storage_path: /data/dashboard.db
+  retention_days: 30
+  secrets_path: /data/dashboard-secrets.json

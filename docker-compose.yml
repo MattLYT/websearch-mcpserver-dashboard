@@ -34,7 +34,9 @@ services:
       - ALL_PROXY
     volumes:
       - websearch-data:/data
-      - ./config.yaml:/app/config.yaml:ro
+      # Dashboard settings writes are validated and backed up under /data
+      # before this single file is updated. The repository remains loopback-only.
+      - ./config.yaml:/app/config.yaml
     stop_grace_period: 15s
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8338/__admin/health"]

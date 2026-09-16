@@ -1,0 +1,485 @@
+// Package telemetry stores privacy-preserving usage and passive health data for
+// the local dashboard. Raw queries and URLs are never persisted.
+package telemetry
+
+import (
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+	"unicode"
+
+	_ "modernc.org/sqlite"
+)
+
+const defaultRetentionDays = 30
+
+var (
+	defaultMu    sync.RWMutex
+	defaultStore *Store
+)
+
+// Event is a single tool or provider observation. Query is summarized before
+// persistence and is never written verbatim.
+type Event struct {
+	Kind        string
+	Tool        string
+	Provider    string
+	Query       string
+	Success     bool
+	Duration    time.Duration
+	CacheHit    bool
+	ResultCount int
+	Error       error
+}
+
+type StoredEvent struct {
+	ID            int64  `json:"id"`
+	OccurredAt    string `json:"occurred_at"`
+	Kind          string `json:"kind"`
+	Tool          string `json:"tool"`
+	Provider      string `json:"provider"`
+	Success       bool   `json:"success"`
+	DurationMS    int64  `json:"duration_ms"`
+	CacheHit      bool   `json:"cache_hit"`
+	ResultCount   int    `json:"result_count"`
+	ErrorSummary  string `json:"error_summary,omitempty"`
+	QueryHash     string `json:"query_hash,omitempty"`
+	QueryChars    int    `json:"query_chars,omitempty"`
+	QueryLanguage string `json:"query_language,omitempty"`
+	QueryTopic    string `json:"query_topic,omitempty"`
+	QueryKeywords string `json:"query_keywords,omitempty"`
+}
+
+type DailyUsage struct {
+	Day         string `json:"day"`
+	Kind        string `json:"kind"`
+	Tool        string `json:"tool"`
+	Provider    string `json:"provider"`
+	Requests    int64  `json:"requests"`
+	Successes   int64  `json:"successes"`
+	Failures    int64  `json:"failures"`
+	CacheHits   int64  `json:"cache_hits"`
+	DurationMS  int64  `json:"duration_ms"`
+	ResultCount int64  `json:"result_count"`
+}
+
+type Health struct {
+	Name          string  `json:"name"`
+	Kind          string  `json:"kind"`
+	Status        string  `json:"status"`
+	LastSuccessAt string  `json:"last_success_at,omitempty"`
+	LastFailureAt string  `json:"last_failure_at,omitempty"`
+	LastSeenAt    string  `json:"last_seen_at,omitempty"`
+	FailureRate   float64 `json:"failure_rate"`
+	SampleSize    int     `json:"sample_size"`
+	LastError     string  `json:"last_error,omitempty"`
+}
+
+type Overview struct {
+	GeneratedAt string       `json:"generated_at"`
+	Today       DailyUsage   `json:"today"`
+	Providers   []Health     `json:"providers"`
+	Tools       []Health     `json:"tools"`
+	Trend       []DailyUsage `json:"trend"`
+}
+
+type Store struct {
+	db            *sql.DB
+	location      *time.Location
+	retentionDays int
+}
+
+func Open(path string, retentionDays int) (*Store, error) {
+	if retentionDays <= 0 {
+		retentionDays = defaultRetentionDays
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, fmt.Errorf("create telemetry directory: %w", err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return nil, fmt.Errorf("open telemetry database: %w", err)
+	}
+	db.SetMaxOpenConns(1)
+	if _, err = db.Exec(`
+		PRAGMA journal_mode=WAL;
+		PRAGMA busy_timeout=5000;
+		CREATE TABLE IF NOT EXISTS usage_events (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			occurred_at INTEGER NOT NULL,
+			day TEXT NOT NULL,
+			kind TEXT NOT NULL,
+			tool TEXT NOT NULL DEFAULT '',
+			provider TEXT NOT NULL DEFAULT '',
+			success INTEGER NOT NULL,
+			duration_ms INTEGER NOT NULL DEFAULT 0,
+			cache_hit INTEGER NOT NULL DEFAULT 0,
+			result_count INTEGER NOT NULL DEFAULT 0,
+			error_summary TEXT NOT NULL DEFAULT '',
+			query_hash TEXT NOT NULL DEFAULT '',
+			query_chars INTEGER NOT NULL DEFAULT 0,
+			query_language TEXT NOT NULL DEFAULT '',
+			query_topic TEXT NOT NULL DEFAULT '',
+			query_keywords TEXT NOT NULL DEFAULT ''
+		);
+		CREATE INDEX IF NOT EXISTS idx_usage_events_time ON usage_events(occurred_at DESC);
+		CREATE INDEX IF NOT EXISTS idx_usage_events_provider ON usage_events(kind, provider, occurred_at DESC);
+		CREATE TABLE IF NOT EXISTS daily_usage (
+			day TEXT NOT NULL,
+			kind TEXT NOT NULL,
+			tool TEXT NOT NULL DEFAULT '',
+			provider TEXT NOT NULL DEFAULT '',
+			requests INTEGER NOT NULL DEFAULT 0,
+			successes INTEGER NOT NULL DEFAULT 0,
+			failures INTEGER NOT NULL DEFAULT 0,
+			cache_hits INTEGER NOT NULL DEFAULT 0,
+			duration_ms INTEGER NOT NULL DEFAULT 0,
+			result_count INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY(day, kind, tool, provider)
+		);`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("initialize telemetry database: %w", err)
+	}
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		loc = time.FixedZone("CST", 8*60*60)
+	}
+	return &Store{db: db, location: loc, retentionDays: retentionDays}, nil
+}
+
+func SetDefault(s *Store) {
+	defaultMu.Lock()
+	defaultStore = s
+	defaultMu.Unlock()
+}
+
+func Default() *Store {
+	defaultMu.RLock()
+	defer defaultMu.RUnlock()
+	return defaultStore
+}
+
+func Record(e Event) {
+	if s := Default(); s != nil {
+		_ = s.Record(e)
+	}
+}
+
+func (s *Store) Close() error {
+	defaultMu.Lock()
+	if defaultStore == s {
+		defaultStore = nil
+	}
+	defaultMu.Unlock()
+	return s.db.Close()
+}
+
+func (s *Store) Record(e Event) error {
+	now := time.Now()
+	if e.Kind == "" {
+		e.Kind = "tool"
+	}
+	hash, chars, lang, topic, keywords := summarizeQuery(e.Query)
+	errSummary := summarizeError(e.Error)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	success := boolInt(e.Success)
+	cacheHit := boolInt(e.CacheHit)
+	day := now.In(s.location).Format("2006-01-02")
+	if _, err = tx.Exec(`INSERT INTO usage_events
+		(occurred_at,day,kind,tool,provider,success,duration_ms,cache_hit,result_count,error_summary,query_hash,query_chars,query_language,query_topic,query_keywords)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, now.Unix(), day, e.Kind, e.Tool, e.Provider, success,
+		e.Duration.Milliseconds(), cacheHit, e.ResultCount, errSummary, hash, chars, lang, topic, keywords); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(`INSERT INTO daily_usage(day,kind,tool,provider,requests,successes,failures,cache_hits,duration_ms,result_count)
+		VALUES(?,?,?,?,1,?,?,?,?,?)
+		ON CONFLICT(day,kind,tool,provider) DO UPDATE SET
+		requests=requests+1, successes=successes+excluded.successes, failures=failures+excluded.failures,
+		cache_hits=cache_hits+excluded.cache_hits, duration_ms=duration_ms+excluded.duration_ms,
+		result_count=result_count+excluded.result_count`, day, e.Kind, e.Tool, e.Provider, success, 1-success, cacheHit,
+		e.Duration.Milliseconds(), e.ResultCount); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) Cleanup() error {
+	cutoff := time.Now().AddDate(0, 0, -s.retentionDays).Unix()
+	_, err := s.db.Exec(`DELETE FROM usage_events WHERE occurred_at < ?`, cutoff)
+	return err
+}
+
+func (s *Store) Recent(limit int) ([]StoredEvent, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	rows, err := s.db.Query(`SELECT id,occurred_at,kind,tool,provider,success,duration_ms,cache_hit,result_count,
+		error_summary,query_hash,query_chars,query_language,query_topic,query_keywords
+		FROM usage_events ORDER BY occurred_at DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []StoredEvent
+	for rows.Next() {
+		var e StoredEvent
+		var ts int64
+		var ok, hit int
+		if err := rows.Scan(&e.ID, &ts, &e.Kind, &e.Tool, &e.Provider, &ok, &e.DurationMS, &hit,
+			&e.ResultCount, &e.ErrorSummary, &e.QueryHash, &e.QueryChars, &e.QueryLanguage, &e.QueryTopic, &e.QueryKeywords); err != nil {
+			return nil, err
+		}
+		e.Success, e.CacheHit = ok == 1, hit == 1
+		e.OccurredAt = time.Unix(ts, 0).In(s.location).Format(time.RFC3339)
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) Overview() (Overview, error) {
+	now := time.Now()
+	out := Overview{GeneratedAt: now.In(s.location).Format(time.RFC3339)}
+	day := now.In(s.location).Format("2006-01-02")
+	_ = s.db.QueryRow(`SELECT COALESCE(SUM(requests),0),COALESCE(SUM(successes),0),COALESCE(SUM(failures),0),
+		COALESCE(SUM(cache_hits),0),COALESCE(SUM(duration_ms),0),COALESCE(SUM(result_count),0)
+		FROM daily_usage WHERE day=? AND kind='tool'`, day).Scan(&out.Today.Requests, &out.Today.Successes,
+		&out.Today.Failures, &out.Today.CacheHits, &out.Today.DurationMS, &out.Today.ResultCount)
+	out.Today.Day, out.Today.Kind = day, "tool"
+	var err error
+	out.Providers, err = s.health("provider", now)
+	if err != nil {
+		return out, err
+	}
+	out.Tools, err = s.health("tool", now)
+	if err != nil {
+		return out, err
+	}
+	out.Trend, err = s.trend(14)
+	return out, err
+}
+
+func (s *Store) trend(days int) ([]DailyUsage, error) {
+	start := time.Now().In(s.location).AddDate(0, 0, -(days - 1)).Format("2006-01-02")
+	rows, err := s.db.Query(`SELECT day,COALESCE(SUM(requests),0),COALESCE(SUM(successes),0),COALESCE(SUM(failures),0),
+		COALESCE(SUM(cache_hits),0),COALESCE(SUM(duration_ms),0),COALESCE(SUM(result_count),0)
+		FROM daily_usage WHERE day>=? AND kind='tool' GROUP BY day ORDER BY day`, start)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DailyUsage
+	for rows.Next() {
+		var d DailyUsage
+		if err := rows.Scan(&d.Day, &d.Requests, &d.Successes, &d.Failures, &d.CacheHits, &d.DurationMS, &d.ResultCount); err != nil {
+			return nil, err
+		}
+		d.Kind = "tool"
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) health(kind string, now time.Time) ([]Health, error) {
+	field := "provider"
+	if kind == "tool" {
+		field = "tool"
+	}
+	rows, err := s.db.Query(fmt.Sprintf(`SELECT %s FROM usage_events WHERE kind=? AND %s<>'' GROUP BY %s`, field, field, field), kind)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		names = append(names, name)
+	}
+	rows.Close()
+	var out []Health
+	for _, name := range names {
+		query := fmt.Sprintf(`SELECT occurred_at,success,error_summary FROM usage_events WHERE kind=? AND %s=? ORDER BY occurred_at DESC LIMIT 20`, field)
+		r, err := s.db.Query(query, kind, name)
+		if err != nil {
+			return nil, err
+		}
+		h := Health{Name: name, Kind: kind, Status: "unknown"}
+		var latestSuccess bool
+		var lastTS int64
+		consecutiveFailures := 0
+		countingConsecutive := true
+		for r.Next() {
+			var ts int64
+			var ok int
+			var msg string
+			if err := r.Scan(&ts, &ok, &msg); err != nil {
+				r.Close()
+				return nil, err
+			}
+			h.SampleSize++
+			if h.SampleSize == 1 {
+				lastTS, latestSuccess, h.LastError = ts, ok == 1, msg
+				h.LastSeenAt = time.Unix(ts, 0).In(s.location).Format(time.RFC3339)
+			}
+			if ok == 1 && h.LastSuccessAt == "" {
+				h.LastSuccessAt = time.Unix(ts, 0).In(s.location).Format(time.RFC3339)
+				countingConsecutive = false
+			}
+			if ok == 0 {
+				if countingConsecutive {
+					consecutiveFailures++
+				}
+				h.FailureRate++
+				if h.LastFailureAt == "" {
+					h.LastFailureAt = time.Unix(ts, 0).In(s.location).Format(time.RFC3339)
+				}
+			}
+		}
+		r.Close()
+		if h.SampleSize > 0 {
+			h.FailureRate /= float64(h.SampleSize)
+			age := now.Sub(time.Unix(lastTS, 0))
+			switch {
+			case age > 24*time.Hour:
+				h.Status = "unknown"
+			case consecutiveFailures >= 3:
+				h.Status = "down"
+			case !latestSuccess || h.FailureRate > 0.20:
+				h.Status = "degraded"
+			default:
+				h.Status = "healthy"
+			}
+		}
+		out = append(out, h)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+func boolInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
+}
+
+var (
+	reURL    = regexp.MustCompile(`(?i)https?://\S+`)
+	reEmail  = regexp.MustCompile(`(?i)\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b`)
+	reIP     = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
+	reLong   = regexp.MustCompile(`\b\d{5,}\b`)
+	reSecret = regexp.MustCompile(`(?i)\b(?:sk|pk|api|key|token|bearer)[-_]?[a-z0-9_-]{8,}\b`)
+)
+
+func summarizeQuery(q string) (string, int, string, string, string) {
+	q = strings.TrimSpace(q)
+	if q == "" {
+		return "", 0, "", "", ""
+	}
+	sum := sha256.Sum256([]byte(q))
+	hash := hex.EncodeToString(sum[:8])
+	chars := len([]rune(q))
+	clean := reURL.ReplaceAllString(q, "[url]")
+	clean = reEmail.ReplaceAllString(clean, "[email]")
+	clean = reIP.ReplaceAllString(clean, "[ip]")
+	clean = reLong.ReplaceAllString(clean, "[number]")
+	clean = reSecret.ReplaceAllString(clean, "[secret]")
+	lang := detectLanguage(clean)
+	topic := classifyTopic(strings.ToLower(clean))
+	keywords := safeKeywords(clean)
+	return hash, chars, lang, topic, keywords
+}
+
+func detectLanguage(s string) string {
+	var han, latin int
+	for _, r := range s {
+		if unicode.Is(unicode.Han, r) {
+			han++
+		}
+		if unicode.Is(unicode.Latin, r) {
+			latin++
+		}
+	}
+	switch {
+	case han > 0 && latin > 0:
+		return "mixed"
+	case han > 0:
+		return "zh"
+	case latin > 0:
+		return "en"
+	default:
+		return "other"
+	}
+}
+
+func classifyTopic(s string) string {
+	topics := []struct {
+		name  string
+		words []string
+	}{
+		{"软件与开发", []string{"api", "github", "代码", "编程", "docker", "go ", "python", "javascript"}},
+		{"学术研究", []string{"论文", "研究", "paper", "doi", "arxiv", "journal"}},
+		{"财经商业", []string{"股票", "公司", "市场", "价格", "finance", "revenue", "stock"}},
+		{"新闻时事", []string{"新闻", "最新", "今日", "news", "latest"}},
+		{"产品与采购", []string{"购买", "推荐", "产品", "评测", "price", "review"}},
+	}
+	for _, t := range topics {
+		for _, w := range t.words {
+			if strings.Contains(s, w) {
+				return t.name
+			}
+		}
+	}
+	return "通用检索"
+}
+
+func safeKeywords(s string) string {
+	fields := strings.FieldsFunc(s, func(r rune) bool { return !(unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.Is(unicode.Han, r)) })
+	stop := map[string]bool{"the": true, "and": true, "for": true, "with": true, "what": true, "how": true, "一个": true, "怎么": true, "什么": true, "是否": true}
+	var out []string
+	seen := map[string]bool{}
+	for _, f := range fields {
+		f = strings.TrimSpace(f)
+		if len([]rune(f)) < 2 || len([]rune(f)) > 18 || stop[strings.ToLower(f)] || strings.Contains(f, "[") || seen[f] {
+			continue
+		}
+		seen[f] = true
+		out = append(out, f)
+		if len(out) == 3 {
+			break
+		}
+	}
+	return strings.Join(out, " · ")
+}
+
+func summarizeError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	msg = reURL.ReplaceAllString(msg, "[url]")
+	msg = reEmail.ReplaceAllString(msg, "[email]")
+	msg = reSecret.ReplaceAllString(msg, "[secret]")
+	msg = strings.TrimSpace(msg)
+	if len([]rune(msg)) > 220 {
+		msg = string([]rune(msg)[:220]) + "…"
+	}
+	return msg
+}
+
+func IsUnavailable(err error) bool { return errors.Is(err, sql.ErrConnDone) }

@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
+	"websearch/pkg/telemetry"
 )
 
 import (
@@ -39,7 +41,11 @@ func resolvePDFPath(path string) (fetchURL string, remote bool) {
 
 // PDFParserHandler PDF 解析 tool handler：本地路径 / file:// / 远程 http(s) URL。
 // 支持可选 pages 页码范围；省略时受 pdf_parser.max_pages（默认 20）约束并提示截断。
-func PDFParserHandler(ctx context.Context, req *mcp.CallToolRequest, params *PDFParserParams) (*mcp.CallToolResult, any, error) {
+func PDFParserHandler(ctx context.Context, req *mcp.CallToolRequest, params *PDFParserParams) (resultOut *mcp.CallToolResult, extra any, err error) {
+	started := time.Now()
+	defer func() {
+		telemetry.Record(telemetry.Event{Kind: "tool", Tool: "pdf_parser", Provider: "pdf_pipeline", Query: params.Path, Success: err == nil, Duration: time.Since(started), Error: err})
+	}()
 	if params.Path == "" {
 		return nil, nil, fmt.Errorf("path 参数不能为空")
 	}

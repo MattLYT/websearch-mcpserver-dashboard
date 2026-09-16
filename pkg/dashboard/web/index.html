@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>WebSearch Control Center</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <div class="shell">
+    <aside>
+      <div class="brand"><span class="brand-mark">W</span><div><strong>WebSearch</strong><small>Control Center</small></div></div>
+      <nav>
+        <button class="nav active" data-page="overview"><span>◫</span>总览</button>
+        <button class="nav" data-page="sources"><span>⌁</span>搜索源</button>
+        <button class="nav" data-page="usage"><span>⌁</span>调用记录</button>
+        <button class="nav" data-page="settings"><span>⚙</span>设置</button>
+      </nav>
+      <div class="privacy"><span class="dot healthy"></span><div><b>仅限本机</b><small>查询全文不会被保存</small></div></div>
+    </aside>
+    <main>
+      <header>
+        <div><p class="eyebrow">LOCAL OBSERVABILITY</p><h1 id="page-title">运行总览</h1></div>
+        <div class="header-actions"><span id="updated">尚未刷新</span><button id="refresh" class="icon-btn" title="刷新">↻</button></div>
+      </header>
+
+      <section id="page-overview" class="page active">
+        <div class="hero-grid">
+          <article class="metric primary"><span>今日调用</span><strong id="today-requests">—</strong><small id="today-success">等待数据</small></article>
+          <article class="metric"><span>异常搜索源</span><strong id="down-count">—</strong><small>基于真实调用，被动判断</small></article>
+          <article class="metric"><span>缓存命中</span><strong id="cache-hits">—</strong><small>今日避免的重复检索</small></article>
+          <article class="metric"><span>官方剩余额度</span><strong id="quota-total">—</strong><small id="quota-caption">仅官方 API</small></article>
+        </div>
+        <div class="two-col">
+          <article class="panel"><div class="panel-head"><div><p class="eyebrow">PASSIVE HEALTH</p><h2>搜索源状态</h2></div><a href="#sources" data-jump="sources">查看全部 →</a></div><div id="source-preview" class="source-list skeleton"></div></article>
+          <article class="panel"><div class="panel-head"><div><p class="eyebrow">14 DAYS</p><h2>调用趋势</h2></div><span class="legend"><i></i>调用次数</span></div><div class="chart-wrap"><canvas id="trend-chart"></canvas><div id="chart-empty" class="empty">有真实调用后，这里会出现趋势</div></div></article>
+        </div>
+        <article class="panel quota-panel"><div class="panel-head"><div><p class="eyebrow">OFFICIAL ONLY</p><h2>额度与套餐</h2></div><span class="muted">不估算，不抓取网页</span></div><div id="quota-grid" class="quota-grid"></div></article>
+      </section>
+
+      <section id="page-sources" class="page">
+        <article class="panel"><div class="panel-head"><div><p class="eyebrow">SOURCE MATRIX</p><h2>搜索源与工具</h2></div><div class="status-key"><span><i class="healthy"></i>正常</span><span><i class="degraded"></i>不稳定</span><span><i class="down"></i>异常</span><span><i class="unknown"></i>未知</span></div></div><div id="sources-table"></div></article>
+      </section>
+
+      <section id="page-usage" class="page">
+        <article class="panel"><div class="panel-head"><div><p class="eyebrow">REDACTED METADATA</p><h2>最近调用</h2></div><span class="muted">保存 30 天明细</span></div><div class="table-scroll"><table><thead><tr><th>时间</th><th>层级</th><th>工具 / 来源</th><th>状态</th><th>耗时</th><th>脱敏摘要</th><th>错误</th></tr></thead><tbody id="events-body"></tbody></table></div></article>
+      </section>
+
+      <section id="page-settings" class="page">
+        <div class="settings-grid">
+          <article class="panel"><div class="panel-head"><div><p class="eyebrow">SAFE SETTINGS</p><h2>常用设置</h2></div><span id="settings-dirty" class="pill hidden">有未保存更改</span></div><form id="settings-form" class="form-grid">
+            <label>搜索模式<select data-key="mode"><option>hybrid</option><option>engine</option><option>apipool</option><option>baidu</option><option>tavily</option><option>exa</option><option>anysearch</option><option>doubao</option></select></label>
+            <label>网络区域<select data-key="network"><option value="china">中国</option><option value="international">国际</option></select></label>
+            <label>上游超时（秒）<input type="number" min="0" max="120" data-key="upstream_timeout_sec"></label>
+            <label>最大结果数<input type="number" min="1" max="50" data-key="smartsearch.max_size"></label>
+            <label>相关性阈值<input type="number" min="0" max="1" step="0.01" data-key="smartsearch.relevance_threshold"></label>
+            <label>MMR λ<input type="number" min="0" max="1" step="0.05" data-key="smartsearch.mmr.lambda"></label>
+            <label class="toggle"><input type="checkbox" data-key="cache.enabled"><span></span>启用缓存</label>
+            <label class="toggle"><input type="checkbox" data-key="academic.enabled"><span></span>学术检索</label>
+            <label class="toggle"><input type="checkbox" data-key="cleanfetch.enabled"><span></span>网页抓取</label>
+            <label class="toggle"><input type="checkbox" data-key="pdf_parser.enabled"><span></span>PDF 解析</label>
+            <div class="form-actions"><button type="button" id="save-settings" class="primary-btn">预览并保存</button></div>
+          </form></article>
+          <article class="panel"><div class="panel-head"><div><p class="eyebrow">CREDENTIALS</p><h2>API Key 状态</h2></div><span class="muted">永不回显原值</span></div><div id="secret-list" class="secret-list"></div></article>
+          <article class="panel danger-zone"><div class="panel-head"><div><p class="eyebrow">ADVANCED</p><h2>高级操作</h2></div></div><div class="advanced-actions"><div><b>重启服务</b><small>应用已保存的设置或新密钥</small><button id="restart-service">确认并重启</button></div><div><b>清空搜索缓存</b><small>监控历史不会被删除</small><button id="clear-cache" class="danger">确认并清空</button></div></div></article>
+        </div>
+      </section>
+    </main>
+  </div>
+  <dialog id="confirm-dialog"><form method="dialog"><h3 id="dialog-title">确认操作</h3><p id="dialog-copy"></p><pre id="dialog-diff"></pre><div><button value="cancel">取消</button><button value="confirm" class="primary-btn">确认</button></div></form></dialog>
+  <div id="toast" role="status"></div>
+  <script src="app.js"></script>
+</body>
+</html>

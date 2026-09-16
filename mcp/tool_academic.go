@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 	"websearch/pkg/log"
 	"websearch/pkg/search"
+	"websearch/pkg/telemetry"
 )
 
 import (
@@ -24,7 +26,13 @@ func AcademicSearchHandler(ctx context.Context, req *mcp.CallToolRequest, params
 // timeRangeMonths 控制搜索时间范围（月），默认 3，0 表示不限。
 
 // doAcademicSearch 学术搜索逻辑。
-func doAcademicSearch(query string, engines []string, timeRange string, page int) (*mcp.CallToolResult, any, error) {
+func doAcademicSearch(query string, engines []string, timeRange string, page int) (result *mcp.CallToolResult, extra any, err error) {
+	started := time.Now()
+	cacheHit := false
+	resultCount := 0
+	defer func() {
+		telemetry.Record(telemetry.Event{Kind: "tool", Tool: "academicsearch", Query: query, Success: err == nil, Duration: time.Since(started), CacheHit: cacheHit, ResultCount: resultCount, Error: err})
+	}()
 	if academicSearcher == nil {
 		return nil, nil, fmt.Errorf("学术搜索引擎未启用，请检查配置 bing.academic 是否为 true")
 	}
@@ -39,6 +47,8 @@ func doAcademicSearch(query string, engines []string, timeRange string, page int
 		} else if rec != nil && rec.Academic && hitType == "query_only" {
 			results, parseErr := rec.GetRawResults()
 			if parseErr == nil {
+				cacheHit = true
+				resultCount = len(results)
 				log.Infof("学术缓存命中: query=%s", query)
 				ret, mergeErr := formatAcademicResults(query, search.AcademicSearchResult{Results: results})
 				if mergeErr == nil {
@@ -59,6 +69,22 @@ func doAcademicSearch(query string, engines []string, timeRange string, page int
 	res, err := academicSearcher.SearchAcademicRaw(query, opts)
 	if err != nil {
 		return nil, nil, fmt.Errorf("学术搜索失败: %w", err)
+	}
+	resultCount = len(res.Results)
+	seen := map[string]bool{}
+	for _, item := range res.Results {
+		names := append([]string{item.Engine}, item.Engines...)
+		for _, name := range names {
+			if name != "" && !seen[name] {
+				seen[name] = true
+				telemetry.Record(telemetry.Event{Kind: "provider", Provider: name, Query: query, Success: true, Duration: time.Since(started)})
+			}
+		}
+	}
+	for name, msg := range res.EngineErrors {
+		if !seen[name] {
+			telemetry.Record(telemetry.Event{Kind: "provider", Provider: name, Query: query, Success: false, Duration: time.Since(started), Error: fmt.Errorf("%s", msg)})
+		}
 	}
 
 	ret, err := formatAcademicResults(query, res)

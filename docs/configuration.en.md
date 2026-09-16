@@ -188,6 +188,14 @@ cache:
   # storage_path: ""         # Unset → exe sibling dir cache/websearch-cache.db
   cleanup_interval: 30      # Cleanup interval (minutes), max 360
 
+# Local control-center prototype (disabled by default)
+# Passively records real tool calls only; raw queries/URLs are not stored and no active health probes run.
+dashboard:
+  enabled: false
+  storage_path: "./data/dashboard.db"
+  retention_days: 30       # Detail retention; daily aggregates are retained
+  secrets_path: "./data/dashboard-secrets.json" # Private overlay; keys are never returned
+
 # Jina Reader (optional, fallback for cleanfetch)
 jina:
   api_key: ""               # Empty → Jina fallback disabled
