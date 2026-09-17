@@ -60,7 +60,7 @@ h2{font-size:15px;font-weight:650}
 .stack{display:flex;flex-direction:column;gap:14px;min-width:0}
 
 /* ---------- overview grid ---------- */
-.overview-grid{display:grid;grid-template-columns:262px minmax(0,1fr) 310px;gap:14px;align-items:start}
+.overview-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;align-items:start;margin-bottom:14px}
 .overview-grid>.panel{margin-bottom:0}
 .sys-value{font-size:23px;font-weight:650;margin:2px 0 6px}
 .kv{display:grid;gap:6px}
@@ -70,6 +70,7 @@ h2{font-size:15px;font-weight:650}
 .kv dd{font-size:12.5px;text-align:right;overflow-wrap:anywhere}
 .secret-line{font-size:12px;color:var(--dim);margin-top:8px;overflow-wrap:anywhere}
 .kpi-stack{display:flex;flex-direction:column;gap:10px}
+.kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:14px}
 .kpi{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:10px 12px}
 .kpi header{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 4px}
 .kpi header b{font-size:12.5px;color:var(--ink-2);font-weight:600}
@@ -182,19 +183,18 @@ dialog form>div{text-align:right;display:flex;gap:8px;justify-content:flex-end;m
 
 /* ---------- responsive ---------- */
 @media (max-width:1180px){
-  .overview-grid{grid-template-columns:246px minmax(0,1fr)}
-  .overview-grid>.stack:last-child{grid-column:1 / -1;display:grid;grid-template-columns:1fr 1fr;gap:14px}
-  .overview-grid>.stack:last-child>.panel{margin-bottom:0}
+  .kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media (max-width:860px){
   .shell{grid-template-columns:1fr}
-  aside{border-right:0;border-bottom:1px solid var(--border);flex-direction:row;align-items:center;flex-wrap:wrap;padding:12px}
+  aside{min-width:0;overflow:hidden;border-right:0;border-bottom:1px solid var(--border);flex-direction:row;align-items:center;flex-wrap:wrap;padding:10px 12px;gap:10px}
+  main{min-width:0;overflow-x:hidden}
   nav{flex-direction:row;flex-wrap:wrap}
   .nav{width:auto}
-  .privacy{margin-top:0;margin-left:auto;border-top:0;padding-top:0}
+  .privacy{margin:0;flex:1 0 100%;border-top:0;padding:0}
   main{padding:14px}
   .overview-grid,.settings-grid{grid-template-columns:1fr}
-  .overview-grid>.stack:last-child{grid-template-columns:1fr}
+  .kpi-grid{grid-template-columns:1fr}
   .form-grid{grid-template-columns:1fr}
-  .overview-grid,.settings-grid,.stack,.kpi-stack{gap:10px}
+  .overview-grid,.settings-grid,.stack,.kpi-stack,.kpi-grid{gap:10px}
 }
