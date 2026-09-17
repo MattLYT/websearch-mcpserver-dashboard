@@ -29,7 +29,7 @@ const state = {
   settings: null, settingsError: null, settingsDirty: false, settingsLoaded: false,
   events: { rows: null, error: null, serverFiltered: true },
   providerEvents: { rows: null, error: null },
-  filters: { kind: 'provider', status: '', source: '', limit: 50 },
+  filters: { kind: 'provider', status: '', tool: '', provider: '', limit: 50 },
   lastLoad: 0,
 };
 
@@ -83,21 +83,17 @@ function emptyRow(cols, text) {
 }
 function hasFilter() {
   const f = state.filters;
-  return Boolean(f.kind || f.status || f.source);
+  return Boolean(f.kind || f.status || f.tool || f.provider);
 }
 function matchesFilters(e) {
   const f = state.filters;
-  if (f.kind && e.kind !== f.kind) return false;
   if (f.status === 'success' && !e.success) return false;
   if (f.status === 'failure' && e.success) return false;
-  if (f.source) {
-    const src = e.kind === 'provider' ? e.provider : e.tool;
-    if (src !== f.source) return false;
-  }
+  if (f.tool && (e.kind !== 'tool' || e.tool !== f.tool)) return false;
+  if (f.provider && (e.kind !== 'provider' || e.provider !== f.provider)) return false;
+  if (f.tool && f.provider) return false;
+  if (!f.tool && !f.provider && f.kind && e.kind !== f.kind) return false;
   return true;
-}
-function sourceOf(e) {
-  return e.kind === 'provider' ? (e.provider || '') : (e.tool || '');
 }
 function activationOf(s) {
   if (s.configured === false) return { key: 'not_configured', label: '未配置' };
@@ -179,7 +175,18 @@ async function loadEvents() {
   params.set('limit', String(f.limit));
   if (f.kind) params.set('kind', f.kind);
   if (f.status) params.set('status', f.status);
-  if (f.source) params.set('source', f.source);
+  const tool = f.tool || '';
+  const provider = f.provider || '';
+  if (tool && provider) {
+    params.set('kind', '__none__');
+    params.set('source', '');
+  } else if (tool) {
+    params.set('kind', 'tool');
+    params.set('source', tool);
+  } else if (provider) {
+    params.set('kind', 'provider');
+    params.set('source', provider);
+  }
   try {
     const rows = await fetchJSON('/__admin/api/events?' + params.toString());
     state.events.rows = Array.isArray(rows) ? rows : [];
@@ -484,8 +491,11 @@ function eventCells(e, cols) {
     out.push(`<td>${esc(e.kind === 'provider' ? '来源' : '工具')}</td>`);
   }
   const detail = e.detail ? `<small class="source-detail">${esc(e.detail)}</small>` : '';
+  const toolLabel = e.kind === 'tool' ? (displayName(e.tool) || '—') : '—';
+  const providerLabel = e.provider ? displayName(e.provider) : '—';
   out.push(
-    `<td><span class="source-name">${esc(displayName(sourceOf(e)) || '—')}</span>${detail}</td>`,
+    `<td><span class="source-name">${esc(toolLabel)}</span></td>`,
+    `<td><span class="source-name">${esc(providerLabel)}</span>${detail}</td>`,
     `<td class="${e.success ? 'ok-text' : 'bad-text'}">${e.success ? '成功' : '失败'}</td>`,
     `<td class="num">${esc(fmtMS(e.duration_ms))}</td>`,
     `<td class="num">${fmtInt(e.result_count)}</td>`,
@@ -509,14 +519,14 @@ function renderOverviewEvents() {
   const note = $('#overview-events-note');
   const rows = state.providerEvents.rows;
   if (rows === null) {
-    body.innerHTML = emptyRow(8, state.providerEvents.error ? '读取失败' : '正在读取…');
+    body.innerHTML = emptyRow(9, state.providerEvents.error ? '读取失败' : '正在读取…');
     setNote(note, state.providerEvents.error ? '读取失败：' + state.providerEvents.error : '', state.providerEvents.error ? 'bad' : '');
     return;
   }
   const top = rows.slice(0, 6);
   body.innerHTML = top.length
     ? top.map(e => `<tr>${eventCells(e, 'overview').join('')}</tr>`).join('')
-    : emptyRow(8, '暂无 Provider 事件（明细保留 30 天）');
+    : emptyRow(9, '暂无 Provider 事件（明细保留 30 天）');
   if (state.providerEvents.error) setNote(note, '数据可能已过期：' + state.providerEvents.error, 'warn');
   else if (!top.length) setNote(note, '来源层调用后才会出现真实事件，不做模拟', '');
   else setNote(note, '', '');
@@ -528,7 +538,7 @@ function renderUsage() {
   const rows = state.events.rows;
   const exportBtn = $('#export-csv');
   if (rows === null) {
-    body.innerHTML = emptyRow(11, state.events.error ? '读取失败' : '正在读取…');
+    body.innerHTML = emptyRow(12, state.events.error ? '读取失败' : '正在读取…');
     exportBtn.disabled = true;
     setNote(note, state.events.error ? '读取失败：' + state.events.error : '', state.events.error ? 'bad' : '');
     return;
@@ -536,7 +546,7 @@ function renderUsage() {
   const filtered = rows.filter(matchesFilters);
   body.innerHTML = filtered.length
     ? filtered.map(e => `<tr>${eventCells(e, 'usage').join('')}</tr>`).join('')
-    : emptyRow(11, rows.length ? '当前筛选条件下没有匹配记录' : '暂无调用记录');
+    : emptyRow(12, rows.length ? '当前筛选条件下没有匹配记录' : '暂无调用记录');
   exportBtn.disabled = filtered.length === 0;
   const parts = [];
   if (state.events.error) parts.push(['数据可能已过期：' + state.events.error, 'warn']);
@@ -562,13 +572,14 @@ function exportCSV() {
     toast('当前没有可导出的记录', true);
     return;
   }
-  const head = ['时间', '层级', '来源/工具', '解析来源', '状态', '耗时(ms)', '结果数', '缓存命中', '主题', '语言', '关键词', '查询哈希', '查询字符数', '错误摘要'];
+  const head = ['时间', '层级', '工具', '来源', '解析来源', '状态', '耗时(ms)', '结果数', '缓存命中', '主题', '语言', '关键词', '查询哈希', '查询字符数', '错误摘要'];
   const lines = [head.map(csvCell).join(',')];
   rows.forEach(e => {
     lines.push([
       fmtAt(e.occurred_at),
       e.kind === 'provider' ? '来源' : '工具',
-      displayName(sourceOf(e)),
+      e.kind === 'tool' ? displayName(e.tool) : '',
+      e.provider ? displayName(e.provider) : '',
       e.detail || '',
       e.success ? '成功' : '失败',
       num(e.duration_ms) === null ? '' : e.duration_ms,
@@ -596,28 +607,33 @@ function exportCSV() {
 
 /* ---------- usage filters ---------- */
 
-function knownSources() {
-  const map = new Map();
+function knownFilterEntries() {
+  const tools = new Map();
+  const providers = new Map();
   const o = state.overview;
-  const add = (id, label) => { if (id) map.set(id, label || displayName(id)); };
+  const addTool = (id, label) => { if (id) tools.set(id, label || displayName(id)); };
+  const addProvider = (id, label) => { if (id) providers.set(id, label || displayName(id)); };
   if (o) {
-    (Array.isArray(o.providers) ? o.providers : []).forEach(h => h && add(h.name));
-    (Array.isArray(o.tools) ? o.tools : []).forEach(h => h && add(h.name));
-    (Array.isArray(o.sources) ? o.sources : []).forEach(s => s && add(s.id, s.name));
-    (Array.isArray(o.academic_sources) ? o.academic_sources : []).forEach(s => s && add(s.id, s.name));
+    (Array.isArray(o.providers) ? o.providers : []).forEach(h => h && addProvider(h.name));
+    (Array.isArray(o.tools) ? o.tools : []).forEach(h => h && addTool(h.name));
+    (Array.isArray(o.sources) ? o.sources : []).forEach(s => s && addProvider(s.id, s.name));
+    (Array.isArray(o.academic_sources) ? o.academic_sources : []).forEach(s => s && addProvider(s.id, s.name));
   }
   [state.events.rows, state.providerEvents.rows].forEach(list => {
-    (list || []).forEach(e => add(sourceOf(e)));
+    (list || []).forEach(e => {
+      if (!e) return;
+      if (e.kind === 'provider') addProvider(e.provider);
+      else addTool(e.tool);
+    });
   });
-  return Array.from(map.entries()).sort((a, b) => String(a[1]).localeCompare(String(b[1]), 'zh-CN'));
+  const sort = map => Array.from(map.entries()).sort((a, b) => String(a[1]).localeCompare(String(b[1]), 'zh-CN'));
+  return { tools: sort(tools), providers: sort(providers) };
 }
 
-function renderUsageSourceOptions() {
-  const sel = $('#filter-source');
+function renderFilterSelect(selector, entries, current) {
+  const sel = $(selector);
   if (!sel) return;
-  const entries = knownSources();
   const known = new Set(entries.map(e => e[0]));
-  const current = state.filters.source;
   const options = ['<option value="">全部</option>'];
   if (current && !known.has(current)) {
     options.push(`<option value="${esc(current)}">${esc(displayName(current))}</option>`);
@@ -628,6 +644,12 @@ function renderUsageSourceOptions() {
   });
   sel.innerHTML = options.join('');
   sel.value = current;
+}
+
+function renderUsageSourceOptions() {
+  const entries = knownFilterEntries();
+  renderFilterSelect('#filter-tool', entries.tools, state.filters.tool);
+  renderFilterSelect('#filter-provider', entries.providers, state.filters.provider);
 }
 
 /* ---------- settings & advanced actions ---------- */
@@ -769,17 +791,18 @@ function wire() {
   });
   $$('[data-key]').forEach(el => el.addEventListener('change', markDirty));
   const applyFilter = () => {
-    state.filters.kind = $('#filter-kind').value;
+    state.filters.kind = '';
     state.filters.status = $('#filter-status').value;
-    state.filters.source = $('#filter-source').value;
+    state.filters.tool = $('#filter-tool').value;
+    state.filters.provider = $('#filter-provider').value;
     state.filters.limit = Number($('#filter-limit').value) || 20;
     loadEvents();
   };
-  ['#filter-kind', '#filter-status', '#filter-source', '#filter-limit'].forEach(sel => {
+  ['#filter-kind', '#filter-status', '#filter-tool', '#filter-provider', '#filter-limit'].forEach(sel => {
     $(sel).addEventListener('change', applyFilter);
   });
   $('#filter-limit').value = String(state.filters.limit);
-  $('#filter-kind').value = state.filters.kind;
+  $('#filter-kind').value = '';
   $('#filter-status').value = state.filters.status;
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden && Date.now() - state.lastLoad > REFRESH_MS) loadAll();
