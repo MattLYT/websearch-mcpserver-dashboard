@@ -844,10 +844,19 @@ function wire() {
   });
   $$('[data-key]').forEach(el => el.addEventListener('change', markDirty));
   const applyFilter = () => {
-    state.filters.kind = '';
     state.filters.status = $('#filter-status').value;
-    state.filters.tool = $('#filter-tool').value;
-    state.filters.provider = $('#filter-provider').value;
+    const tool = $('#filter-tool').value;
+    const provider = $('#filter-provider').value;
+    if (tool || provider) {
+      // 工具/来源下拉优先；层级仅在下拉未选时生效。两者不可能同时命中。
+      state.filters.kind = '';
+      state.filters.tool = tool;
+      state.filters.provider = provider;
+    } else {
+      state.filters.kind = $('#filter-kind').value;
+      state.filters.tool = '';
+      state.filters.provider = '';
+    }
     state.filters.limit = Number($('#filter-limit').value) || 20;
     loadEvents();
   };
@@ -855,7 +864,7 @@ function wire() {
     $(sel).addEventListener('change', applyFilter);
   });
   $('#filter-limit').value = String(state.filters.limit);
-  $('#filter-kind').value = '';
+  $('#filter-kind').value = state.filters.kind;
   $('#filter-status').value = state.filters.status;
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden && Date.now() - state.lastLoad > REFRESH_MS) loadAll();
