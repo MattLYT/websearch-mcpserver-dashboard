@@ -41,6 +41,8 @@ type dashboardOverview struct {
 	System          SystemSummary `json:"system"`
 	Sources         []SourceView  `json:"sources"`
 	AcademicSources []SourceView  `json:"academic_sources"`
+	// ConfiguredTools 是公开 MCP 工具的固定清单，不依赖是否已经产生调用。
+	ConfiguredTools []MCPToolView `json:"configured_tools"`
 }
 
 func buildDashboardOverview(conf config.Config, observed telemetry.Overview) dashboardOverview {
@@ -51,6 +53,7 @@ func buildDashboardOverview(conf config.Config, observed telemetry.Overview) das
 		System:          summarizeSystem(web),
 		Sources:         web,
 		AcademicSources: academic,
+		ConfiguredTools: mcpToolCatalog(conf),
 	}
 }
 
