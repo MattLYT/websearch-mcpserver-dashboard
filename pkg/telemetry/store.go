@@ -39,6 +39,9 @@ type Event struct {
 	CacheHit    bool
 	ResultCount int
 	Error       error
+	// Detail carries small, non-sensitive context such as which parser handled
+	// a PDF. Raw queries and URLs are still never stored in this field.
+	Detail string
 }
 
 type StoredEvent struct {
@@ -52,6 +55,7 @@ type StoredEvent struct {
 	CacheHit      bool   `json:"cache_hit"`
 	ResultCount   int    `json:"result_count"`
 	ErrorSummary  string `json:"error_summary,omitempty"`
+	Detail        string `json:"detail,omitempty"`
 	QueryHash     string `json:"query_hash,omitempty"`
 	QueryChars    int    `json:"query_chars,omitempty"`
 	QueryLanguage string `json:"query_language,omitempty"`
@@ -141,7 +145,8 @@ func Open(path string, retentionDays int) (*Store, error) {
 			query_chars INTEGER NOT NULL DEFAULT 0,
 			query_language TEXT NOT NULL DEFAULT '',
 			query_topic TEXT NOT NULL DEFAULT '',
-			query_keywords TEXT NOT NULL DEFAULT ''
+			query_keywords TEXT NOT NULL DEFAULT '',
+			detail TEXT NOT NULL DEFAULT ''
 		);
 		CREATE INDEX IF NOT EXISTS idx_usage_events_time ON usage_events(occurred_at DESC);
 		CREATE INDEX IF NOT EXISTS idx_usage_events_provider ON usage_events(kind, provider, occurred_at DESC);
@@ -161,6 +166,9 @@ func Open(path string, retentionDays int) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("initialize telemetry database: %w", err)
 	}
+	// Existing databases created before the detail column was added still open.
+	// A duplicate-column error means this migration already ran.
+	_, _ = db.Exec(`ALTER TABLE usage_events ADD COLUMN detail TEXT NOT NULL DEFAULT ''`)
 	loc, err := time.LoadLocation("Asia/Shanghai")
 	if err != nil {
 		loc = time.FixedZone("CST", 8*60*60)
@@ -211,9 +219,9 @@ func (s *Store) Record(e Event) error {
 	cacheHit := boolInt(e.CacheHit)
 	day := now.In(s.location).Format("2006-01-02")
 	if _, err = tx.Exec(`INSERT INTO usage_events
-		(occurred_at,day,kind,tool,provider,success,duration_ms,cache_hit,result_count,error_summary,query_hash,query_chars,query_language,query_topic,query_keywords)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, now.Unix(), day, e.Kind, e.Tool, e.Provider, success,
-		e.Duration.Milliseconds(), cacheHit, e.ResultCount, errSummary, hash, chars, lang, topic, keywords); err != nil {
+		(occurred_at,day,kind,tool,provider,success,duration_ms,cache_hit,result_count,error_summary,query_hash,query_chars,query_language,query_topic,query_keywords,detail)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, now.Unix(), day, e.Kind, e.Tool, e.Provider, success,
+		e.Duration.Milliseconds(), cacheHit, e.ResultCount, errSummary, hash, chars, lang, topic, keywords, e.Detail); err != nil {
 		return err
 	}
 	if _, err = tx.Exec(`INSERT INTO daily_usage(day,kind,tool,provider,requests,successes,failures,cache_hits,duration_ms,result_count)
@@ -268,7 +276,7 @@ func (s *Store) RecentFiltered(filter EventFilter) ([]StoredEvent, error) {
 	}
 	args = append(args, limit)
 	query := `SELECT id,occurred_at,kind,tool,provider,success,duration_ms,cache_hit,result_count,
-		error_summary,query_hash,query_chars,query_language,query_topic,query_keywords
+		error_summary,query_hash,query_chars,query_language,query_topic,query_keywords,detail
 		FROM usage_events WHERE ` + strings.Join(where, " AND ") + ` ORDER BY occurred_at DESC,id DESC LIMIT ?`
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
@@ -281,7 +289,7 @@ func (s *Store) RecentFiltered(filter EventFilter) ([]StoredEvent, error) {
 		var ts int64
 		var ok, hit int
 		if err := rows.Scan(&e.ID, &ts, &e.Kind, &e.Tool, &e.Provider, &ok, &e.DurationMS, &hit,
-			&e.ResultCount, &e.ErrorSummary, &e.QueryHash, &e.QueryChars, &e.QueryLanguage, &e.QueryTopic, &e.QueryKeywords); err != nil {
+			&e.ResultCount, &e.ErrorSummary, &e.QueryHash, &e.QueryChars, &e.QueryLanguage, &e.QueryTopic, &e.QueryKeywords, &e.Detail); err != nil {
 			return nil, err
 		}
 		e.Success, e.CacheHit = ok == 1, hit == 1
