@@ -136,8 +136,11 @@
                 <option value="failure">失败</option>
               </select>
             </label>
-            <label class="field"><span>来源 / 工具</span>
-              <select id="filter-source"><option value="">全部</option></select>
+            <label class="field"><span>工具</span>
+              <select id="filter-tool"><option value="">全部</option></select>
+            </label>
+            <label class="field"><span>来源</span>
+              <select id="filter-provider"><option value="">全部</option></select>
             </label>
             <label class="field"><span>条数</span>
               <select id="filter-limit">
@@ -154,7 +157,7 @@
           <p class="panel-note" id="events-note"></p>
           <div class="table-scroll">
             <table class="data-table">
-              <thead><tr><th>时间</th><th>层级</th><th>来源 / 工具</th><th>状态</th><th class="num">耗时</th><th class="num">结果数</th><th>缓存</th><th>主题 / 语言</th><th>关键词</th><th>查询哈希</th><th>错误摘要</th></tr></thead>
+              <thead><tr><th>时间</th><th>层级</th><th>工具</th><th>来源</th><th>状态</th><th class="num">耗时</th><th class="num">结果数</th><th>缓存</th><th>主题 / 语言</th><th>关键词</th><th>查询哈希</th><th>错误摘要</th></tr></thead>
               <tbody id="usage-body"></tbody>
             </table>
           </div>
