@@ -72,6 +72,7 @@ func TestEventsFiltersKindStatusAndSource(t *testing.T) {
 		{"", 4},
 		{"kind=provider", 2},
 		{"kind=tool", 2},
+		{"kind=none", 0},
 		{"status=all", 4},
 		{"status=failure", 2},
 		{"kind=provider&status=failure", 1},

@@ -88,10 +88,12 @@ func eventLimit(raw string) int {
 	return defaultEventLimit
 }
 
-// eventKind accepts kind=provider|tool; empty or unknown values mean "all".
+// eventKind accepts kind=provider|tool|none; empty or unknown values mean
+// "all". "none" is the explicit no-match sentinel used when the dashboard
+// combines a tool filter with a provider filter.
 func eventKind(raw string) string {
 	value := strings.ToLower(strings.TrimSpace(raw))
-	if value == "provider" || value == "tool" {
+	if value == "provider" || value == "tool" || value == "none" {
 		return value
 	}
 	return ""
@@ -117,8 +119,13 @@ func (h *Handler) events(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	query := r.URL.Query()
+	kind := eventKind(query.Get("kind"))
+	if kind == "none" {
+		writeJSON(w, http.StatusOK, []telemetry.StoredEvent{})
+		return
+	}
 	out, err := h.store.RecentFiltered(telemetry.EventFilter{
-		Kind:   eventKind(query.Get("kind")),
+		Kind:   kind,
 		Status: eventStatus(query.Get("status")),
 		Source: strings.TrimSpace(query.Get("source")),
 		Limit:  eventLimit(query.Get("limit")),
