@@ -137,6 +137,7 @@ async function loadOverview() {
   }
   renderSystem();
   renderToolKpis();
+  renderMCPTools();
   renderWebSources();
   renderSourcePages();
   renderUsageSourceOptions();
@@ -275,6 +276,49 @@ function renderToolKpis() {
   $('#tool-kpis').innerHTML = cards.map(([label, value, detail]) =>
     `<article class="kpi"><header><b>${esc(label)}</b></header><strong>${esc(value)}</strong><small class="dim">${esc(detail)}</small></article>`
   ).join('');
+}
+
+// renderMCPTools 展示公开 MCP 工具的固定清单（不依赖是否已经产生调用），
+// 并用遥测健康数据补充“已观测 / 尚无调用”的观测状态。
+function renderMCPTools() {
+  const list = $('#mcp-tools-list');
+  if (!list) return;
+  const o = state.overview;
+  const configured = o && Array.isArray(o.configured_tools) ? o.configured_tools : [];
+  const note = $('#mcp-tools-note');
+  const help = $('#mcp-tools-help');
+  if (!configured.length) {
+    list.innerHTML = `<p class="empty">${esc(o ? '概览接口未返回工具清单' : '正在读取…')}</p>`;
+    if (note) note.textContent = '—';
+    if (help) setNote(help, state.overviewError ? '读取失败：' + state.overviewError : '', state.overviewError ? 'bad' : '');
+    return;
+  }
+  const observed = new Map();
+  (Array.isArray(o.tools) ? o.tools : []).forEach(h => h && observed.set(h.name, h));
+  const enabledCount = configured.filter(t => t.enabled).length;
+  if (note) note.textContent = enabledCount + ' / ' + configured.length + ' 已启用';
+  if (help) setNote(help, '开关状态来自运行配置；观测状态来自真实调用，尚无调用不会被当成异常', '');
+  list.innerHTML = configured.map(tool => {
+    const health = observed.get(tool.name);
+    let stateLabel;
+    let dotClass;
+    if (!tool.enabled) {
+      stateLabel = '配置未启用';
+      dotClass = 'unknown';
+    } else if (health && health.last_seen_at) {
+      stateLabel = HEALTH[health.status] || '未知';
+      dotClass = DOT[health.status] || 'unknown';
+    } else {
+      stateLabel = '可调用 · 尚无观测';
+      dotClass = 'unknown';
+    }
+    const stats = health && health.today
+      ? `<small>今日 ${fmtInt(health.today.requests)} 次 · 成功 ${fmtInt(health.today.successes)} · 失败 ${fmtInt(health.today.failures)}</small>`
+      : '<small>尚未产生工具层事件</small>';
+    return `<div class="tool-row">${dot(dotClass)}` +
+      `<div class="tool-main"><div class="tool-line"><b>${esc(tool.label || displayName(tool.name))}</b><span class="tool-state">${esc(stateLabel)}</span></div>` +
+      `<small class="mono">${esc(tool.name)}</small>${stats}</div></div>`;
+  }).join('');
 }
 
 /* ---------- sources ---------- */
@@ -622,6 +666,7 @@ function knownFilterEntries() {
   const addTool = (id, label) => { if (id) tools.set(id, label || displayName(id)); };
   const addProvider = (id, label) => { if (id) providers.set(id, label || displayName(id)); };
   if (o) {
+    (Array.isArray(o.configured_tools) ? o.configured_tools : []).forEach(t => t && addTool(t.name, t.label));
     (Array.isArray(o.providers) ? o.providers : []).forEach(h => h && addProvider(h.name));
     (Array.isArray(o.tools) ? o.tools : []).forEach(h => h && addTool(h.name));
     (Array.isArray(o.sources) ? o.sources : []).forEach(s => s && addProvider(s.id, s.name));
