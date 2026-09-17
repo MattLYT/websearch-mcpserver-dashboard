@@ -170,6 +170,8 @@ async function loadSettings() {
 }
 
 async function loadEvents() {
+  const requestId = (state.events.requestId || 0) + 1;
+  state.events.requestId = requestId;
   const f = state.filters;
   const params = new URLSearchParams();
   params.set('limit', String(f.limit));
@@ -178,7 +180,7 @@ async function loadEvents() {
   const tool = f.tool || '';
   const provider = f.provider || '';
   if (tool && provider) {
-    params.set('kind', '__none__');
+    params.set('kind', 'none');
     params.set('source', '');
   } else if (tool) {
     params.set('kind', 'tool');
@@ -189,10 +191,12 @@ async function loadEvents() {
   }
   try {
     const rows = await fetchJSON('/__admin/api/events?' + params.toString());
+    if (state.events.requestId !== requestId) return;
     state.events.rows = Array.isArray(rows) ? rows : [];
     state.events.error = null;
     state.events.serverFiltered = !hasFilter() || state.events.rows.every(matchesFilters);
   } catch (e) {
+    if (state.events.requestId !== requestId) return;
     state.events.error = e.message;
   }
   renderUsage();
@@ -491,11 +495,15 @@ function eventCells(e, cols) {
     out.push(`<td>${esc(e.kind === 'provider' ? '来源' : '工具')}</td>`);
   }
   const detail = e.detail ? `<small class="source-detail">${esc(e.detail)}</small>` : '';
-  const toolLabel = e.kind === 'tool' ? (displayName(e.tool) || '—') : '—';
-  const providerLabel = e.provider ? displayName(e.provider) : '—';
+  const toolLabel = e.kind === 'tool'
+    ? `<span class="source-name">${esc(displayName(e.tool))}</span>`
+    : '<span class="dim">—</span>';
+  const providerLabel = e.provider
+    ? `<span class="source-name">${esc(displayName(e.provider))}</span>${detail}`
+    : '<span class="dim">—</span>';
   out.push(
-    `<td><span class="source-name">${esc(toolLabel)}</span></td>`,
-    `<td><span class="source-name">${esc(providerLabel)}</span>${detail}</td>`,
+    `<td>${toolLabel}</td>`,
+    `<td>${providerLabel}</td>`,
     `<td class="${e.success ? 'ok-text' : 'bad-text'}">${e.success ? '成功' : '失败'}</td>`,
     `<td class="num">${esc(fmtMS(e.duration_ms))}</td>`,
     `<td class="num">${fmtInt(e.result_count)}</td>`,
