@@ -273,7 +273,9 @@ function renderToolKpis() {
     ['今日失败次数', today ? fmtInt(today.failures) : '—', '仅统计 MCP 工具层事件'],
     ['今日平均响应时间', avg === null ? '—' : fmtMS(avg), today && num(today.requests) > 0 ? '工具层总耗时 ÷ 调用数' : '无调用时不计算'],
   ];
-  $('#tool-kpis').innerHTML = cards.map(([label, value, detail]) =>
+  const kpis = $('#overview-kpis');
+  if (!kpis) return;
+  kpis.innerHTML = cards.map(([label, value, detail]) =>
     `<article class="kpi"><header><b>${esc(label)}</b></header><strong>${esc(value)}</strong><small class="dim">${esc(detail)}</small></article>`
   ).join('');
 }
@@ -405,6 +407,8 @@ function countsLabel(list) {
 function renderWebSources() {
   const body = $('#web-sources-body');
   const note = $('#web-sources-note');
+  // 总览已移除 Web 来源面板；搜索源页使用 renderSourcePages。
+  if (!body) return;
   const list = webSources();
   if (list === null) {
     body.innerHTML = emptyRow(6, state.overviewError ? '读取失败' : '正在读取…');
@@ -457,6 +461,8 @@ function renderTavily() {
   const note = $('#tavily-note');
   const dotEl = $('#tavily-dot');
   const details = $('#tavily-details');
+  // 总览已移除额度面板；额度仍通过搜索源页的额度列展示。
+  if (!value || !details) return;
   const q = tavilyItem();
   const kv = (pairs) => pairs.filter(p => p[1]).map(p => `<div><dt>${esc(p[0])}</dt><dd>${esc(p[1])}</dd></div>`).join('');
   if (state.quotaError && !q) {

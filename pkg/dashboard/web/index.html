@@ -29,52 +29,33 @@
       </header>
 
       <section id="page-overview" class="page active">
-        <div class="overview-grid">
-          <div class="stack">
-            <article class="panel">
-              <div class="panel-head"><div><p class="eyebrow">SYSTEM</p><h2>系统状态</h2></div><span id="system-dot" class="dot unknown"></span></div>
-              <p class="sys-value" id="system-status">—</p>
-              <p class="panel-note" id="system-note"></p>
-              <dl class="kv">
-                <div><dt>启用来源</dt><dd id="system-enabled">—</dd></div>
-                <div><dt>已观测</dt><dd id="system-observed">—</dd></div>
-                <div><dt>不稳定</dt><dd id="system-degraded">—</dd></div>
-                <div><dt>异常</dt><dd id="system-down">—</dd></div>
-              </dl>
-            </article>
-            <article class="panel">
-              <div class="panel-head"><div><p class="eyebrow">MCP TOOLS</p><h2>工具模块</h2></div><span class="muted" id="mcp-tools-note">4 个公开工具</span></div>
-              <p class="panel-note" id="mcp-tools-help"></p>
-              <div class="tool-list" id="mcp-tools-list"></div>
-            </article>
-            <div class="kpi-stack" id="tool-kpis"></div>
-          </div>
+        <div class="kpi-grid" id="overview-kpis"></div>
 
+        <div class="overview-grid">
           <article class="panel">
-            <div class="panel-head"><div><p class="eyebrow">WEB SOURCES</p><h2>Web 来源</h2></div><a class="mini-link" href="#sources" data-jump="sources">全部来源 →</a></div>
-            <p class="panel-note" id="web-sources-note"></p>
-            <div class="table-scroll table-compact">
-              <table class="data-table">
-                <thead><tr><th>来源</th><th>状态</th><th>健康</th><th>最近 20 次</th><th class="num">今日尝试</th><th class="num">成功率</th><th class="num">平均耗时</th><th>额度</th></tr></thead>
-                <tbody id="web-sources-body"></tbody>
-              </table>
-            </div>
+            <div class="panel-head"><div><p class="eyebrow">SYSTEM</p><h2>系统状态</h2></div><span id="system-dot" class="dot unknown"></span></div>
+            <p class="sys-value" id="system-status">—</p>
+            <p class="panel-note" id="system-note"></p>
+            <dl class="kv">
+              <div><dt>启用来源</dt><dd id="system-enabled">—</dd></div>
+              <div><dt>已观测 Web 来源</dt><dd id="system-observed">—</dd></div>
+              <div><dt>不稳定</dt><dd id="system-degraded">—</dd></div>
+              <div><dt>异常</dt><dd id="system-down">—</dd></div>
+            </dl>
           </article>
 
-          <div class="stack">
-            <article class="panel">
-              <div class="panel-head"><div><p class="eyebrow">OFFICIAL QUOTA</p><h2>Tavily 额度</h2></div><span id="tavily-dot" class="dot unknown"></span></div>
-              <p class="sys-value" id="tavily-value">—</p>
-              <p class="panel-note" id="tavily-note"></p>
-              <dl class="kv" id="tavily-details"></dl>
-            </article>
-            <article class="panel">
-              <div class="panel-head"><div><p class="eyebrow">EFFECTIVE CONFIG</p><h2>运行配置</h2></div></div>
-              <p class="panel-note" id="config-note"></p>
-              <dl class="kv" id="config-list"></dl>
-              <p class="secret-line" id="config-secrets"></p>
-            </article>
-          </div>
+          <article class="panel">
+            <div class="panel-head"><div><p class="eyebrow">EFFECTIVE CONFIG</p><h2>运行配置</h2></div></div>
+            <p class="panel-note" id="config-note"></p>
+            <dl class="kv" id="config-list"></dl>
+            <p class="secret-line" id="config-secrets"></p>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head"><div><p class="eyebrow">MCP TOOLS</p><h2>工具模块</h2></div><span class="muted" id="mcp-tools-note">4 个公开工具</span></div>
+            <p class="panel-note" id="mcp-tools-help"></p>
+            <div class="tool-list" id="mcp-tools-list"></div>
+          </article>
         </div>
 
         <article class="panel">
@@ -87,6 +68,7 @@
             </table>
           </div>
         </article>
+
       </section>
 
       <section id="page-sources" class="page">
