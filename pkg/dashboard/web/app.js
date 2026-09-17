@@ -483,8 +483,9 @@ function eventCells(e, cols) {
   if (cols !== 'overview') {
     out.push(`<td>${esc(e.kind === 'provider' ? '来源' : '工具')}</td>`);
   }
+  const detail = e.detail ? `<small class="source-detail">${esc(e.detail)}</small>` : '';
   out.push(
-    `<td>${esc(displayName(sourceOf(e)) || '—')}</td>`,
+    `<td><span class="source-name">${esc(displayName(sourceOf(e)) || '—')}</span>${detail}</td>`,
     `<td class="${e.success ? 'ok-text' : 'bad-text'}">${e.success ? '成功' : '失败'}</td>`,
     `<td class="num">${esc(fmtMS(e.duration_ms))}</td>`,
     `<td class="num">${fmtInt(e.result_count)}</td>`,
@@ -561,13 +562,14 @@ function exportCSV() {
     toast('当前没有可导出的记录', true);
     return;
   }
-  const head = ['时间', '层级', '来源/工具', '状态', '耗时(ms)', '结果数', '缓存命中', '主题', '语言', '关键词', '查询哈希', '查询字符数', '错误摘要'];
+  const head = ['时间', '层级', '来源/工具', '解析来源', '状态', '耗时(ms)', '结果数', '缓存命中', '主题', '语言', '关键词', '查询哈希', '查询字符数', '错误摘要'];
   const lines = [head.map(csvCell).join(',')];
   rows.forEach(e => {
     lines.push([
       fmtAt(e.occurred_at),
       e.kind === 'provider' ? '来源' : '工具',
       displayName(sourceOf(e)),
+      e.detail || '',
       e.success ? '成功' : '失败',
       num(e.duration_ms) === null ? '' : e.duration_ms,
       num(e.result_count) === null ? '' : e.result_count,

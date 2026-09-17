@@ -49,6 +49,7 @@ func doAcademicSearch(query string, engines []string, timeRange string, page int
 			if parseErr == nil {
 				cacheHit = true
 				resultCount = len(results)
+				recordAcademicProviderEvents(query, results, nil, nil, started)
 				log.Infof("学术缓存命中: query=%s", query)
 				ret, mergeErr := formatAcademicResults(query, search.AcademicSearchResult{Results: results})
 				if mergeErr == nil {
@@ -68,24 +69,13 @@ func doAcademicSearch(query string, engines []string, timeRange string, page int
 	log.Infof("学术搜索: query=%s, engines=%v, timeRange=%s, page=%d", query, engines, timeRange, page)
 	res, err := academicSearcher.SearchAcademicRaw(query, opts)
 	if err != nil {
+		// Provider failures must still be visible in telemetry even though the
+		// aggregate tool call returned an error.
+		recordAcademicProviderEvents(query, nil, academicProviderErrorsFromError(err), academicEngineSelection(academicSearcher.AcademicEngines(), engines), started)
 		return nil, nil, fmt.Errorf("学术搜索失败: %w", err)
 	}
 	resultCount = len(res.Results)
-	seen := map[string]bool{}
-	for _, item := range res.Results {
-		names := append([]string{item.Engine}, item.Engines...)
-		for _, name := range names {
-			if name != "" && !seen[name] {
-				seen[name] = true
-				telemetry.Record(telemetry.Event{Kind: "provider", Provider: name, Query: query, Success: true, Duration: time.Since(started)})
-			}
-		}
-	}
-	for name, msg := range res.EngineErrors {
-		if !seen[name] {
-			telemetry.Record(telemetry.Event{Kind: "provider", Provider: name, Query: query, Success: false, Duration: time.Since(started), Error: fmt.Errorf("%s", msg)})
-		}
-	}
+	recordAcademicProviderEvents(query, res.Results, res.EngineErrors, academicEngineSelection(academicSearcher.AcademicEngines(), engines), started)
 
 	ret, err := formatAcademicResults(query, res)
 	if err != nil {
@@ -96,6 +86,107 @@ func doAcademicSearch(query string, engines []string, timeRange string, page int
 		_ = cacheInst.Store(cacheKey, "", true, res.Results, "")
 	}
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: ret}}}, nil, nil
+}
+
+// academicProviderErrorsFromError extracts the adapter's "engine: message"
+// summary so a fully failed aggregate call still produces provider events.
+func academicProviderErrorsFromError(err error) map[string]string {
+	if err == nil {
+		return nil
+	}
+	const prefix = "学术引擎搜索无结果（"
+	msg := err.Error()
+	start := strings.Index(msg, prefix)
+	if start < 0 {
+		return nil
+	}
+	body := msg[start+len(prefix):]
+	body = strings.TrimSuffix(body, "）")
+	out := make(map[string]string)
+	for _, part := range strings.Split(body, "; ") {
+		name, detail, ok := strings.Cut(part, ": ")
+		if ok && name != "" {
+			out[name] = detail
+		}
+	}
+	return out
+}
+
+// academicEngineSelection returns only the engines that actually ran. An empty
+// requested list means the adapter searched every registered engine.
+func academicEngineSelection(registered, requested []string) []string {
+	if len(registered) == 0 {
+		return requested
+	}
+	if len(requested) == 0 {
+		return registered
+	}
+	selected := make([]string, 0, len(requested))
+	for _, name := range requested {
+		for _, available := range registered {
+			if strings.EqualFold(strings.TrimSpace(name), available) {
+				selected = append(selected, available)
+				break
+			}
+		}
+	}
+	return selected
+}
+
+// recordAcademicProviderEvents attributes each merged academic result to every
+// engine that returned it. Empty successes and per-engine failures still emit
+// one event so the dashboard shows coverage for every provider, not just the
+// engines that happened to contribute the final result set.
+func recordAcademicProviderEvents(query string, results []search.SearchResult, engineErrors map[string]string, engines []string, started time.Time) {
+	counts := make(map[string]int)
+	failed := make(map[string]bool)
+	engineTrace := make([]string, 0, len(engines))
+	seenEngine := make(map[string]bool)
+
+	mark := func(name string) {
+		if name == "" || seenEngine[name] {
+			return
+		}
+		seenEngine[name] = true
+		engineTrace = append(engineTrace, name)
+	}
+	for _, name := range engines {
+		mark(name)
+	}
+	for _, item := range results {
+		names := item.Engines
+		if len(names) == 0 && item.Engine != "" {
+			names = []string{item.Engine}
+		}
+		for _, name := range names {
+			if name != "" {
+				counts[name]++
+				mark(name)
+			}
+		}
+	}
+	for name := range engineErrors {
+		failed[name] = true
+		mark(name)
+	}
+
+	// The adapter exposes per-engine errors but not per-engine timing yet, so
+	// each provider event carries the aggregate call duration.
+	duration := time.Since(started)
+	for _, name := range engineTrace {
+		event := telemetry.Event{
+			Kind:        "provider",
+			Provider:    name,
+			Query:       query,
+			Success:     !failed[name],
+			Duration:    duration,
+			ResultCount: counts[name],
+		}
+		if failed[name] {
+			event.Error = fmt.Errorf("%s", engineErrors[name])
+		}
+		telemetry.Record(event)
+	}
 }
 
 // streamSummarize 流式生成摘要：通过 MCP progress notification 逐 token 推送，
