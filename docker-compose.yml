@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.codex
-    image: websearch-mcpserver:observability-fd66cf9f
+    image: websearch-mcpserver:observability-fd66cf9g
     # This is a locally built image. The reconciler builds it explicitly when
     # Docker no longer has the image instead of trying a registry pull first.
     pull_policy: never

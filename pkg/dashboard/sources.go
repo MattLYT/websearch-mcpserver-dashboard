@@ -58,9 +58,12 @@ type dashboardOverview struct {
 func buildDashboardOverview(conf config.Config, observed telemetry.Overview) dashboardOverview {
 	web := joinSources(webSourceCatalog(conf), observed.Providers)
 	academic := joinSources(academicSourceCatalog(conf), observed.Providers)
+	summary := summarizeSystem(web)
+	// Suspension covers both web and academic providers.
+	summary.Suspended += countSuspended(academic)
 	return dashboardOverview{
 		Overview:        observed,
-		System:          summarizeSystem(web),
+		System:          summary,
 		Sources:         web,
 		AcademicSources: academic,
 		ConfiguredTools: mcpToolCatalog(conf),
@@ -209,6 +212,17 @@ func summarizeSystem(sources []SourceView) SystemSummary {
 		out.Status = "healthy"
 	}
 	return out
+}
+
+// countSuspended counts active sources whose read-only circuit breaker is open.
+func countSuspended(sources []SourceView) int {
+	count := 0
+	for _, source := range sources {
+		if source.Active && source.Suspended {
+			count++
+		}
+	}
+	return count
 }
 
 func webSourceCatalog(conf config.Config) []SourceView {
