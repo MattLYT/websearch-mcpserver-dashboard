@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WebSearch MCP 控制中心 · 本机可观测性</title>
+<meta name="description" content="基于 daidaiJ/websearch-mcpserver 的本机控制中心：被动遥测、来源健康、失败分类、熔断状态与请求关联。">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<header class="hero">
+  <div class="inner">
+    <p class="eyebrow">LOCAL OBSERVABILITY · 本机可观测性</p>
+    <h1>WebSearch MCP 控制中心</h1>
+    <p class="lede">在原有 websearch-mcpserver 之上增加一个默认关闭、只读的本机控制台：被动记录每一次工具与来源调用，解释失败原因，展示来源健康与熔断状态，并保留请求级调用链。不主动探测、不保存完整查询。</p>
+    <div class="tagrow">
+      <span class="tag ok">四工具同屏</span>
+      <span class="tag ok">失败分类</span>
+      <span class="tag ok">最小样本置信度</span>
+      <span class="tag ok">只读熔断</span>
+      <span class="tag ok">请求关联</span>
+      <span class="tag ok">Prometheus 出口</span>
+    </div>
+    <div class="hero-actions">
+      <a class="btn primary" href="https://github.com/matt1060338871-pixel/websearch-mcpserver">本次扩展的分支</a>
+      <a class="btn ghost" href="https://github.com/daidaiJ/websearch-mcpserver">上游项目（原作者维护）</a>
+      <a class="btn ghost" href="../en/index.html">English</a>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <section>
+    <div class="note">
+      本项目是基于 <a href="https://github.com/daidaiJ/websearch-mcpserver">daidaiJ/websearch-mcpserver</a> 的扩展分支，遵循上游的 MIT 许可与社区规范。
+      控制中心是可选附加模块，默认 <code>dashboard.enabled: false</code>，不改变四个 MCP 工具的参数、返回与调用行为；
+      上游原始功能、文档与发布流程保持原样，相关成果与著作权归原作者。
+    </div>
+  </section>
+
+  <section>
+    <h2>系统结构</h2>
+    <p class="sub">数据只往一个方向流动：真实调用产生事件，事件驱动控制台，控制台从不反向触发搜索。</p>
+    <div class="flow">
+      <div class="node"><b>MCP 工具层</b><small>smartsearch · academicsearch · cleanfetch · pdf_parser</small></div>
+      <div class="arrow">→</div>
+      <div class="node"><b>被动遥测层</b><small>工具事件 + 来源事件，SQLite 存储，查询哈希而非原文</small></div>
+      <div class="arrow">→</div>
+      <div class="node"><b>本地控制台</b><small>总览 · 搜索源 · 调用记录 · 设置（loopback 限定）</small></div>
+      <div class="arrow">→</div>
+      <div class="node"><b>可选出口</b><small>只读 Admin API 与 Prometheus 文本指标</small></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>控制中心提供什么</h2>
+    <div class="grid cols-3">
+      <article class="card"><h3>失败语义</h3><p>把失败归类为限流、验证码、访问被拒、超时、网络、解析失败、无结果与未知；来源行直接显示失败构成与 P95 延迟。</p></article>
+      <article class="card"><h3>告警可信度</h3><p>基于最近 20 次调用判定健康，样本不足 5 次时标记为“样本不足”，避免把一次波动读成来源损坏。</p></article>
+      <article class="card"><h3>只读熔断</h3><p>连续 3 次失败才进入暂停，按错误类型给出不同暂停时长并显示恢复时间；成功即清除。控制台只报告，不改变搜索路径。</p></article>
+      <article class="card"><h3>请求关联</h3><p>每次工具调用生成 request id，工具事件与其触发的来源事件共享同一标识，可在页面上展开一次调用的来源链。</p></article>
+      <article class="card"><h3>四工具固定展示</h3><p>四个公开 MCP 工具始终可见，未调用过的工具显示为“可调用 · 尚无观测”，不会因为历史为空而消失。</p></article>
+      <article class="card"><h3>机器可读出口</h3><p><code>/__admin/api/providers</code> 给脚本读取来源状态，<code>/__admin/api/metrics</code> 提供 Prometheus 文本指标，供 Grafana 等现有栈消费。</p></article>
+    </div>
+  </section>
+
+  <section>
+    <h2>界面</h2>
+    <div class="grid cols-2">
+      <figure><img src="../images/dashboard-overview.jpg" alt="控制中心总览"><figcaption>总览：KPI、系统状态、运行配置与四个工具模块</figcaption></figure>
+      <figure><img src="../images/dashboard-sources.jpg" alt="搜索源页面"><figcaption>搜索源：健康、失败构成、P95、额度与熔断状态</figcaption></figure>
+      <figure><img src="../images/dashboard-usage.jpg" alt="调用记录页面"><figcaption>调用记录：工具与来源分列，可按错误类型筛选并展开请求</figcaption></figure>
+      <figure><img src="../images/dashboard-settings.jpg" alt="设置页面"><figcaption>设置：备份后写入白名单配置，密钥永不回显</figcaption></figure>
+    </div>
+  </section>
+
+  <section>
+    <h2>快速开始</h2>
+    <p class="sub">保持上游原有的启动方式，只多一个可选的控制中心开关。</p>
+    <h3>Docker Compose</h3>
+<pre><code>services:
+  websearch:
+    image: ghcr.io/daidaiJ/websearch-mcpserver:latest
+    ports: ["127.0.0.1:8338:8338"]
+    environment:
+      - TAVILY_SK
+      - EXA_API_KEY
+      - JINA_API_KEY
+    volumes:
+      - websearch-data:/data
+      - ./config.yaml:/app/config.yaml:rw
+volumes:
+  websearch-data:</code></pre>
+    <h3>配置文件</h3>
+<pre><code>dashboard:
+  enabled: true
+  storage_path: ./data/dashboard.db
+  retention_days: 30
+  secrets_path: ./data/dashboard-secrets.json
+  suspension:
+    ban_time_on_fail: 5s
+    max_ban_time_on_fail: 24h
+    suspended_times:
+      rate_limit: 3m
+      captcha: 1h
+      access_denied: 24h</code></pre>
+    <p>打开 <code>http://127.0.0.1:8338/dashboard/</code> 即可看到控制台；它只允许本机访问，与 MCP 端点共用同一个 loopback 边界。</p>
+  </section>
+
+  <section>
+    <h2>数据与隐私</h2>
+    <div class="grid cols-2">
+      <article class="card"><h3>只保存脱敏元数据</h3><p>查询以哈希 + 主题 + 语言 + 关键词的形式落库，完整查询与 URL 不写入数据库；密钥只保存在独立的私密覆盖文件，接口与页面都不回显原值。</p></article>
+      <article class="card"><h3>只做被动观测</h3><p>控制台不发起任何健康探测，也不会因为某个来源“被暂停”就跳过调用；它只呈现真实发生过的调用结果。</p></article>
+    </div>
+  </section>
+
+  <section>
+    <h2>覆盖的来源</h2>
+    <table>
+      <thead><tr><th>分组</th><th>来源</th></tr></thead>
+      <tbody>
+        <tr><td>通用搜索</td><td>Bing、DuckDuckGo、百度千帆、豆包搜索、AnySearch、Tavily、Exa</td></tr>
+        <tr><td>学术检索</td><td>arXiv、Crossref、OpenAlex、PubMed、Europe PMC、DBLP、DOAJ、Semantic Scholar、Google Scholar</td></tr>
+        <tr><td>抓取与解析</td><td>go-webfetch、Jina Reader、MinerU</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>许可与致谢</h2>
+    <p>本项目采用上游的 MIT 许可。核心搜索能力、搜索引擎适配与文档来自 <a href="https://github.com/daidaiJ/websearch-mcpserver">daidaiJ/websearch-mcpserver</a>，本分支只在其上增加可观测性模块。欢迎通过上游仓库提交与该项目本身相关的 Issue 与 PR。</p>
+  </section>
+</main>
+
+<footer>
+  <div class="inner">
+    <p>WebSearch MCP 控制中心 · 基于 <a href="https://github.com/daidaiJ/websearch-mcpserver">daidaiJ/websearch-mcpserver</a>（MIT）扩展 · 本机可观测性模块</p>
+  </div>
+</footer>
+</body>
+</html>

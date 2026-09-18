@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WebSearch MCP Control Center · Local Observability</title>
+<meta name="description" content="A local, read-only control center on top of daidaiJ/websearch-mcpserver: passive telemetry, provider health, failure taxonomy and request correlation.">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<header class="hero">
+  <div class="inner">
+    <p class="eyebrow">LOCAL OBSERVABILITY</p>
+    <h1>WebSearch MCP Control Center</h1>
+    <p class="lede">An optional, disabled-by-default control center for websearch-mcpserver. It passively records every tool and provider call, explains why calls fail, tracks source health and circuit-breaker state, and keeps a request-level call chain. No active probing, no raw query storage.</p>
+    <div class="tagrow">
+      <span class="tag ok">Four tools on one screen</span>
+      <span class="tag ok">Failure taxonomy</span>
+      <span class="tag ok">Minimum-sample confidence</span>
+      <span class="tag ok">Read-only circuit breaker</span>
+      <span class="tag ok">Request correlation</span>
+      <span class="tag ok">Prometheus endpoint</span>
+    </div>
+    <div class="hero-actions">
+      <a class="btn primary" href="https://github.com/matt1060338871-pixel/websearch-mcpserver">This fork</a>
+      <a class="btn ghost" href="https://github.com/daidaiJ/websearch-mcpserver">Upstream project</a>
+      <a class="btn ghost" href="../zh/index.html">中文</a>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <section>
+    <div class="note">
+      This is an extension branch of <a href="https://github.com/daidaiJ/websearch-mcpserver">daidaiJ/websearch-mcpserver</a> and follows the upstream MIT license and community conventions.
+      The control center is optional and defaults to <code>dashboard.enabled: false</code>; it does not change the four MCP tools' parameters, responses or call paths.
+      Upstream functionality, documentation and release process stay untouched, and credit for them belongs to the original author.
+    </div>
+  </section>
+
+  <section>
+    <h2>Data flow</h2>
+    <p class="sub">One direction only: real calls produce events, events drive the console, the console never triggers a search.</p>
+    <div class="flow">
+      <div class="node"><b>MCP tools</b><small>smartsearch · academicsearch · cleanfetch · pdf_parser</small></div>
+      <div class="arrow">→</div>
+      <div class="node"><b>Passive telemetry</b><small>Tool and provider events in SQLite; hashes instead of raw queries</small></div>
+      <div class="arrow">→</div>
+      <div class="node"><b>Local console</b><small>Overview · Sources · Call log · Settings (loopback only)</small></div>
+      <div class="arrow">→</div>
+      <div class="node"><b>Optional exports</b><small>Read-only admin API and Prometheus text metrics</small></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>What the console adds</h2>
+    <div class="grid cols-3">
+      <article class="card"><h3>Failure semantics</h3><p>Failures are classified as rate limit, captcha, access denied, timeout, network, parse, no result or unknown, with per-source failure composition and p95 latency.</p></article>
+      <article class="card"><h3>Trustworthy alerts</h3><p>Health is judged over the last 20 calls; fewer than five samples are marked as low confidence instead of broken.</p></article>
+      <article class="card"><h3>Read-only circuit breaker</h3><p>Three consecutive failures open a pause with per-error durations and a recovery time; a success clears it. The console reports only and never skips a call.</p></article>
+      <article class="card"><h3>Request correlation</h3><p>Each tool call gets a request id shared with the provider events it caused, so one call can be expanded into its full source chain.</p></article>
+      <article class="card"><h3>Stable tool inventory</h3><p>All four public MCP tools stay visible even before their first call, shown as “callable · not yet observed”.</p></article>
+      <article class="card"><h3>Machine-readable exports</h3><p><code>/__admin/api/providers</code> for scripts and <code>/__admin/api/metrics</code> for Prometheus-compatible stacks such as Grafana.</p></article>
+    </div>
+  </section>
+
+  <section>
+    <h2>Screens</h2>
+    <div class="grid cols-2">
+      <figure><img src="../images/dashboard-overview.jpg" alt="Dashboard overview"><figcaption>Overview: KPIs, system status, effective config and the four tool modules</figcaption></figure>
+      <figure><img src="../images/dashboard-sources.jpg" alt="Sources page"><figcaption>Sources: health, failure composition, p95, quota and circuit-breaker state</figcaption></figure>
+      <figure><img src="../images/dashboard-usage.jpg" alt="Call log"><figcaption>Call log: tools and providers split, filterable by error kind, expandable per request</figcaption></figure>
+      <figure><img src="../images/dashboard-settings.jpg" alt="Settings page"><figcaption>Settings: whitelisted changes with a YAML backup; secrets are never echoed</figcaption></figure>
+    </div>
+  </section>
+
+  <section>
+    <h2>Quick start</h2>
+    <h3>Docker Compose</h3>
+<pre><code>services:
+  websearch:
+    image: ghcr.io/daidaiJ/websearch-mcpserver:latest
+    ports: ["127.0.0.1:8338:8338"]
+    environment:
+      - TAVILY_SK
+      - EXA_API_KEY
+      - JINA_API_KEY
+    volumes:
+      - websearch-data:/data
+      - ./config.yaml:/app/config.yaml:rw
+volumes:
+  websearch-data:</code></pre>
+    <h3>Configuration</h3>
+<pre><code>dashboard:
+  enabled: true
+  storage_path: ./data/dashboard.db
+  retention_days: 30
+  secrets_path: ./data/dashboard-secrets.json
+  suspension:
+    ban_time_on_fail: 5s
+    max_ban_time_on_fail: 24h
+    suspended_times:
+      rate_limit: 3m
+      captcha: 1h
+      access_denied: 24h</code></pre>
+    <p>The console is served at <code>http://127.0.0.1:8338/dashboard/</code> and shares the same loopback boundary as the MCP endpoint.</p>
+  </section>
+
+  <section>
+    <h2>Data and privacy</h2>
+    <div class="grid cols-2">
+      <article class="card"><h3>Redacted metadata only</h3><p>Queries are stored as a hash plus topic, language and keywords; raw queries and URLs never reach the database. API keys live in a separate private overlay and are never returned by the API or UI.</p></article>
+      <article class="card"><h3>Passive observation only</h3><p>The console performs no health probes and never skips a source because it is paused; it only reports what real calls produced.</p></article>
+    </div>
+  </section>
+
+  <section>
+    <h2>Covered sources</h2>
+    <table>
+      <thead><tr><th>Group</th><th>Sources</th></tr></thead>
+      <tbody>
+        <tr><td>Web search</td><td>Bing, DuckDuckGo, Baidu Qianfan, Doubao Search, AnySearch, Tavily, Exa</td></tr>
+        <tr><td>Academic</td><td>arXiv, Crossref, OpenAlex, PubMed, Europe PMC, DBLP, DOAJ, Semantic Scholar, Google Scholar</td></tr>
+        <tr><td>Fetch and parse</td><td>go-webfetch, Jina Reader, MinerU</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>License and credit</h2>
+    <p>Released under the upstream MIT license. Core search capability, engine adapters and documentation come from <a href="https://github.com/daidaiJ/websearch-mcpserver">daidaiJ/websearch-mcpserver</a>; this branch only adds an observability module. Please send issues and pull requests about the project itself to the upstream repository.</p>
+  </section>
+</main>
+
+<footer>
+  <div class="inner">
+    <p>WebSearch MCP Control Center · an observability extension of <a href="https://github.com/daidaiJ/websearch-mcpserver">daidaiJ/websearch-mcpserver</a> (MIT)</p>
+  </div>
+</footer>
+</body>
+</html>
