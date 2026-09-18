@@ -88,6 +88,18 @@ func eventLimit(raw string) int {
 	return defaultEventLimit
 }
 
+// eventErrorKind accepts one of the stable telemetry error kinds; empty or
+// unknown values mean "all".
+func eventErrorKind(raw string) string {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	switch value {
+	case "rate_limit", "captcha", "access_denied", "timeout", "parse", "no_result", "network", "unknown":
+		return value
+	default:
+		return ""
+	}
+}
+
 // eventKind accepts kind=provider|tool|none; empty or unknown values mean
 // "all". "none" is the explicit no-match sentinel used when the dashboard
 // combines a tool filter with a provider filter.
@@ -125,10 +137,11 @@ func (h *Handler) events(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := h.store.RecentFiltered(telemetry.EventFilter{
-		Kind:   kind,
-		Status: eventStatus(query.Get("status")),
-		Source: strings.TrimSpace(query.Get("source")),
-		Limit:  eventLimit(query.Get("limit")),
+		Kind:      kind,
+		Status:    eventStatus(query.Get("status")),
+		Source:    strings.TrimSpace(query.Get("source")),
+		ErrorKind: eventErrorKind(query.Get("error_kind")),
+		Limit:     eventLimit(query.Get("limit")),
 	})
 	if err != nil {
 		writeError(w, err)

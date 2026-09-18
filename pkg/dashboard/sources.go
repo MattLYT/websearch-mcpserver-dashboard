@@ -17,22 +17,26 @@ type SystemSummary struct {
 }
 
 type SourceView struct {
-	ID                  string               `json:"id"`
-	Name                string               `json:"name"`
-	Group               string               `json:"group"`
-	Configured          bool                 `json:"configured"`
-	Active              bool                 `json:"active"`
-	Status              string               `json:"status"`
-	LastSuccessAt       string               `json:"last_success_at,omitempty"`
-	LastFailureAt       string               `json:"last_failure_at,omitempty"`
-	LastSeenAt          string               `json:"last_seen_at,omitempty"`
-	FailureRate         float64              `json:"failure_rate"`
-	SampleSize          int                  `json:"sample_size"`
-	ConsecutiveFailures int                  `json:"consecutive_failures"`
-	RecentOutcomes      []bool               `json:"recent_outcomes"`
-	Today               telemetry.DailyUsage `json:"today"`
-	LastError           string               `json:"last_error,omitempty"`
-	QuotaQueryable      bool                 `json:"quota_queryable"`
+	ID                  string                     `json:"id"`
+	Name                string                     `json:"name"`
+	Group               string                     `json:"group"`
+	Configured          bool                       `json:"configured"`
+	Active              bool                       `json:"active"`
+	Status              string                     `json:"status"`
+	LastSuccessAt       string                     `json:"last_success_at,omitempty"`
+	LastFailureAt       string                     `json:"last_failure_at,omitempty"`
+	LastSeenAt          string                     `json:"last_seen_at,omitempty"`
+	FailureRate         float64                    `json:"failure_rate"`
+	SampleSize          int                        `json:"sample_size"`
+	ConsecutiveFailures int                        `json:"consecutive_failures"`
+	RecentOutcomes      []bool                     `json:"recent_outcomes"`
+	Today               telemetry.DailyUsage       `json:"today"`
+	LastError           string                     `json:"last_error,omitempty"`
+	State               string                     `json:"state,omitempty"`
+	SuspendedUntil      string                     `json:"suspended_until,omitempty"`
+	P95MS               int64                      `json:"p95_ms"`
+	ErrorKinds          []telemetry.ErrorKindCount `json:"error_kinds,omitempty"`
+	QuotaQueryable      bool                       `json:"quota_queryable"`
 	aliases             []string
 }
 
@@ -90,6 +94,9 @@ func joinSources(defs []SourceView, observed []telemetry.Health) []SourceView {
 			if today.Day == "" {
 				today.Day, today.Kind, today.Provider = candidate.Today.Day, "provider", s.ID
 			}
+			if candidate.P95MS > h.P95MS {
+				h.P95MS = candidate.P95MS
+			}
 			today.Requests += candidate.Today.Requests
 			today.Successes += candidate.Today.Successes
 			today.Failures += candidate.Today.Failures
@@ -99,6 +106,7 @@ func joinSources(defs []SourceView, observed []telemetry.Health) []SourceView {
 		}
 		if !ok {
 			s.Status = "unknown"
+			s.State = "unknown"
 			continue
 		}
 		s.Status = h.Status
@@ -111,6 +119,15 @@ func joinSources(defs []SourceView, observed []telemetry.Health) []SourceView {
 		s.RecentOutcomes = h.RecentOutcomes
 		s.Today = today
 		s.LastError = h.LastError
+		s.State = h.State
+		if s.State == "" {
+			s.State = h.Status
+		}
+		if h.SuspendedUntil != "" {
+			s.SuspendedUntil = h.SuspendedUntil
+		}
+		s.P95MS = h.P95MS
+		s.ErrorKinds = h.ErrorKinds
 	}
 	return defs
 }

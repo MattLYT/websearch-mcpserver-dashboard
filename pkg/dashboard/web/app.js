@@ -8,6 +8,10 @@ const REFRESH_MS = 60000;
 const TZ = { hour12: false, timeZone: 'Asia/Shanghai' };
 const PAGES = { overview: '运行总览', sources: '搜索源', usage: '调用记录', settings: '设置' };
 const HEALTH = { healthy: '正常', degraded: '不稳定', down: '异常', unknown: '未知' };
+const ERROR_KINDS = {
+  rate_limit: '限流', captcha: '验证码', access_denied: '访问被拒', timeout: '超时',
+  parse: '解析失败', no_result: '无结果', network: '网络/服务端', unknown: '未知错误',
+};
 const SYSTEM = { healthy: '运行正常', degraded: '部分降级', down: '部分异常', waiting: '等待真实调用' };
 const DOT = { healthy: 'healthy', degraded: 'degraded', down: 'down', unknown: 'unknown' };
 const DISPLAY = {
@@ -29,7 +33,7 @@ const state = {
   settings: null, settingsError: null, settingsDirty: false, settingsLoaded: false,
   events: { rows: null, error: null, serverFiltered: true },
   providerEvents: { rows: null, error: null },
-  filters: { kind: 'provider', status: '', tool: '', provider: '', limit: 50 },
+  filters: { kind: 'provider', status: '', errorKind: '', tool: '', provider: '', limit: 50 },
   lastLoad: 0,
 };
 
@@ -66,6 +70,22 @@ function fmtClock() {
 function displayName(id) {
   return DISPLAY[id] || id || '';
 }
+function errorKindLabel(kind) {
+  return ERROR_KINDS[kind] || kind || '';
+}
+function errorKindChip(kind) {
+  if (!kind) return '<span class="dim">—</span>';
+  return `<span class="kind-chip">${esc(errorKindLabel(kind))}</span>`;
+}
+function formatErrorKinds(list) {
+  if (!Array.isArray(list) || !list.length) return '<span class="dim">—</span>';
+  return list.slice(0, 3).map(item =>
+    `<span class="kind-chip bad">${esc(errorKindLabel(item.kind))} ×${fmtInt(item.count)}</span>`
+  ).join(' ');
+}
+function formatP95(s) {
+  return s && num(s.p95_ms) > 0 ? fmtMS(s.p95_ms) : '<span class="dim">—</span>';
+}
 function dot(status) {
   return `<i class="dot ${DOT[status] || 'unknown'}"></i>`;
 }
@@ -83,12 +103,13 @@ function emptyRow(cols, text) {
 }
 function hasFilter() {
   const f = state.filters;
-  return Boolean(f.kind || f.status || f.tool || f.provider);
+  return Boolean(f.kind || f.status || f.errorKind || f.tool || f.provider);
 }
 function matchesFilters(e) {
   const f = state.filters;
   if (f.status === 'success' && !e.success) return false;
   if (f.status === 'failure' && e.success) return false;
+  if (f.errorKind && (e.error_kind || '') !== f.errorKind) return false;
   if (f.tool && (e.kind !== 'tool' || e.tool !== f.tool)) return false;
   if (f.provider && (e.kind !== 'provider' || e.provider !== f.provider)) return false;
   if (f.tool && f.provider) return false;
@@ -178,6 +199,7 @@ async function loadEvents() {
   params.set('limit', String(f.limit));
   if (f.kind) params.set('kind', f.kind);
   if (f.status) params.set('status', f.status);
+  if (f.errorKind) params.set('error_kind', f.errorKind);
   const tool = f.tool || '';
   const provider = f.provider || '';
   if (tool && provider) {
@@ -379,11 +401,15 @@ function sourceRowHtml(s, detailed) {
     `<td class="num">${today ? fmtInt(today.requests) : '<span class="dim">—</span>'}</td>`,
   ];
   if (detailed) {
+    cells.push(`<td class="wrap-any">${formatErrorKinds(s.error_kinds)}</td>`);
+  }
+  if (detailed) {
     cells.push(`<td class="num">${today ? fmtInt(today.successes) + ' / ' + fmtInt(today.failures) : '<span class="dim">—</span>'}</td>`);
   }
   const successRate = today && num(today.requests) > 0 ? today.successes / today.requests : null;
   cells.push(`<td class="num">${successRate === null ? '<span class="dim">—</span>' : esc(Math.round(successRate * 100) + '%')}</td>`);
-  cells.push(`<td class="num">${today && num(today.requests) > 0 ? esc(fmtMS(Math.round(today.duration_ms / today.requests))) : '<span class="dim">—</span>'}</td>`);
+  const avg = today && num(today.requests) > 0 ? fmtMS(Math.round(today.duration_ms / today.requests)) : '<span class="dim">—</span>';
+  cells.push(`<td class="num">${avg} <small class="dim">/ ${formatP95(s)}</small></td>`);
   if (detailed) {
     cells.push(`<td class="nowrap">${esc(fmtAt(s.last_seen_at))}</td>`);
   }
@@ -558,6 +584,7 @@ function eventCells(e, cols) {
     `<td class="${e.success ? 'ok-text' : 'bad-text'}">${e.success ? '成功' : '失败'}</td>`,
     `<td class="num">${esc(fmtMS(e.duration_ms))}</td>`,
     `<td class="num">${fmtInt(e.result_count)}</td>`,
+    `<td>${errorKindChip(e.error_kind)}</td>`,
   );
   if (cols === 'overview') {
     out.push(`<td>${esc([e.query_topic, e.query_language].filter(Boolean).join(' / ') || '—')}</td>`);
@@ -597,7 +624,7 @@ function renderUsage() {
   const rows = state.events.rows;
   const exportBtn = $('#export-csv');
   if (rows === null) {
-    body.innerHTML = emptyRow(12, state.events.error ? '读取失败' : '正在读取…');
+    body.innerHTML = emptyRow(13, state.events.error ? '读取失败' : '正在读取…');
     exportBtn.disabled = true;
     setNote(note, state.events.error ? '读取失败：' + state.events.error : '', state.events.error ? 'bad' : '');
     return;
@@ -605,7 +632,7 @@ function renderUsage() {
   const filtered = rows.filter(matchesFilters);
   body.innerHTML = filtered.length
     ? filtered.map(e => `<tr>${eventCells(e, 'usage').join('')}</tr>`).join('')
-    : emptyRow(12, rows.length ? '当前筛选条件下没有匹配记录' : '暂无调用记录');
+    : emptyRow(13, rows.length ? '当前筛选条件下没有匹配记录' : '暂无调用记录');
   exportBtn.disabled = filtered.length === 0;
   const parts = [];
   if (state.events.error) parts.push(['数据可能已过期：' + state.events.error, 'warn']);
@@ -631,7 +658,7 @@ function exportCSV() {
     toast('当前没有可导出的记录', true);
     return;
   }
-  const head = ['时间', '层级', '工具', '来源', '解析来源', '状态', '耗时(ms)', '结果数', '缓存命中', '主题', '语言', '关键词', '查询哈希', '查询字符数', '错误摘要'];
+  const head = ['时间', '层级', '工具', '来源', '解析来源', '状态', '错误类型', '耗时(ms)', '结果数', '缓存命中', '主题', '语言', '关键词', '查询哈希', '查询字符数', '错误摘要'];
   const lines = [head.map(csvCell).join(',')];
   rows.forEach(e => {
     lines.push([
@@ -641,6 +668,7 @@ function exportCSV() {
       e.provider ? displayName(e.provider) : '',
       e.detail || '',
       e.success ? '成功' : '失败',
+      errorKindLabel(e.error_kind),
       num(e.duration_ms) === null ? '' : e.duration_ms,
       num(e.result_count) === null ? '' : e.result_count,
       e.cache_hit ? '是' : '否',
@@ -706,10 +734,20 @@ function renderFilterSelect(selector, entries, current) {
   sel.value = current;
 }
 
+function knownErrorKinds() {
+  const map = new Map();
+  const add = kind => { if (kind) map.set(kind, errorKindLabel(kind)); };
+  [state.events.rows, state.providerEvents.rows].forEach(list => {
+    (list || []).forEach(e => e && !e.success && add(e.error_kind));
+  });
+  return Array.from(map.entries()).sort((a, b) => String(a[1]).localeCompare(String(b[1]), 'zh-CN'));
+}
+
 function renderUsageSourceOptions() {
   const entries = knownFilterEntries();
   renderFilterSelect('#filter-tool', entries.tools, state.filters.tool);
   renderFilterSelect('#filter-provider', entries.providers, state.filters.provider);
+  renderFilterSelect('#filter-error-kind', knownErrorKinds(), state.filters.errorKind);
 }
 
 /* ---------- settings & advanced actions ---------- */
@@ -852,6 +890,7 @@ function wire() {
   $$('[data-key]').forEach(el => el.addEventListener('change', markDirty));
   const applyFilter = () => {
     state.filters.status = $('#filter-status').value;
+    state.filters.errorKind = $('#filter-error-kind').value;
     const tool = $('#filter-tool').value;
     const provider = $('#filter-provider').value;
     if (tool || provider) {
@@ -867,7 +906,7 @@ function wire() {
     state.filters.limit = Number($('#filter-limit').value) || 20;
     loadEvents();
   };
-  ['#filter-kind', '#filter-status', '#filter-tool', '#filter-provider', '#filter-limit'].forEach(sel => {
+  ['#filter-kind', '#filter-status', '#filter-error-kind', '#filter-tool', '#filter-provider', '#filter-limit'].forEach(sel => {
     $(sel).addEventListener('change', applyFilter);
   });
   $('#filter-limit').value = String(state.filters.limit);

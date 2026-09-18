@@ -87,7 +87,7 @@
           <p class="panel-note" id="sources-web-note"></p>
           <div class="table-scroll">
             <table class="data-table">
-              <thead><tr><th>来源</th><th>启用状态</th><th>健康</th><th>最近 20 次</th><th class="num">今日尝试</th><th class="num">成功 / 失败</th><th class="num">成功率</th><th class="num">平均耗时</th><th>最近观测</th><th>额度</th><th>最近错误</th></tr></thead>
+              <thead><tr><th>来源</th><th>启用状态</th><th>健康</th><th>最近 20 次</th><th class="num">今日尝试</th><th>失败构成</th><th class="num">成功 / 失败</th><th class="num">成功率</th><th class="num">平均 / P95</th><th>最近观测</th><th>额度</th><th>最近错误</th></tr></thead>
               <tbody id="sources-web-body"></tbody>
             </table>
           </div>
@@ -98,7 +98,7 @@
           <p class="panel-note" id="sources-academic-note"></p>
           <div class="table-scroll">
             <table class="data-table">
-              <thead><tr><th>来源</th><th>启用状态</th><th>健康</th><th>最近 20 次</th><th class="num">今日尝试</th><th class="num">成功 / 失败</th><th class="num">成功率</th><th class="num">平均耗时</th><th>最近观测</th><th>额度</th><th>最近错误</th></tr></thead>
+              <thead><tr><th>来源</th><th>启用状态</th><th>健康</th><th>最近 20 次</th><th class="num">今日尝试</th><th>失败构成</th><th class="num">成功 / 失败</th><th class="num">成功率</th><th class="num">平均 / P95</th><th>最近观测</th><th>额度</th><th>最近错误</th></tr></thead>
               <tbody id="sources-academic-body"></tbody>
             </table>
           </div>
@@ -123,6 +123,9 @@
                 <option value="failure">失败</option>
               </select>
             </label>
+            <label class="field"><span>错误类型</span>
+              <select id="filter-error-kind"><option value="">全部</option></select>
+            </label>
             <label class="field"><span>工具</span>
               <select id="filter-tool"><option value="">全部</option></select>
             </label>
@@ -144,7 +147,7 @@
           <p class="panel-note" id="events-note"></p>
           <div class="table-scroll">
             <table class="data-table">
-              <thead><tr><th>时间</th><th>层级</th><th>工具</th><th>来源</th><th>状态</th><th class="num">耗时</th><th class="num">结果数</th><th>缓存</th><th>主题 / 语言</th><th>关键词</th><th>查询哈希</th><th>错误摘要</th></tr></thead>
+              <thead><tr><th>时间</th><th>层级</th><th>工具</th><th>来源</th><th>状态</th><th>错误类型</th><th class="num">耗时</th><th class="num">结果数</th><th>缓存</th><th>主题 / 语言</th><th>关键词</th><th>查询哈希</th><th>错误摘要</th></tr></thead>
               <tbody id="usage-body"></tbody>
             </table>
           </div>
