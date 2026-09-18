@@ -315,11 +315,12 @@ function renderMCPTools() {
       dotClass = 'unknown';
     }
     const stats = health && health.today
-      ? `<small>今日 ${fmtInt(health.today.requests)} 次 · 成功 ${fmtInt(health.today.successes)} · 失败 ${fmtInt(health.today.failures)}</small>`
+      ? `<small>${fmtInt(health.today.requests)} 次 · ${fmtInt(health.today.successes)} 成功 · ${fmtInt(health.today.failures)} 失败</small>`
       : '<small>尚未产生工具层事件</small>';
-    return `<div class="tool-row">${dot(dotClass)}` +
-      `<div class="tool-main"><div class="tool-line"><b>${esc(tool.label || displayName(tool.name))}</b><span class="tool-state">${esc(stateLabel)}</span></div>` +
-      `<small class="mono">${esc(tool.name)}</small>${stats}</div></div>`;
+    return `<div class="tool-row"><span class="tool-head">${dot(dotClass)}` +
+      `<b>${esc(tool.label || displayName(tool.name))}</b><small class="mono">${esc(tool.name)}</small></span>` +
+      `<span class="tool-state">${esc(stateLabel)}</span>` +
+      `<p class="tool-stats">${stats}</p></div>`;
   }).join('');
 }
 

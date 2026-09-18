@@ -60,7 +60,7 @@ h2{font-size:15px;font-weight:650}
 .stack{display:flex;flex-direction:column;gap:14px;min-width:0}
 
 /* ---------- overview grid ---------- */
-.overview-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;align-items:start;margin-bottom:14px}
+.overview-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;align-items:stretch;margin-bottom:12px}
 .overview-grid>.panel{margin-bottom:0}
 .sys-value{font-size:23px;font-weight:650;margin:2px 0 6px}
 .kv{display:grid;gap:6px}
@@ -79,13 +79,14 @@ h2{font-size:15px;font-weight:650}
 .kpi small.dim{color:var(--dim)}
 
 /* ---------- MCP tool modules ---------- */
-.tool-list{display:grid;gap:6px}
-.tool-row{display:grid;grid-template-columns:9px minmax(0,1fr);gap:9px;align-items:start;padding-top:7px;border-top:1px solid var(--border)}
+.tool-list{display:grid;gap:4px}
+.tool-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:1px 8px;align-items:baseline;padding:5px 0;border-top:1px solid var(--border)}
 .tool-row:first-child{border-top:0;padding-top:0}
-.tool-line{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
-.tool-main b{display:block;font-size:13px}
-.tool-main .tool-state{flex:0 0 auto;font-size:11.5px;color:var(--ink-2)}
-.tool-main small{display:block;margin-top:3px}
+.tool-head{display:flex;align-items:baseline;gap:6px;min-width:0;flex-wrap:wrap}
+.tool-head b{font-size:13px}
+.tool-head small{font-size:11px;color:var(--dim)}
+.tool-state{font-size:11.5px;color:var(--ink-2);text-align:right;white-space:nowrap}
+.tool-stats{grid-column:1 / -1;margin:1px 0 0;color:var(--dim);font-size:11.5px;line-height:1.35}
 
 /* ---------- status marks ---------- */
 .dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--unknown);flex:0 0 auto}
@@ -182,6 +183,9 @@ dialog form>div{text-align:right;display:flex;gap:8px;justify-content:flex-end;m
 #toast.show{display:block}
 
 /* ---------- responsive ---------- */
+@media (max-width:1240px){
+  .overview-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
 @media (max-width:1180px){
   .kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
