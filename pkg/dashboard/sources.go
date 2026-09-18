@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"slices"
+	"sort"
 	"strings"
 
 	"websearch/pkg/config"
@@ -34,6 +35,7 @@ type SourceView struct {
 	Today               telemetry.DailyUsage       `json:"today"`
 	LastError           string                     `json:"last_error,omitempty"`
 	State               string                     `json:"state,omitempty"`
+	Confidence          string                     `json:"confidence,omitempty"`
 	Suspended           bool                       `json:"suspended"`
 	SuspendedUntil      string                     `json:"suspended_until,omitempty"`
 	SuspendReason       string                     `json:"suspend_reason,omitempty"`
@@ -101,6 +103,9 @@ func joinSources(defs []SourceView, observed []telemetry.Health) []SourceView {
 			if candidate.P95MS > h.P95MS {
 				h.P95MS = candidate.P95MS
 			}
+			// Failure composition is additive across aliases: the newest alias
+			// may have no failures while an older one did.
+			s.ErrorKinds = mergeErrorKindCounts(s.ErrorKinds, candidate.ErrorKinds)
 			today.Requests += candidate.Today.Requests
 			today.Successes += candidate.Today.Successes
 			today.Failures += candidate.Today.Failures
@@ -124,9 +129,15 @@ func joinSources(defs []SourceView, observed []telemetry.Health) []SourceView {
 		s.Today = today
 		s.LastError = h.LastError
 		s.State = h.State
+		if h.SuspendedUntil == "" && s.State == "suspended" {
+			// Suspension expired without a newer event: fall back to the
+			// rolled-up status instead of showing a stale circuit breaker.
+			s.State = h.Status
+		}
 		if s.State == "" {
 			s.State = h.Status
 		}
+		s.Confidence = h.Confidence
 		if h.SuspendedUntil != "" {
 			s.Suspended = true
 			s.SuspendedUntil = h.SuspendedUntil
@@ -136,9 +147,34 @@ func joinSources(defs []SourceView, observed []telemetry.Health) []SourceView {
 			s.Suspended = false
 		}
 		s.P95MS = h.P95MS
-		s.ErrorKinds = h.ErrorKinds
 	}
 	return defs
+}
+
+// mergeErrorKindCounts combines failure compositions from multiple runtime
+// aliases of the same source and keeps the newest list ordered by count.
+func mergeErrorKindCounts(current, incoming []telemetry.ErrorKindCount) []telemetry.ErrorKindCount {
+	if len(incoming) == 0 {
+		return current
+	}
+	counts := make(map[string]int, len(current)+len(incoming))
+	for _, item := range current {
+		counts[item.Kind] += item.Count
+	}
+	for _, item := range incoming {
+		counts[item.Kind] += item.Count
+	}
+	merged := make([]telemetry.ErrorKindCount, 0, len(counts))
+	for kind, count := range counts {
+		merged = append(merged, telemetry.ErrorKindCount{Kind: kind, Count: count})
+	}
+	sort.Slice(merged, func(i, j int) bool {
+		if merged[i].Count != merged[j].Count {
+			return merged[i].Count > merged[j].Count
+		}
+		return merged[i].Kind < merged[j].Kind
+	})
+	return merged
 }
 
 func summarizeSystem(sources []SourceView) SystemSummary {

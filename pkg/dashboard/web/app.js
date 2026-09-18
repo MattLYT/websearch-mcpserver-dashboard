@@ -421,12 +421,12 @@ function sourceRowHtml(s, detailed) {
   if (detailed) {
     cells.push(`<td class="wrap-any">${s.last_error ? '<span class="bad-text">' + esc(s.last_error) + '</span>' : '<span class="dim">—</span>'}</td>`);
   }
-  const rowClass = s.active === true && s.suspended ? 'row-suspended' : (s.active === true && s.status === 'down' ? 'row-down' : '');
+  const rowClass = s.active === true && s.suspended === true ? 'row-suspended' : (s.active === true && s.status === 'down' ? 'row-down' : '');
   return `<tr class="${rowClass}">${cells.join('')}</tr>`;
 }
 
 function suspendBadge(s) {
-  if (!s || !s.suspended) return '';
+  if (!s || s.suspended !== true) return '';
   const reason = s.suspend_reason ? errorKindLabel(s.suspend_reason) : '连续失败';
   const secs = num(s.suspend_countdown_sec);
   const countdown = secs && secs > 0 ? (secs >= 60 ? Math.ceil(secs / 60) + ' 分' : secs + ' 秒') : '';
@@ -600,9 +600,14 @@ function eventCells(e, cols) {
     `<td>${toolLabel}</td>`,
     `<td>${providerLabel}</td>`,
     `<td class="${e.success ? 'ok-text' : 'bad-text'}">${e.success ? '成功' : '失败'}</td>`,
+  );
+  // 错误类型列只存在于调用记录表；总览事件表保持原有列定义。
+  if (cols !== 'overview') {
+    out.push(`<td>${errorKindChip(e.error_kind)}</td>`);
+  }
+  out.push(
     `<td class="num">${esc(fmtMS(e.duration_ms))}</td>`,
     `<td class="num">${fmtInt(e.result_count)}</td>`,
-    `<td>${errorKindChip(e.error_kind)}</td>`,
   );
   if (cols === 'overview') {
     out.push(`<td>${esc([e.query_topic, e.query_language].filter(Boolean).join(' / ') || '—')}</td>`);
