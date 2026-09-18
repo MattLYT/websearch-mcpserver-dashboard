@@ -42,6 +42,8 @@ type Event struct {
 	// Detail carries small, non-sensitive context such as which parser handled
 	// a PDF. Raw queries and URLs are still never stored in this field.
 	Detail string
+	// ErrorKind is a stable failure category derived from Error at record time.
+	ErrorKind string
 }
 
 type StoredEvent struct {
@@ -55,6 +57,7 @@ type StoredEvent struct {
 	CacheHit      bool   `json:"cache_hit"`
 	ResultCount   int    `json:"result_count"`
 	ErrorSummary  string `json:"error_summary,omitempty"`
+	ErrorKind     string `json:"error_kind,omitempty"`
 	Detail        string `json:"detail,omitempty"`
 	QueryHash     string `json:"query_hash,omitempty"`
 	QueryChars    int    `json:"query_chars,omitempty"`
@@ -77,27 +80,41 @@ type DailyUsage struct {
 }
 
 type Health struct {
-	Name                string     `json:"name"`
-	Kind                string     `json:"kind"`
-	Status              string     `json:"status"`
-	LastSuccessAt       string     `json:"last_success_at,omitempty"`
-	LastFailureAt       string     `json:"last_failure_at,omitempty"`
-	LastSeenAt          string     `json:"last_seen_at,omitempty"`
-	FailureRate         float64    `json:"failure_rate"`
-	SampleSize          int        `json:"sample_size"`
-	ConsecutiveFailures int        `json:"consecutive_failures"`
-	RecentOutcomes      []bool     `json:"recent_outcomes"`
-	Today               DailyUsage `json:"today"`
-	LastError           string     `json:"last_error,omitempty"`
+	Name                string           `json:"name"`
+	Kind                string           `json:"kind"`
+	Status              string           `json:"status"`
+	LastSuccessAt       string           `json:"last_success_at,omitempty"`
+	LastFailureAt       string           `json:"last_failure_at,omitempty"`
+	LastSeenAt          string           `json:"last_seen_at,omitempty"`
+	FailureRate         float64          `json:"failure_rate"`
+	SampleSize          int              `json:"sample_size"`
+	ConsecutiveFailures int              `json:"consecutive_failures"`
+	RecentOutcomes      []bool           `json:"recent_outcomes"`
+	Today               DailyUsage       `json:"today"`
+	LastError           string           `json:"last_error,omitempty"`
+	State               string           `json:"state,omitempty"`
+	Confidence          string           `json:"confidence,omitempty"`
+	SuspendedUntil      string           `json:"suspended_until,omitempty"`
+	P95DurationMS       int64            `json:"p95_duration_ms"`
+	P95MS               int64            `json:"-"`
+	ErrorKinds          []ErrorKindCount `json:"error_kinds,omitempty"`
+}
+
+// ErrorKindCount is the failure composition of one source over the health
+// window, ordered by count descending.
+type ErrorKindCount struct {
+	Kind  string `json:"kind"`
+	Count int    `json:"count"`
 }
 
 // EventFilter selects privacy-preserving event metadata. Source is matched
 // against provider for provider events and tool for tool events.
 type EventFilter struct {
-	Kind   string
-	Status string
-	Source string
-	Limit  int
+	Kind      string
+	Status    string
+	Source    string
+	ErrorKind string
+	Limit     int
 }
 
 type Overview struct {
@@ -146,7 +163,8 @@ func Open(path string, retentionDays int) (*Store, error) {
 			query_language TEXT NOT NULL DEFAULT '',
 			query_topic TEXT NOT NULL DEFAULT '',
 			query_keywords TEXT NOT NULL DEFAULT '',
-			detail TEXT NOT NULL DEFAULT ''
+			detail TEXT NOT NULL DEFAULT '',
+			error_kind TEXT NOT NULL DEFAULT ''
 		);
 		CREATE INDEX IF NOT EXISTS idx_usage_events_time ON usage_events(occurred_at DESC);
 		CREATE INDEX IF NOT EXISTS idx_usage_events_provider ON usage_events(kind, provider, occurred_at DESC);
@@ -166,9 +184,10 @@ func Open(path string, retentionDays int) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("initialize telemetry database: %w", err)
 	}
-	// Existing databases created before the detail column was added still open.
+	// Existing databases created before these columns were added still open.
 	// A duplicate-column error means this migration already ran.
 	_, _ = db.Exec(`ALTER TABLE usage_events ADD COLUMN detail TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(`ALTER TABLE usage_events ADD COLUMN error_kind TEXT NOT NULL DEFAULT ''`)
 	loc, err := time.LoadLocation("Asia/Shanghai")
 	if err != nil {
 		loc = time.FixedZone("CST", 8*60*60)
@@ -210,6 +229,10 @@ func (s *Store) Record(e Event) error {
 	}
 	hash, chars, lang, topic, keywords := summarizeQuery(e.Query)
 	errSummary := summarizeError(e.Error)
+	errorKind := e.ErrorKind
+	if errorKind == "" {
+		errorKind = ClassifyErrorKind(e.Error)
+	}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -219,9 +242,9 @@ func (s *Store) Record(e Event) error {
 	cacheHit := boolInt(e.CacheHit)
 	day := now.In(s.location).Format("2006-01-02")
 	if _, err = tx.Exec(`INSERT INTO usage_events
-		(occurred_at,day,kind,tool,provider,success,duration_ms,cache_hit,result_count,error_summary,query_hash,query_chars,query_language,query_topic,query_keywords,detail)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, now.Unix(), day, e.Kind, e.Tool, e.Provider, success,
-		e.Duration.Milliseconds(), cacheHit, e.ResultCount, errSummary, hash, chars, lang, topic, keywords, e.Detail); err != nil {
+		(occurred_at,day,kind,tool,provider,success,duration_ms,cache_hit,result_count,error_summary,query_hash,query_chars,query_language,query_topic,query_keywords,detail,error_kind)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, now.Unix(), day, e.Kind, e.Tool, e.Provider, success,
+		e.Duration.Milliseconds(), cacheHit, e.ResultCount, errSummary, hash, chars, lang, topic, keywords, e.Detail, errorKind); err != nil {
 		return err
 	}
 	if _, err = tx.Exec(`INSERT INTO daily_usage(day,kind,tool,provider,requests,successes,failures,cache_hits,duration_ms,result_count)
@@ -274,9 +297,13 @@ func (s *Store) RecentFiltered(filter EventFilter) ([]StoredEvent, error) {
 			args = append(args, filter.Source, filter.Source)
 		}
 	}
+	if filter.ErrorKind != "" {
+		where = append(where, "error_kind=?")
+		args = append(args, filter.ErrorKind)
+	}
 	args = append(args, limit)
 	query := `SELECT id,occurred_at,kind,tool,provider,success,duration_ms,cache_hit,result_count,
-		error_summary,query_hash,query_chars,query_language,query_topic,query_keywords,detail
+		error_summary,query_hash,query_chars,query_language,query_topic,query_keywords,detail,error_kind
 		FROM usage_events WHERE ` + strings.Join(where, " AND ") + ` ORDER BY occurred_at DESC,id DESC LIMIT ?`
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
@@ -289,7 +316,7 @@ func (s *Store) RecentFiltered(filter EventFilter) ([]StoredEvent, error) {
 		var ts int64
 		var ok, hit int
 		if err := rows.Scan(&e.ID, &ts, &e.Kind, &e.Tool, &e.Provider, &ok, &e.DurationMS, &hit,
-			&e.ResultCount, &e.ErrorSummary, &e.QueryHash, &e.QueryChars, &e.QueryLanguage, &e.QueryTopic, &e.QueryKeywords, &e.Detail); err != nil {
+			&e.ResultCount, &e.ErrorSummary, &e.QueryHash, &e.QueryChars, &e.QueryLanguage, &e.QueryTopic, &e.QueryKeywords, &e.Detail, &e.ErrorKind); err != nil {
 			return nil, err
 		}
 		e.Success, e.CacheHit = ok == 1, hit == 1
@@ -367,7 +394,7 @@ func (s *Store) health(kind string, now time.Time) ([]Health, error) {
 		return nil, err
 	}
 	for _, name := range names {
-		query := fmt.Sprintf(`SELECT occurred_at,success,error_summary FROM usage_events WHERE kind=? AND %s=? ORDER BY occurred_at DESC,id DESC LIMIT 20`, field)
+		query := fmt.Sprintf(`SELECT occurred_at,success,error_summary,duration_ms,error_kind FROM usage_events WHERE kind=? AND %s=? ORDER BY occurred_at DESC,id DESC LIMIT 20`, field)
 		r, err := s.db.Query(query, kind, name)
 		if err != nil {
 			return nil, err
@@ -378,15 +405,22 @@ func (s *Store) health(kind string, now time.Time) ([]Health, error) {
 		consecutiveFailures := 0
 		countingConsecutive := true
 		var newestFirst []bool
+		var durations []int64
+		errorKinds := map[string]int{}
 		for r.Next() {
 			var ts int64
 			var ok int
-			var msg string
-			if err := r.Scan(&ts, &ok, &msg); err != nil {
+			var msg, kind string
+			var durationMS int64
+			if err := r.Scan(&ts, &ok, &msg, &durationMS, &kind); err != nil {
 				r.Close()
 				return nil, err
 			}
 			h.SampleSize++
+			durations = append(durations, durationMS)
+			if ok == 0 && kind != "" {
+				errorKinds[kind]++
+			}
 			newestFirst = append(newestFirst, ok == 1)
 			if h.SampleSize == 1 {
 				lastTS, latestSuccess, h.LastError = ts, ok == 1, msg
@@ -408,27 +442,70 @@ func (s *Store) health(kind string, now time.Time) ([]Health, error) {
 		}
 		r.Close()
 		h.ConsecutiveFailures = consecutiveFailures
+		h.P95MS = calculateP95(durations)
+		for kind, count := range errorKinds {
+			h.ErrorKinds = append(h.ErrorKinds, ErrorKindCount{Kind: kind, Count: count})
+		}
+		sort.Slice(h.ErrorKinds, func(i, j int) bool {
+			if h.ErrorKinds[i].Count != h.ErrorKinds[j].Count {
+				return h.ErrorKinds[i].Count > h.ErrorKinds[j].Count
+			}
+			return h.ErrorKinds[i].Kind < h.ErrorKinds[j].Kind
+		})
 		for i := len(newestFirst) - 1; i >= 0; i-- {
 			h.RecentOutcomes = append(h.RecentOutcomes, newestFirst[i])
 		}
 		if h.SampleSize > 0 {
 			h.FailureRate /= float64(h.SampleSize)
 			age := now.Sub(time.Unix(lastTS, 0))
+			// Confidence tracks evidence strength so a single failure is never
+			// read as a broken source; it is exposed separately from status.
+			if h.SampleSize < minSampleSize {
+				h.Confidence = "insufficient"
+			} else {
+				h.Confidence = "ok"
+			}
 			switch {
 			case age > 24*time.Hour:
 				h.Status = "unknown"
+				h.State = "stale"
 			case consecutiveFailures >= 3:
+				// Repeated failures are meaningful even in a small window.
 				h.Status = "down"
+				h.State = "suspended"
 			case !latestSuccess || h.FailureRate > 0.20:
 				h.Status = "degraded"
+				h.State = "degraded"
 			default:
 				h.Status = "healthy"
+				h.State = "healthy"
 			}
 		}
 		out = append(out, h)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
+}
+
+// minSampleSize keeps one-off failures from being read as a broken source.
+const minSampleSize = 5
+
+// calculateP95 returns the nearest-rank 95th percentile of durations in
+// milliseconds. Fewer than 20 observations fall back to the maximum.
+func calculateP95(values []int64) int64 {
+	if len(values) == 0 {
+		return 0
+	}
+	sorted := append([]int64(nil), values...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	idx := (len(sorted)*95 + 99) / 100
+	if idx < 1 {
+		idx = 1
+	}
+	if idx > len(sorted) {
+		idx = len(sorted)
+	}
+	return sorted[idx-1]
 }
 
 func (s *Store) todayByName(kind string, now time.Time) (map[string]DailyUsage, error) {
