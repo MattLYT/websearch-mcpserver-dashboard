@@ -176,7 +176,19 @@ Or use MCP Hooks for session auto start/stop (Qwen Code example; full details in
 | [docs/search.md](docs/search.md) | Search modes, engine reference, relevance scoring, MCP tool parameters |
 | [docs/architecture.md](docs/architecture.md) | Architecture, fallback chain, proxy detection, caching, Go module embedding, web-researcher extension |
 | [docs/api.md](docs/api.md) | Go Module API and HTTP API (MCP / SearXNG / Admin endpoints) |
+| [docs/configuration.md](docs/configuration.md) | Local control center: disabled by default, passively records tool/provider calls and serves a read-only dashboard |
 | [CHANGELOG.md](CHANGELOG.md) | Version changelog |
+
+## Local Control Center (optional)
+
+Enable `dashboard.enabled` in the configuration and the service passively records real tool/provider call metadata, then serves a local dashboard at `http://127.0.0.1:8338/dashboard/` with overview, source health, call history and settings. It never performs active health probes and never stores raw queries or URLs (only hashes, topics and keywords).
+
+```yaml
+dashboard:
+  enabled: true
+  storage_path: "./data/dashboard.db"
+  retention_days: 30
+```
 
 ## Related Projects
 
