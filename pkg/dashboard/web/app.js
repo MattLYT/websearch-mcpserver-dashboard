@@ -33,7 +33,7 @@ const state = {
   settings: null, settingsError: null, settingsDirty: false, settingsLoaded: false,
   events: { rows: null, error: null, serverFiltered: true },
   providerEvents: { rows: null, error: null },
-  filters: { kind: 'provider', status: '', errorKind: '', tool: '', provider: '', limit: 50 },
+  filters: { kind: 'provider', status: '', errorKind: '', tool: '', provider: '', requestId: '', limit: 50 },
   lastLoad: 0,
 };
 
@@ -103,13 +103,14 @@ function emptyRow(cols, text) {
 }
 function hasFilter() {
   const f = state.filters;
-  return Boolean(f.kind || f.status || f.errorKind || f.tool || f.provider);
+  return Boolean(f.kind || f.status || f.errorKind || f.tool || f.provider || f.requestId);
 }
 function matchesFilters(e) {
   const f = state.filters;
   if (f.status === 'success' && !e.success) return false;
   if (f.status === 'failure' && e.success) return false;
   if (f.errorKind && (e.error_kind || '') !== f.errorKind) return false;
+  if (f.requestId && (e.request_id || '') !== f.requestId) return false;
   if (f.tool && (e.kind !== 'tool' || e.tool !== f.tool)) return false;
   if (f.provider && (e.kind !== 'provider' || e.provider !== f.provider)) return false;
   if (f.tool && f.provider) return false;
@@ -200,6 +201,7 @@ async function loadEvents() {
   if (f.kind) params.set('kind', f.kind);
   if (f.status) params.set('status', f.status);
   if (f.errorKind) params.set('error_kind', f.errorKind);
+  if (f.requestId) params.set('request_id', f.requestId);
   const tool = f.tool || '';
   const provider = f.provider || '';
   if (tool && provider) {
@@ -273,7 +275,8 @@ function renderSystem() {
   } else {
     label.textContent = SYSTEM[sys.status] || '未知';
     d.className = 'dot ' + (sys.status === 'waiting' ? 'unknown' : (DOT[sys.status] || 'unknown'));
-    const summary = `已启用 ${fmtInt(sys.enabled)} 个 · 已观察 ${fmtInt(sys.observed)} 个 · 异常 ${fmtInt(sys.down)} 个`;
+    const summary = `已启用 ${fmtInt(sys.enabled)} 个 · 已观察 ${fmtInt(sys.observed)} 个 · 异常 ${fmtInt(sys.down)} 个` +
+    (num(sys.suspended) > 0 ? ` · 熔断 ${fmtInt(sys.suspended)} 个` : '');
     if (state.overviewError) setNote(note, summary + ' · 数据可能已过期：' + state.overviewError, 'warn');
     else if (sys.status === 'waiting') setNote(note, summary + ' · 尚未观察到近期真实调用', '');
     else setNote(note, summary, '');
@@ -283,6 +286,7 @@ function renderSystem() {
   setText('#system-observed', has ? fmtInt(sys.observed) : '—');
   setText('#system-degraded', has ? fmtInt(sys.degraded) : '—');
   setText('#system-down', has ? fmtInt(sys.down) : '—');
+  setText('#system-suspended', has ? fmtInt(sys.suspended) : '—');
 }
 
 function renderToolKpis() {
@@ -396,7 +400,7 @@ function sourceRowHtml(s, detailed) {
   const cells = [
     `<td class="src-name"><b>${esc(name)}</b>${id ? `<small class="dim">${esc(id)}</small>` : ''}</td>`,
     `<td><span class="tag ${esc(act.key)}">${esc(act.label)}</span></td>`,
-    `<td class="nowrap">${s.active === false || s.configured === false ? '<span class="dim">—</span>' : dot(health.dot) + ' ' + esc(health.label)}</td>`,
+    `<td class="nowrap">${s.active === false || s.configured === false ? '<span class="dim">—</span>' : dot(health.dot) + ' ' + esc(health.label) + suspendBadge(s)}</td>`,
     `<td>${healthStrip(s)}</td>`,
     `<td class="num">${today ? fmtInt(today.requests) : '<span class="dim">—</span>'}</td>`,
   ];
@@ -417,7 +421,16 @@ function sourceRowHtml(s, detailed) {
   if (detailed) {
     cells.push(`<td class="wrap-any">${s.last_error ? '<span class="bad-text">' + esc(s.last_error) + '</span>' : '<span class="dim">—</span>'}</td>`);
   }
-  return `<tr class="${s.active === true && s.status === 'down' ? 'row-down' : ''}">${cells.join('')}</tr>`;
+  const rowClass = s.active === true && s.suspended ? 'row-suspended' : (s.active === true && s.status === 'down' ? 'row-down' : '');
+  return `<tr class="${rowClass}">${cells.join('')}</tr>`;
+}
+
+function suspendBadge(s) {
+  if (!s || !s.suspended) return '';
+  const reason = s.suspend_reason ? errorKindLabel(s.suspend_reason) : '连续失败';
+  const secs = num(s.suspend_countdown_sec);
+  const countdown = secs && secs > 0 ? (secs >= 60 ? Math.ceil(secs / 60) + ' 分' : secs + ' 秒') : '';
+  return `<span class="kind-chip suspend" title="${esc(reason)}${countdown ? '，约 ' + countdown + ' 后恢复' : ''}">熔断${countdown ? ' · ' + esc(countdown) : ''}</span>`;
 }
 
 function countsLabel(list) {
@@ -556,6 +569,7 @@ function renderConfig() {
     ['网络区域', v.network === 'china' ? '中国' : v.network === 'international' ? '国际' : ''],
     ['上游超时', num(v.upstream_timeout_sec) === null ? '' : String(v.upstream_timeout_sec) + ' 秒'],
     ['缓存', yn(v['cache.enabled'])],
+    ['熔断暂停', [v['dashboard.suspension.ban_time_on_fail'], v['dashboard.suspension.max_ban_time_on_fail']].filter(Boolean).join(' / ')],
     ['已启用来源', state.overview && state.overview.system ? fmtInt(state.overview.system.enabled) + ' 个' : ''],
   ];
   list.innerHTML = rows.filter(r => r[1]).map(r => `<div><dt>${esc(r[0])}</dt><dd>${esc(r[1])}</dd></div>`).join('');
@@ -572,8 +586,12 @@ function eventCells(e, cols) {
     out.push(`<td>${esc(e.kind === 'provider' ? '来源' : '工具')}</td>`);
   }
   const detail = e.detail ? `<small class="source-detail">${esc(e.detail)}</small>` : '';
+  const requestLine = e.request_id
+    ? `<small class="mono request-id" data-request="${esc(e.request_id)}" title="只看这一次调用">${esc(e.request_id)}</small>`
+    : '';
+  const chainLine = e.attempt_chain ? `<small class="dim">${esc(e.attempt_chain)}</small>` : '';
   const toolLabel = e.kind === 'tool'
-    ? `<span class="source-name">${esc(displayName(e.tool))}</span>`
+    ? `<span class="source-name">${esc(displayName(e.tool))}</span>${requestLine}${chainLine}`
     : '<span class="dim">—</span>';
   const providerLabel = e.provider
     ? `<span class="source-name">${esc(displayName(e.provider))}</span>${detail}`
@@ -637,8 +655,18 @@ function renderUsage() {
   const parts = [];
   if (state.events.error) parts.push(['数据可能已过期：' + state.events.error, 'warn']);
   if (hasFilter() && !state.events.serverFiltered) parts.push(['后端未应用筛选参数，当前按已获取的 ' + rows.length + ' 条在本地筛选', 'warn']);
+  if (state.filters.requestId) {
+    parts.push(['仅看请求 ' + state.filters.requestId + ' · <a href="#usage" data-clear-request="1">清除</a>', 'warn']);
+  }
   parts.push(['匹配 ' + filtered.length + ' 条 / 已获取 ' + rows.length + ' 条 · 查询全文不保存', '']);
-  note.innerHTML = parts.filter(p => p[0]).map(p => `<span${p[1] ? ' class="' + p[1] + '"' : ''}>${esc(p[0])}</span>`).join(' · ');
+  note.innerHTML = parts.filter(p => p[0]).map(p => `<span${p[1] ? ' class="' + p[1] + '"' : ''}>${p[0]}</span>`).join(' · ');
+  $$('[data-clear-request]', note).forEach(link => {
+    link.onclick = event => {
+      event.preventDefault();
+      state.filters.requestId = '';
+      loadEvents();
+    };
+  });
 }
 
 /* ---------- CSV export (UTF-8 BOM) ---------- */
@@ -771,6 +799,12 @@ function renderSettingsForm() {
       `<button type="button" data-secret="${esc(key)}">${on ? '替换' : '设置'}</button></div>`;
   }).join('');
   $$('[data-secret]').forEach(b => { b.onclick = () => editSecret(b.dataset.secret); });
+  $$('[data-request]').forEach(el => {
+    el.onclick = () => {
+      state.filters.requestId = el.dataset.request;
+      loadEvents();
+    };
+  });
   state.settingsLoaded = true;
 }
 

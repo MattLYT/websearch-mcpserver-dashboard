@@ -51,6 +51,8 @@ func (h *Handler) Register(mux *http.ServeMux, guard func(http.HandlerFunc) http
 	mux.HandleFunc("/__admin/api/overview", guard(h.overview))
 	mux.HandleFunc("/__admin/api/events", guard(h.events))
 	mux.HandleFunc("/__admin/api/quotas", guard(h.quotas))
+	mux.HandleFunc("/__admin/api/providers", guard(h.providers))
+	mux.HandleFunc("/__admin/api/metrics", guard(h.metricsHandler))
 	mux.HandleFunc("/__admin/api/settings", guard(h.settings))
 	mux.HandleFunc("/__admin/api/secrets", guard(h.secrets))
 	mux.HandleFunc("/__admin/api/restart", guard(h.restartService))
@@ -141,6 +143,7 @@ func (h *Handler) events(w http.ResponseWriter, r *http.Request) {
 		Status:    eventStatus(query.Get("status")),
 		Source:    strings.TrimSpace(query.Get("source")),
 		ErrorKind: eventErrorKind(query.Get("error_kind")),
+		RequestID: strings.TrimSpace(query.Get("request_id")),
 		Limit:     eventLimit(query.Get("limit")),
 	})
 	if err != nil {
@@ -148,6 +151,31 @@ func (h *Handler) events(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// providers returns the merged provider state, including the read-only
+// circuit breaker fields. The dashboard overview already includes the same
+// data; this endpoint keeps a stable machine-readable surface for scripts.
+func (h *Handler) providers(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	if h.store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "dashboard telemetry disabled"})
+		return
+	}
+	observed, err := h.store.Overview()
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	view := buildDashboardOverview(h.conf, observed)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"generated_at": view.GeneratedAt,
+		"summary":      view.System,
+		"providers":    append(append([]SourceView{}, view.Sources...), view.AcademicSources...),
+	})
 }
 
 func (h *Handler) quotas(w http.ResponseWriter, r *http.Request) {

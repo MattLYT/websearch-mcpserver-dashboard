@@ -156,6 +156,9 @@ func (s *Server) Run(conf config.Config, onListening ...func()) error {
 			return fmt.Errorf("initialize dashboard telemetry: %w", err)
 		}
 		telemetry.SetDefault(metrics)
+		if policy, err := dashboard.SuspensionPolicy(conf.Dashboard.Suspension); err == nil {
+			telemetry.SetSuspensionPolicy(policy)
+		}
 		defer metrics.Close()
 		_ = metrics.Cleanup()
 	}

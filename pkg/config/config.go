@@ -417,10 +417,21 @@ type CacheConfig struct {
 // DashboardConfig controls the local-only observability dashboard. It does not
 // enable active provider probes; all health observations come from real calls.
 type DashboardConfig struct {
-	Enabled       bool   `mapstructure:"enabled"`
-	StoragePath   string `mapstructure:"storage_path"`
-	RetentionDays int    `mapstructure:"retention_days"`
-	SecretsPath   string `mapstructure:"secrets_path"`
+	Enabled       bool             `mapstructure:"enabled"`
+	StoragePath   string           `mapstructure:"storage_path"`
+	RetentionDays int              `mapstructure:"retention_days"`
+	SecretsPath   string           `mapstructure:"secrets_path"`
+	Suspension    SuspensionConfig `mapstructure:"suspension"`
+}
+
+// SuspensionConfig mirrors SearXNG's ban_time_on_fail / max_ban_time_on_fail /
+// suspended_times knobs. Values are duration strings such as "5s", "10m",
+// "1h", "24h" (or plain numbers, treated as seconds). The control center only
+// reports suspension; it never skips a call.
+type SuspensionConfig struct {
+	BanTimeOnFail    string            `mapstructure:"ban_time_on_fail"`
+	MaxBanTimeOnFail string            `mapstructure:"max_ban_time_on_fail"`
+	SuspendedTimes   map[string]string `mapstructure:"suspended_times"`
 }
 
 type JinaConfig struct {

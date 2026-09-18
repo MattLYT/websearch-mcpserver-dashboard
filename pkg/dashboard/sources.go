@@ -9,11 +9,12 @@ import (
 )
 
 type SystemSummary struct {
-	Status   string `json:"status"`
-	Enabled  int    `json:"enabled"`
-	Observed int    `json:"observed"`
-	Degraded int    `json:"degraded"`
-	Down     int    `json:"down"`
+	Status    string `json:"status"`
+	Enabled   int    `json:"enabled"`
+	Observed  int    `json:"observed"`
+	Degraded  int    `json:"degraded"`
+	Down      int    `json:"down"`
+	Suspended int    `json:"suspended"`
 }
 
 type SourceView struct {
@@ -33,7 +34,10 @@ type SourceView struct {
 	Today               telemetry.DailyUsage       `json:"today"`
 	LastError           string                     `json:"last_error,omitempty"`
 	State               string                     `json:"state,omitempty"`
+	Suspended           bool                       `json:"suspended"`
 	SuspendedUntil      string                     `json:"suspended_until,omitempty"`
+	SuspendReason       string                     `json:"suspend_reason,omitempty"`
+	SuspendCountdown    int64                      `json:"suspend_countdown_sec,omitempty"`
 	P95MS               int64                      `json:"p95_ms"`
 	ErrorKinds          []telemetry.ErrorKindCount `json:"error_kinds,omitempty"`
 	QuotaQueryable      bool                       `json:"quota_queryable"`
@@ -124,7 +128,12 @@ func joinSources(defs []SourceView, observed []telemetry.Health) []SourceView {
 			s.State = h.Status
 		}
 		if h.SuspendedUntil != "" {
+			s.Suspended = true
 			s.SuspendedUntil = h.SuspendedUntil
+			s.SuspendReason = h.SuspendReason
+			s.SuspendCountdown = h.SuspendCountdown
+		} else {
+			s.Suspended = false
 		}
 		s.P95MS = h.P95MS
 		s.ErrorKinds = h.ErrorKinds
@@ -139,6 +148,9 @@ func summarizeSystem(sources []SourceView) SystemSummary {
 			continue
 		}
 		out.Enabled++
+		if s.Suspended || s.State == "suspended" {
+			out.Suspended++
+		}
 		switch s.Status {
 		case "down":
 			out.Down++

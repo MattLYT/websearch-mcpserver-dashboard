@@ -19,19 +19,19 @@ import (
 // academicsearch 工具：handler、学术搜索与结果合并。
 // AcademicSearchHandler 学术搜索 tool handler。
 func AcademicSearchHandler(ctx context.Context, req *mcp.CallToolRequest, params *AcademicSearchParams) (*mcp.CallToolResult, any, error) {
-	return doAcademicSearch(params.Query, params.Engines, params.TimeRange, params.Page)
+	return doAcademicSearch(params.Query, params.Engines, params.TimeRange, params.Page, telemetry.NewRequestID())
 }
 
 // doWebSearch 通用网页搜索逻辑。
 // timeRangeMonths 控制搜索时间范围（月），默认 3，0 表示不限。
 
 // doAcademicSearch 学术搜索逻辑。
-func doAcademicSearch(query string, engines []string, timeRange string, page int) (result *mcp.CallToolResult, extra any, err error) {
+func doAcademicSearch(query string, engines []string, timeRange string, page int, requestID string) (result *mcp.CallToolResult, extra any, err error) {
 	started := time.Now()
 	cacheHit := false
 	resultCount := 0
 	defer func() {
-		telemetry.Record(telemetry.Event{Kind: "tool", Tool: "academicsearch", Query: query, Success: err == nil, Duration: time.Since(started), CacheHit: cacheHit, ResultCount: resultCount, Error: err})
+		telemetry.Record(telemetry.Event{Kind: "tool", Tool: "academicsearch", Query: query, Success: err == nil, Duration: time.Since(started), CacheHit: cacheHit, ResultCount: resultCount, Error: err, RequestID: requestID, AttemptChain: recentAttemptChain(started, 20)})
 	}()
 	if academicSearcher == nil {
 		return nil, nil, fmt.Errorf("学术搜索引擎未启用，请检查配置 bing.academic 是否为 true")
@@ -49,7 +49,7 @@ func doAcademicSearch(query string, engines []string, timeRange string, page int
 			if parseErr == nil {
 				cacheHit = true
 				resultCount = len(results)
-				recordAcademicProviderEvents(query, results, nil, nil, started)
+				recordAcademicProviderEvents(query, results, nil, nil, started, requestID)
 				log.Infof("学术缓存命中: query=%s", query)
 				ret, mergeErr := formatAcademicResults(query, search.AcademicSearchResult{Results: results})
 				if mergeErr == nil {
@@ -71,11 +71,11 @@ func doAcademicSearch(query string, engines []string, timeRange string, page int
 	if err != nil {
 		// Provider failures must still be visible in telemetry even though the
 		// aggregate tool call returned an error.
-		recordAcademicProviderEvents(query, nil, academicProviderErrorsFromError(err), academicEngineSelection(academicSearcher.AcademicEngines(), engines), started)
+		recordAcademicProviderEvents(query, nil, academicProviderErrorsFromError(err), academicEngineSelection(academicSearcher.AcademicEngines(), engines), started, requestID)
 		return nil, nil, fmt.Errorf("学术搜索失败: %w", err)
 	}
 	resultCount = len(res.Results)
-	recordAcademicProviderEvents(query, res.Results, res.EngineErrors, academicEngineSelection(academicSearcher.AcademicEngines(), engines), started)
+	recordAcademicProviderEvents(query, res.Results, res.EngineErrors, academicEngineSelection(academicSearcher.AcademicEngines(), engines), started, requestID)
 
 	ret, err := formatAcademicResults(query, res)
 	if err != nil {
@@ -137,7 +137,7 @@ func academicEngineSelection(registered, requested []string) []string {
 // engine that returned it. Empty successes and per-engine failures still emit
 // one event so the dashboard shows coverage for every provider, not just the
 // engines that happened to contribute the final result set.
-func recordAcademicProviderEvents(query string, results []search.SearchResult, engineErrors map[string]string, engines []string, started time.Time) {
+func recordAcademicProviderEvents(query string, results []search.SearchResult, engineErrors map[string]string, engines []string, started time.Time, requestID string) {
 	counts := make(map[string]int)
 	failed := make(map[string]bool)
 	engineTrace := make([]string, 0, len(engines))
@@ -181,6 +181,13 @@ func recordAcademicProviderEvents(query string, results []search.SearchResult, e
 			Success:     !failed[name],
 			Duration:    duration,
 			ResultCount: counts[name],
+			RequestID:   requestID,
+			AttemptChain: func() string {
+				if !failed[name] {
+					return name
+				}
+				return ""
+			}(),
 		}
 		if failed[name] {
 			event.Error = fmt.Errorf("%s", engineErrors[name])
