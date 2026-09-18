@@ -176,7 +176,19 @@ autostart.vbs
 | [docs/search.md](docs/search.md) | 搜索模式详解、引擎对照、相关性评分、MCP 工具参数 |
 | [docs/architecture.md](docs/architecture.md) | 架构设计、回退链、代理检测、缓存、Go 模块嵌入、web-researcher 扩展 |
 | [docs/api.md](docs/api.md) | Go Module API 与 HTTP API（MCP / SearXNG / Admin 端点） |
+| [docs/configuration.md](docs/configuration.md) | 本机控制中心：默认关闭，被动记录工具与来源调用，提供只读控制台 |
 | [CHANGELOG.md](CHANGELOG.md) | 版本变更日志 |
+
+## 本机控制中心（可选）
+
+配置中启用 `dashboard.enabled` 后，服务会自动记录**真实的工具调用与来源调用**元数据，并在 `http://127.0.0.1:8338/dashboard/` 提供本机控制台：总览、搜索源健康、调用记录与设置。控制台不主动探测上游，不保存完整查询与 URL（只保留脱敏后的哈希、主题与关键词）。
+
+```yaml
+dashboard:
+  enabled: true
+  storage_path: "./data/dashboard.db"
+  retention_days: 30
+```
 
 ## 相关项目
 
