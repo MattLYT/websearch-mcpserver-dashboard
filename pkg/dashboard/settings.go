@@ -45,6 +45,9 @@ func settingsView(c config.Config) map[string]any {
 			"smartsearch.mmr.enabled":         c.SmartSearch.MMR.Enabled,
 			"smartsearch.mmr.lambda":          c.SmartSearch.MMR.Lambda,
 			"doubao.version":                  c.Doubao.GetVersion(), "apipool.engines": c.Apipool.GetEngines(),
+			"dashboard.suspension.ban_time_on_fail":     c.Dashboard.Suspension.BanTimeOnFail,
+			"dashboard.suspension.max_ban_time_on_fail": c.Dashboard.Suspension.MaxBanTimeOnFail,
+			"dashboard.suspension.suspended_times":      c.Dashboard.Suspension.SuspendedTimes,
 		},
 		"secrets": map[string]bool{
 			"BAIDU_SK": len(c.Baidu.EffectiveSKList()) > 0, "TAVILY_SK": len(c.Tavily.EffectiveSKList()) > 0,
@@ -155,6 +158,14 @@ func validateSetting(path string, value any) error {
 			if !ok || !slices.Contains(allowed, v) {
 				return fmt.Errorf("invalid apipool engine")
 			}
+		}
+	case "dashboard.suspension.ban_time_on_fail", "dashboard.suspension.max_ban_time_on_fail":
+		v, ok := value.(string)
+		if !ok || strings.TrimSpace(v) == "" {
+			return fmt.Errorf("%s must be a duration string such as 5s, 10m or 24h", path)
+		}
+		if _, err := parseSuspensionDuration(v); err != nil {
+			return fmt.Errorf("%s: %v", path, err)
 		}
 	default:
 		return fmt.Errorf("setting %s is not editable", path)

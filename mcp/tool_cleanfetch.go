@@ -25,10 +25,12 @@ import (
 // 支持 url + urls 批量（合并去重，最多 5 个）：并发抓取，单条失败不影响其它。
 // 只传一个 URL 时输出与旧版完全一致。
 func CleanFetch(ctx context.Context, req *mcp.CallToolRequest, params *CleanFetchParams) (result *mcp.CallToolResult, extra any, err error) {
+	requestID := telemetry.NewRequestID()
+	ctx = telemetry.WithRequestID(ctx, requestID)
 	started := time.Now()
 	count := 0
 	defer func() {
-		telemetry.Record(telemetry.Event{Kind: "tool", Tool: "cleanfetch", Query: params.URL, Success: err == nil, Duration: time.Since(started), ResultCount: count, Error: err})
+		telemetry.Record(telemetry.Event{Kind: "tool", Tool: "cleanfetch", Query: params.URL, Success: err == nil, Duration: time.Since(started), ResultCount: count, Error: err, RequestID: requestID, AttemptChain: recentAttemptChain(started, 15)})
 	}()
 	urls := mergeFetchURLs(params.URL, params.URLs)
 	count = len(urls)
@@ -100,6 +102,11 @@ func mergeFetchURLs(url string, urls []string) []string {
 // 返回格式化后的 Markdown 文本。
 func fetchCleanPage(ctx context.Context, rawURL string) (string, error) {
 	started := time.Now()
+	recordProvider := func(event telemetry.Event) {
+		event.Kind = "provider"
+		event.Query = rawURL
+		telemetry.RecordEventContext(ctx, event)
+	}
 	// ── 安全预检：DNS rebinding 防护 ──
 	if err := validateURLSecurity(rawURL); err != nil {
 		return "", err
@@ -114,20 +121,20 @@ func fetchCleanPage(ctx context.Context, rawURL string) (string, error) {
 	if webfetchInst != nil {
 		result, err := webfetchInst.Fetch(ctx, rawURL)
 		if err == nil {
-			telemetry.Record(telemetry.Event{Kind: "provider", Provider: "webfetch", Query: rawURL, Success: true, Duration: time.Since(started), ResultCount: 1})
+			recordProvider(telemetry.Event{Provider: "webfetch", Success: true, Duration: time.Since(started), ResultCount: 1})
 			return formatWebFetchResult(result), nil
 		}
-		telemetry.Record(telemetry.Event{Kind: "provider", Provider: "webfetch", Query: rawURL, Success: false, Duration: time.Since(started), Error: err})
+		recordProvider(telemetry.Event{Provider: "webfetch", Success: false, Duration: time.Since(started), Error: err})
 		log.Infof("webfetch 抓取失败(%v)，尝试回退到 Jina Reader", err)
 
 		// ── 第二层：Jina Reader（需代理，jinaInst != nil 即表示代理已开启）──
 		if jinaInst != nil {
 			jinaResult, jinaErr := jinaInst.Fetch(rawURL)
 			if jinaErr == nil {
-				telemetry.Record(telemetry.Event{Kind: "provider", Provider: "jina", Query: rawURL, Success: true, Duration: time.Since(started), ResultCount: 1})
+				recordProvider(telemetry.Event{Provider: "jina", Success: true, Duration: time.Since(started), ResultCount: 1})
 				return formatJinaResult(jinaResult), nil
 			}
-			telemetry.Record(telemetry.Event{Kind: "provider", Provider: "jina", Query: rawURL, Success: false, Duration: time.Since(started), Error: jinaErr})
+			recordProvider(telemetry.Event{Provider: "jina", Success: false, Duration: time.Since(started), Error: jinaErr})
 			return "", fmt.Errorf("webfetch: %v; Jina 兜底: %w", err, jinaErr)
 		}
 		return "", fmt.Errorf("webfetch 抓取失败: %v", err)
@@ -137,10 +144,10 @@ func fetchCleanPage(ctx context.Context, rawURL string) (string, error) {
 	if jinaInst != nil {
 		jinaResult, jinaErr := jinaInst.Fetch(rawURL)
 		if jinaErr != nil {
-			telemetry.Record(telemetry.Event{Kind: "provider", Provider: "jina", Query: rawURL, Success: false, Duration: time.Since(started), Error: jinaErr})
+			recordProvider(telemetry.Event{Provider: "jina", Success: false, Duration: time.Since(started), Error: jinaErr})
 			return "", fmt.Errorf("jina reader 抓取失败: %w", jinaErr)
 		}
-		telemetry.Record(telemetry.Event{Kind: "provider", Provider: "jina", Query: rawURL, Success: true, Duration: time.Since(started), ResultCount: 1})
+		recordProvider(telemetry.Event{Provider: "jina", Success: true, Duration: time.Since(started), ResultCount: 1})
 		return formatJinaResult(jinaResult), nil
 	}
 

@@ -43,10 +43,15 @@ func doWebSearch(ctx context.Context, req *mcp.CallToolRequest, query, intent st
 	engineName := ""
 	cacheHit := false
 	resultCount := 0
+	requestID := telemetry.RequestID(ctx)
+	if requestID == "" {
+		requestID = telemetry.NewRequestID()
+		ctx = telemetry.WithRequestID(ctx, requestID)
+	}
 	defer func() {
-		telemetry.Record(telemetry.Event{Kind: "tool", Tool: "smartsearch", Provider: engineName, Query: query, Success: err == nil, Duration: time.Since(started), CacheHit: cacheHit, ResultCount: resultCount, Error: err})
+		telemetry.Record(telemetry.Event{Kind: "tool", Tool: "smartsearch", Provider: engineName, Query: query, Success: err == nil, Duration: time.Since(started), CacheHit: cacheHit, ResultCount: resultCount, Error: err, RequestID: requestID, AttemptChain: recentAttemptChain(started, 12)})
 		if !cacheHit && engineName != "" && engineName != "hybrid" && engineName != "apipool" {
-			telemetry.Record(telemetry.Event{Kind: "provider", Provider: engineName, Query: query, Success: err == nil, Duration: time.Since(started), ResultCount: resultCount, Error: err})
+			telemetry.Record(telemetry.Event{Kind: "provider", Provider: engineName, Query: query, Success: err == nil, Duration: time.Since(started), ResultCount: resultCount, Error: err, RequestID: requestID})
 		}
 	}()
 	if searchapi == nil {

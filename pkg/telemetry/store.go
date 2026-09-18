@@ -44,6 +44,10 @@ type Event struct {
 	Detail string
 	// ErrorKind is a stable failure category derived from Error at record time.
 	ErrorKind string
+	// RequestID correlates one tool call with the provider events it caused.
+	RequestID string
+	// AttemptChain summarizes which providers were attempted and who returned.
+	AttemptChain string
 }
 
 type StoredEvent struct {
@@ -59,6 +63,8 @@ type StoredEvent struct {
 	ErrorSummary  string `json:"error_summary,omitempty"`
 	ErrorKind     string `json:"error_kind,omitempty"`
 	Detail        string `json:"detail,omitempty"`
+	RequestID     string `json:"request_id,omitempty"`
+	AttemptChain  string `json:"attempt_chain,omitempty"`
 	QueryHash     string `json:"query_hash,omitempty"`
 	QueryChars    int    `json:"query_chars,omitempty"`
 	QueryLanguage string `json:"query_language,omitempty"`
@@ -95,6 +101,8 @@ type Health struct {
 	State               string           `json:"state,omitempty"`
 	Confidence          string           `json:"confidence,omitempty"`
 	SuspendedUntil      string           `json:"suspended_until,omitempty"`
+	SuspendReason       string           `json:"suspend_reason,omitempty"`
+	SuspendCountdown    int64            `json:"suspend_countdown_sec,omitempty"`
 	P95DurationMS       int64            `json:"p95_duration_ms"`
 	P95MS               int64            `json:"-"`
 	ErrorKinds          []ErrorKindCount `json:"error_kinds,omitempty"`
@@ -114,6 +122,7 @@ type EventFilter struct {
 	Status    string
 	Source    string
 	ErrorKind string
+	RequestID string
 	Limit     int
 }
 
@@ -164,7 +173,9 @@ func Open(path string, retentionDays int) (*Store, error) {
 			query_topic TEXT NOT NULL DEFAULT '',
 			query_keywords TEXT NOT NULL DEFAULT '',
 			detail TEXT NOT NULL DEFAULT '',
-			error_kind TEXT NOT NULL DEFAULT ''
+			error_kind TEXT NOT NULL DEFAULT '',
+			request_id TEXT NOT NULL DEFAULT '',
+			attempt_chain TEXT NOT NULL DEFAULT ''
 		);
 		CREATE INDEX IF NOT EXISTS idx_usage_events_time ON usage_events(occurred_at DESC);
 		CREATE INDEX IF NOT EXISTS idx_usage_events_provider ON usage_events(kind, provider, occurred_at DESC);
@@ -188,6 +199,8 @@ func Open(path string, retentionDays int) (*Store, error) {
 	// A duplicate-column error means this migration already ran.
 	_, _ = db.Exec(`ALTER TABLE usage_events ADD COLUMN detail TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`ALTER TABLE usage_events ADD COLUMN error_kind TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(`ALTER TABLE usage_events ADD COLUMN request_id TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(`ALTER TABLE usage_events ADD COLUMN attempt_chain TEXT NOT NULL DEFAULT ''`)
 	loc, err := time.LoadLocation("Asia/Shanghai")
 	if err != nil {
 		loc = time.FixedZone("CST", 8*60*60)
@@ -242,9 +255,9 @@ func (s *Store) Record(e Event) error {
 	cacheHit := boolInt(e.CacheHit)
 	day := now.In(s.location).Format("2006-01-02")
 	if _, err = tx.Exec(`INSERT INTO usage_events
-		(occurred_at,day,kind,tool,provider,success,duration_ms,cache_hit,result_count,error_summary,query_hash,query_chars,query_language,query_topic,query_keywords,detail,error_kind)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, now.Unix(), day, e.Kind, e.Tool, e.Provider, success,
-		e.Duration.Milliseconds(), cacheHit, e.ResultCount, errSummary, hash, chars, lang, topic, keywords, e.Detail, errorKind); err != nil {
+		(occurred_at,day,kind,tool,provider,success,duration_ms,cache_hit,result_count,error_summary,query_hash,query_chars,query_language,query_topic,query_keywords,detail,error_kind,request_id,attempt_chain)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, now.Unix(), day, e.Kind, e.Tool, e.Provider, success,
+		e.Duration.Milliseconds(), cacheHit, e.ResultCount, errSummary, hash, chars, lang, topic, keywords, e.Detail, errorKind, e.RequestID, e.AttemptChain); err != nil {
 		return err
 	}
 	if _, err = tx.Exec(`INSERT INTO daily_usage(day,kind,tool,provider,requests,successes,failures,cache_hits,duration_ms,result_count)
@@ -301,9 +314,13 @@ func (s *Store) RecentFiltered(filter EventFilter) ([]StoredEvent, error) {
 		where = append(where, "error_kind=?")
 		args = append(args, filter.ErrorKind)
 	}
+	if filter.RequestID != "" {
+		where = append(where, "request_id=?")
+		args = append(args, filter.RequestID)
+	}
 	args = append(args, limit)
 	query := `SELECT id,occurred_at,kind,tool,provider,success,duration_ms,cache_hit,result_count,
-		error_summary,query_hash,query_chars,query_language,query_topic,query_keywords,detail,error_kind
+		error_summary,query_hash,query_chars,query_language,query_topic,query_keywords,detail,error_kind,request_id,attempt_chain
 		FROM usage_events WHERE ` + strings.Join(where, " AND ") + ` ORDER BY occurred_at DESC,id DESC LIMIT ?`
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
@@ -316,7 +333,7 @@ func (s *Store) RecentFiltered(filter EventFilter) ([]StoredEvent, error) {
 		var ts int64
 		var ok, hit int
 		if err := rows.Scan(&e.ID, &ts, &e.Kind, &e.Tool, &e.Provider, &ok, &e.DurationMS, &hit,
-			&e.ResultCount, &e.ErrorSummary, &e.QueryHash, &e.QueryChars, &e.QueryLanguage, &e.QueryTopic, &e.QueryKeywords, &e.Detail, &e.ErrorKind); err != nil {
+			&e.ResultCount, &e.ErrorSummary, &e.QueryHash, &e.QueryChars, &e.QueryLanguage, &e.QueryTopic, &e.QueryKeywords, &e.Detail, &e.ErrorKind, &e.RequestID, &e.AttemptChain); err != nil {
 			return nil, err
 		}
 		e.Success, e.CacheHit = ok == 1, hit == 1
@@ -407,6 +424,8 @@ func (s *Store) health(kind string, now time.Time) ([]Health, error) {
 		var newestFirst []bool
 		var durations []int64
 		errorKinds := map[string]int{}
+		var lastFailureTS int64
+		lastFailureKind := ""
 		for r.Next() {
 			var ts int64
 			var ok int
@@ -431,6 +450,9 @@ func (s *Store) health(kind string, now time.Time) ([]Health, error) {
 				countingConsecutive = false
 			}
 			if ok == 0 {
+				if lastFailureKind == "" {
+					lastFailureTS, lastFailureKind = ts, kind
+				}
 				if countingConsecutive {
 					consecutiveFailures++
 				}
@@ -458,6 +480,13 @@ func (s *Store) health(kind string, now time.Time) ([]Health, error) {
 		if h.SampleSize > 0 {
 			h.FailureRate /= float64(h.SampleSize)
 			age := now.Sub(time.Unix(lastTS, 0))
+			suspension := EvaluateSuspension(CurrentSuspensionPolicy(), consecutiveFailures, lastFailureKind, time.Unix(lastFailureTS, 0), now)
+			if suspension.Suspended {
+				h.State = "suspended"
+				h.SuspendedUntil = suspension.Until.In(s.location).Format(time.RFC3339)
+				h.SuspendReason = suspension.ErrorKind
+				h.SuspendCountdown = int64(time.Until(suspension.Until).Seconds())
+			}
 			// Confidence tracks evidence strength so a single failure is never
 			// read as a broken source; it is exposed separately from status.
 			if h.SampleSize < minSampleSize {
@@ -472,7 +501,9 @@ func (s *Store) health(kind string, now time.Time) ([]Health, error) {
 			case consecutiveFailures >= 3:
 				// Repeated failures are meaningful even in a small window.
 				h.Status = "down"
-				h.State = "suspended"
+				if h.State == "" {
+					h.State = "suspended"
+				}
 			case !latestSuccess || h.FailureRate > 0.20:
 				h.Status = "degraded"
 				h.State = "degraded"

@@ -41,6 +41,7 @@
               <div><dt>已观测 Web 来源</dt><dd id="system-observed">—</dd></div>
               <div><dt>不稳定</dt><dd id="system-degraded">—</dd></div>
               <div><dt>异常</dt><dd id="system-down">—</dd></div>
+              <div><dt>熔断中</dt><dd id="system-suspended">—</dd></div>
             </dl>
           </article>
 
@@ -165,6 +166,8 @@
               <label>最大结果数<input type="number" min="1" max="50" data-key="smartsearch.max_size"></label>
               <label>相关性阈值<input type="number" min="0" max="1" step="0.01" data-key="smartsearch.relevance_threshold"></label>
               <label>MMR λ<input type="number" min="0" max="1" step="0.05" data-key="smartsearch.mmr.lambda"></label>
+              <label>熔断首次暂停<input type="text" placeholder="5s" data-key="dashboard.suspension.ban_time_on_fail"></label>
+              <label>熔断暂停上限<input type="text" placeholder="24h" data-key="dashboard.suspension.max_ban_time_on_fail"></label>
               <label class="toggle"><input type="checkbox" data-key="cache.enabled"><span></span>启用缓存</label>
               <label class="toggle"><input type="checkbox" data-key="academic.enabled"><span></span>学术检索</label>
               <label class="toggle"><input type="checkbox" data-key="cleanfetch.enabled"><span></span>网页抓取</label>
