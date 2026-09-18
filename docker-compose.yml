@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.codex
-    image: websearch-mcpserver:v3.5.1-upstream-local
+    image: websearch-mcpserver:production-ab3d038
     # This is a locally built image. The reconciler builds it explicitly when
     # Docker no longer has the image instead of trying a registry pull first.
     pull_policy: never
@@ -36,7 +36,7 @@ services:
       - websearch-data:/data
       # Dashboard settings writes are validated and backed up under /data
       # before this single file is updated. The repository remains loopback-only.
-      - ./config.yaml:/app/config.yaml
+      - ./config.yaml:/app/config.yaml:rw
     stop_grace_period: 15s
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8338/__admin/health"]
