@@ -183,6 +183,12 @@ autostart.vbs
 
 配置中启用 `dashboard.enabled` 后，服务会自动记录**真实的工具调用与来源调用**元数据，并在 `http://127.0.0.1:8338/dashboard/` 提供本机控制台：总览、搜索源健康、调用记录与设置。控制台不主动探测上游，不保存完整查询与 URL（只保留脱敏后的哈希、主题与关键词）。
 
+![控制中心总览](docs/images/dashboard-overview.jpg)
+
+**功能页入口**：<https://matt1060338871-pixel.github.io/websearch-mcpserver/zh/>（英文：<https://matt1060338871-pixel.github.io/websearch-mcpserver/en/>）
+
+控制台在原有工具之上补充了四项能力：失败分类（限流 / 验证码 / 访问被拒 / 超时 / 网络 / 解析 / 无结果）、基于最近 20 次调用的健康判定与最小样本置信度、只读的熔断状态（按错误类型给出暂停时长，成功即恢复）、以及请求级关联（一次工具调用与其来源事件共享 request id）。同时提供只读的 `GET /__admin/api/providers` 与 Prometheus 文本指标 `GET /__admin/api/metrics`。
+
 ```yaml
 dashboard:
   enabled: true

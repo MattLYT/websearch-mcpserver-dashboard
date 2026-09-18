@@ -183,6 +183,12 @@ Or use MCP Hooks for session auto start/stop (Qwen Code example; full details in
 
 Enable `dashboard.enabled` in the configuration and the service passively records real tool/provider call metadata, then serves a local dashboard at `http://127.0.0.1:8338/dashboard/` with overview, source health, call history and settings. It never performs active health probes and never stores raw queries or URLs (only hashes, topics and keywords).
 
+![Dashboard overview](docs/images/dashboard-overview.jpg)
+
+**Feature pages**: <https://matt1060338871-pixel.github.io/websearch-mcpserver/en/> (Chinese: <https://matt1060338871-pixel.github.io/websearch-mcpserver/zh/>)
+
+The console adds four capabilities on top of the existing tools: a failure taxonomy (rate limit / captcha / access denied / timeout / network / parse / no result), health judged over the last 20 calls with a minimum-sample confidence marker, a read-only circuit breaker (per-error pause durations, cleared on success), and request-level correlation (one tool call shares a request id with the provider events it caused). It also exposes a read-only `GET /__admin/api/providers` and Prometheus text metrics at `GET /__admin/api/metrics`.
+
 ```yaml
 dashboard:
   enabled: true
