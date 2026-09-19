@@ -186,6 +186,14 @@ cache:
   # storage_path: ""         # 未配置时默认 exe 同目录 cache/websearch-cache.db
   cleanup_interval: 30      # 清理间隔（分钟），最大 360
 
+# 本机控制中心原型（默认关闭）
+# 仅被动记录真实工具调用；不保存完整查询或 URL，不执行主动健康探测。
+dashboard:
+  enabled: false
+  storage_path: "./data/dashboard.db"
+  retention_days: 30       # 明细保留天数；每日汇总长期保留
+  secrets_path: "./data/dashboard-secrets.json" # 私密覆盖文件，不回显 Key
+
 # Jina Reader（可选，cleanfetch 失败时回退）
 jina:
   api_key: ""               # 留空则不启用 Jina 回退
