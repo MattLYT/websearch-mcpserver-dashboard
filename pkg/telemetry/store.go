@@ -48,6 +48,8 @@ type Event struct {
 	RequestID string
 	// AttemptChain summarizes which providers were attempted and who returned.
 	AttemptChain string
+	// Client 是发起调用的 MCP 宿主标识（按 User-Agent 归一化），仅工具层记录。
+	Client string
 }
 
 type StoredEvent struct {
@@ -70,6 +72,7 @@ type StoredEvent struct {
 	QueryLanguage string `json:"query_language,omitempty"`
 	QueryTopic    string `json:"query_topic,omitempty"`
 	QueryKeywords string `json:"query_keywords,omitempty"`
+	Client        string `json:"client,omitempty"`
 }
 
 type DailyUsage struct {
@@ -191,6 +194,12 @@ func Open(path string, retentionDays int) (*Store, error) {
 			duration_ms INTEGER NOT NULL DEFAULT 0,
 			result_count INTEGER NOT NULL DEFAULT 0,
 			PRIMARY KEY(day, kind, tool, provider)
+		);
+		CREATE TABLE IF NOT EXISTS quota_state (
+			provider TEXT PRIMARY KEY,
+			period_start INTEGER NOT NULL,
+			adjust INTEGER NOT NULL DEFAULT 0,
+			updated_at INTEGER NOT NULL
 		);`); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("initialize telemetry database: %w", err)
@@ -201,6 +210,7 @@ func Open(path string, retentionDays int) (*Store, error) {
 	_, _ = db.Exec(`ALTER TABLE usage_events ADD COLUMN error_kind TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`ALTER TABLE usage_events ADD COLUMN request_id TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`ALTER TABLE usage_events ADD COLUMN attempt_chain TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(`ALTER TABLE usage_events ADD COLUMN client TEXT NOT NULL DEFAULT ''`)
 	loc, err := time.LoadLocation("Asia/Shanghai")
 	if err != nil {
 		loc = time.FixedZone("CST", 8*60*60)
@@ -255,9 +265,9 @@ func (s *Store) Record(e Event) error {
 	cacheHit := boolInt(e.CacheHit)
 	day := now.In(s.location).Format("2006-01-02")
 	if _, err = tx.Exec(`INSERT INTO usage_events
-		(occurred_at,day,kind,tool,provider,success,duration_ms,cache_hit,result_count,error_summary,query_hash,query_chars,query_language,query_topic,query_keywords,detail,error_kind,request_id,attempt_chain)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, now.Unix(), day, e.Kind, e.Tool, e.Provider, success,
-		e.Duration.Milliseconds(), cacheHit, e.ResultCount, errSummary, hash, chars, lang, topic, keywords, e.Detail, errorKind, e.RequestID, e.AttemptChain); err != nil {
+		(occurred_at,day,kind,tool,provider,success,duration_ms,cache_hit,result_count,error_summary,query_hash,query_chars,query_language,query_topic,query_keywords,detail,error_kind,request_id,attempt_chain,client)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, now.Unix(), day, e.Kind, e.Tool, e.Provider, success,
+		e.Duration.Milliseconds(), cacheHit, e.ResultCount, errSummary, hash, chars, lang, topic, keywords, e.Detail, errorKind, e.RequestID, e.AttemptChain, e.Client); err != nil {
 		return err
 	}
 	if _, err = tx.Exec(`INSERT INTO daily_usage(day,kind,tool,provider,requests,successes,failures,cache_hits,duration_ms,result_count)
@@ -276,6 +286,29 @@ func (s *Store) Cleanup() error {
 	cutoff := time.Now().AddDate(0, 0, -s.retentionDays).Unix()
 	_, err := s.db.Exec(`DELETE FROM usage_events WHERE occurred_at < ?`, cutoff)
 	return err
+}
+
+// StartCleanupLoop 启动周期清理协程：明细按 retention_days 滚动过期，
+// 长驻进程不会超期累积（daily_usage 日聚合按设计长期保留，量级极小）。
+// 返回的 stop 幂等，服务关闭时先停循环再关库，避免写已关闭的数据库。
+func (s *Store) StartCleanupLoop(interval time.Duration) (stop func()) {
+	stopCh := make(chan struct{})
+	var once sync.Once
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopCh:
+				return
+			case <-ticker.C:
+				if err := s.Cleanup(); err != nil {
+					return // 数据库已关闭等场景：静默退出
+				}
+			}
+		}
+	}()
+	return func() { once.Do(func() { close(stopCh) }) }
 }
 
 func (s *Store) Recent(limit int) ([]StoredEvent, error) {
@@ -320,7 +353,7 @@ func (s *Store) RecentFiltered(filter EventFilter) ([]StoredEvent, error) {
 	}
 	args = append(args, limit)
 	query := `SELECT id,occurred_at,kind,tool,provider,success,duration_ms,cache_hit,result_count,
-		error_summary,query_hash,query_chars,query_language,query_topic,query_keywords,detail,error_kind,request_id,attempt_chain
+		error_summary,query_hash,query_chars,query_language,query_topic,query_keywords,detail,error_kind,request_id,attempt_chain,client
 		FROM usage_events WHERE ` + strings.Join(where, " AND ") + ` ORDER BY occurred_at DESC,id DESC LIMIT ?`
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
@@ -333,7 +366,7 @@ func (s *Store) RecentFiltered(filter EventFilter) ([]StoredEvent, error) {
 		var ts int64
 		var ok, hit int
 		if err := rows.Scan(&e.ID, &ts, &e.Kind, &e.Tool, &e.Provider, &ok, &e.DurationMS, &hit,
-			&e.ResultCount, &e.ErrorSummary, &e.QueryHash, &e.QueryChars, &e.QueryLanguage, &e.QueryTopic, &e.QueryKeywords, &e.Detail, &e.ErrorKind, &e.RequestID, &e.AttemptChain); err != nil {
+			&e.ResultCount, &e.ErrorSummary, &e.QueryHash, &e.QueryChars, &e.QueryLanguage, &e.QueryTopic, &e.QueryKeywords, &e.Detail, &e.ErrorKind, &e.RequestID, &e.AttemptChain, &e.Client); err != nil {
 			return nil, err
 		}
 		e.Success, e.CacheHit = ok == 1, hit == 1
@@ -682,3 +715,129 @@ func summarizeError(err error) string {
 }
 
 func IsUnavailable(err error) bool { return errors.Is(err, sql.ErrConnDone) }
+
+// ── 额度状态（quota_state）──
+// 本地用量直接派生自 usage_events 的真实成功调用；quota_state 只保存统计
+// 周期起点与人工修正量，二者相加即展示用量。不主动探测供应商。
+
+// QuotaProviders 返回遥测中出现过的 provider 名（去重、按名称排序）。
+func (s *Store) QuotaProviders() ([]string, error) {
+	rows, err := s.db.Query(`SELECT DISTINCT provider FROM usage_events WHERE kind='provider' AND provider<>'' ORDER BY provider`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// CountProviderCalls 统计某 provider 自 since（unix 秒）以来的成功调用次数。
+func (s *Store) CountProviderCalls(provider string, since int64) (int64, error) {
+	var n int64
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM usage_events
+		WHERE kind='provider' AND provider=? AND success=1 AND occurred_at>=?`,
+		provider, since).Scan(&n)
+	return n, err
+}
+
+// QuotaState 返回 provider 的统计周期起点与人工修正量；无记录时返回 (0,0,nil)。
+func (s *Store) QuotaState(provider string) (periodStart, adjust int64, err error) {
+	err = s.db.QueryRow(`SELECT period_start, adjust FROM quota_state WHERE provider=?`, provider).
+		Scan(&periodStart, &adjust)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, 0, nil
+	}
+	return periodStart, adjust, err
+}
+
+// SetQuotaState 写入或覆盖某 provider 的周期起点与人工修正量。
+// 自动重置（周期推进、修正量清零）与手动重置/调整共用此入口。
+func (s *Store) SetQuotaState(provider string, periodStart, adjust int64) error {
+	_, err := s.db.Exec(`INSERT INTO quota_state(provider,period_start,adjust,updated_at)
+		VALUES(?,?,?,?)
+		ON CONFLICT(provider) DO UPDATE SET period_start=excluded.period_start,
+		adjust=excluded.adjust, updated_at=excluded.updated_at`,
+		provider, periodStart, adjust, time.Now().Unix())
+	return err
+}
+
+// ClientToolUsage 是单个客户端内按工具维度的用量小计。
+type ClientToolUsage struct {
+	Tool      string `json:"tool"`
+	Requests  int64  `json:"requests"`
+	Successes int64  `json:"successes"`
+	Failures  int64  `json:"failures"`
+	AvgMS     int64  `json:"avg_ms"`
+}
+
+// ClientUsage 是一个 MCP 客户端（按 User-Agent 归一化）在窗口期内的用量。
+type ClientUsage struct {
+	Client    string            `json:"client"`
+	Requests  int64             `json:"requests"`
+	Successes int64             `json:"successes"`
+	Failures  int64             `json:"failures"`
+	AvgMS     int64             `json:"avg_ms"`
+	LastSeen  string            `json:"last_seen,omitempty"`
+	Tools     []ClientToolUsage `json:"tools,omitempty"`
+}
+
+// ClientUsageStats 按客户端聚合工具层调用（被动真实数据，不探测客户端）。
+// windowDays 为统计窗口（如 7 = 最近 7 天）；返回按请求量降序。
+func (s *Store) ClientUsageStats(windowDays int) ([]ClientUsage, error) {
+	if windowDays <= 0 {
+		windowDays = 7
+	}
+	cutoff := time.Now().AddDate(0, 0, -windowDays).Unix()
+	rows, err := s.db.Query(`SELECT client, COUNT(*), SUM(success), AVG(duration_ms), MAX(occurred_at)
+		FROM usage_events WHERE kind='tool' AND client<>'' AND occurred_at>=?
+		GROUP BY client ORDER BY 2 DESC`, cutoff)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]ClientUsage, 0, 8)
+	index := map[string]int{}
+	for rows.Next() {
+		var u ClientUsage
+		var last int64
+		if err := rows.Scan(&u.Client, &u.Requests, &u.Successes, &u.AvgMS, &last); err != nil {
+			return nil, err
+		}
+		u.Failures = u.Requests - u.Successes
+		u.LastSeen = time.Unix(last, 0).In(s.location).Format(time.RFC3339)
+		index[u.Client] = len(out)
+		out = append(out, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(out) == 0 {
+		return out, nil
+	}
+	toolRows, err := s.db.Query(`SELECT client, tool, COUNT(*), SUM(success), AVG(duration_ms)
+		FROM usage_events WHERE kind='tool' AND client<>'' AND occurred_at>=?
+		GROUP BY client, tool ORDER BY 3 DESC`, cutoff)
+	if err != nil {
+		return nil, err
+	}
+	defer toolRows.Close()
+	for toolRows.Next() {
+		var client, tool string
+		var requests, successes, avg int64
+		if err := toolRows.Scan(&client, &tool, &requests, &successes, &avg); err != nil {
+			return nil, err
+		}
+		if i, ok := index[client]; ok {
+			out[i].Tools = append(out[i].Tools, ClientToolUsage{Tool: tool, Requests: requests,
+				Successes: successes, Failures: requests - successes, AvgMS: avg})
+		}
+	}
+	return out, toolRows.Err()
+}

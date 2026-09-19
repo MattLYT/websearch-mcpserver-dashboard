@@ -48,7 +48,7 @@ func PDFParserHandler(ctx context.Context, req *mcp.CallToolRequest, params *PDF
 	parsedPages := 0
 	parseEngine := ""
 	defer func() {
-		telemetry.Record(telemetry.Event{
+		telemetry.RecordEventContext(ctx, telemetry.Event{
 			Kind:         "tool",
 			Tool:         "pdf_parser",
 			Provider:     "pdf_pipeline",

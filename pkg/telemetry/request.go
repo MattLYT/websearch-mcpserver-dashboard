@@ -32,6 +32,32 @@ func WithRequestID(ctx context.Context, id string) context.Context {
 	return context.WithValue(ctx, requestContextKey{}, id)
 }
 
+// clientContextKey carries the MCP host identity (derived from User-Agent)
+// so every event recorded during the call is attributed to one client.
+type clientContextKey struct{}
+
+// WithClient attaches the MCP client identity to the context.
+func WithClient(ctx context.Context, client string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if client == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, clientContextKey{}, client)
+}
+
+// ClientFromContext returns the MCP client identity attached by WithClient, if any.
+func ClientFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	if v, ok := ctx.Value(clientContextKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
 // RequestID returns the identifier attached by WithRequestID, if any.
 func RequestID(ctx context.Context) string {
 	if ctx == nil {
@@ -133,6 +159,9 @@ func (s *Store) RecordContext(ctx context.Context, event Event) {
 	if event.RequestID == "" {
 		event.RequestID = RequestID(ctx)
 	}
+	if event.Client == "" {
+		event.Client = ClientFromContext(ctx)
+	}
 	if collector := CollectorFromContext(ctx); collector != nil {
 		collector.Add(event)
 		return
@@ -146,6 +175,9 @@ func (s *Store) RecordContext(ctx context.Context, event Event) {
 func RecordEventContext(ctx context.Context, event Event) {
 	if event.RequestID == "" {
 		event.RequestID = RequestID(ctx)
+	}
+	if event.Client == "" {
+		event.Client = ClientFromContext(ctx)
 	}
 	if collector := CollectorFromContext(ctx); collector != nil {
 		collector.Add(event)

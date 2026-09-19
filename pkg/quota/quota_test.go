@@ -27,7 +27,7 @@ func testService(t *testing.T, conf config.Config, handler http.Handler, client 
 	if client == nil {
 		client = srv.Client()
 	}
-	return newService(conf, srv.URL+"/usage", client)
+	return newService(conf, srv.URL+"/usage", client, nil)
 }
 
 func f64(v *float64) string {

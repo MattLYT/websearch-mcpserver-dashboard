@@ -265,6 +265,36 @@ func TestSummarizeSystemRollup(t *testing.T) {
 	}
 }
 
+func TestBuildDashboardOverviewSortsSourcesByState(t *testing.T) {
+	conf := fullWebConfig()
+	conf.Mode = config.ModeEngine
+
+	out := buildDashboardOverview(conf, telemetry.Overview{})
+
+	var got []string
+	for _, s := range out.Sources {
+		got = append(got, s.ID)
+	}
+	// 已启用在前（保持目录顺序），已配置未启用居中，未配置最后。
+	want := []string{"baidu_web", "bing", "google", "duckduckgo", "anysearch", "baidu", "tavily", "exa", "doubao"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("sources 顺序 = %v, want %v", got, want)
+	}
+
+	// 学术表同样分层：国内网络下国际学术源（configured 未 active）排在最后。
+	conf.Academic = config.AcademicConfig{Enabled: true}
+	conf.Network = "china"
+	acadOut := buildDashboardOverview(conf, telemetry.Overview{})
+	var acad []string
+	for _, s := range acadOut.AcademicSources {
+		acad = append(acad, s.ID)
+	}
+	wantAcad := []string{"arxiv", "crossref", "openalex", "pubmed", "europepmc", "dblp", "doaj", "semantic_scholar", "google_scholar"}
+	if !slices.Equal(acad, wantAcad) {
+		t.Fatalf("academic_sources 顺序 = %v, want %v", acad, wantAcad)
+	}
+}
+
 func TestBuildDashboardOverviewKeepsAcademicSourcesSeparate(t *testing.T) {
 	conf := config.Config{
 		Mode:     config.ModeEngine,

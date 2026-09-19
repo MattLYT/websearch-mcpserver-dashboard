@@ -55,6 +55,13 @@ func settingsView(c config.Config) map[string]any {
 			"DOUBAO_SEARCH_API_KEY": len(c.Doubao.EffectiveSKList()) > 0, "JINA_API_KEY": c.Jina.APIKey != "",
 			"MINERU_TOKEN": c.PDFParser.MinerUToken != "",
 		},
+		// 管理员口令只暴露“是否已配置”，值本身永不离开服务端，
+		// 也不能通过本控制台修改（只能手改 config.yaml 后重启）。
+		"admin_password_configured": c.Dashboard.AdminPasswordConfigured(),
+		"admin_username_configured": c.Dashboard.AdminUsername != "",
+		"networks": map[string]any{
+			"allowed": c.Dashboard.AllowedNetworks,
+		},
 	}
 }
 

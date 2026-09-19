@@ -30,7 +30,7 @@ func CleanFetch(ctx context.Context, req *mcp.CallToolRequest, params *CleanFetc
 	started := time.Now()
 	count := 0
 	defer func() {
-		telemetry.Record(telemetry.Event{Kind: "tool", Tool: "cleanfetch", Query: params.URL, Success: err == nil, Duration: time.Since(started), ResultCount: count, Error: err, RequestID: requestID, AttemptChain: recentAttemptChain(started, 15)})
+		telemetry.RecordEventContext(ctx, telemetry.Event{Kind: "tool", Tool: "cleanfetch", Query: params.URL, Success: err == nil, Duration: time.Since(started), ResultCount: count, Error: err, RequestID: requestID, AttemptChain: recentAttemptChain(started, 15)})
 	}()
 	urls := mergeFetchURLs(params.URL, params.URLs)
 	count = len(urls)

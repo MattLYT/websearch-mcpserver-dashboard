@@ -1,9 +1,9 @@
 package mcpserver
 
 import (
+	"fmt"
 	"context"
 	"errors"
-	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -49,7 +49,7 @@ func doWebSearch(ctx context.Context, req *mcp.CallToolRequest, query, intent st
 		ctx = telemetry.WithRequestID(ctx, requestID)
 	}
 	defer func() {
-		telemetry.Record(telemetry.Event{Kind: "tool", Tool: "smartsearch", Provider: engineName, Query: query, Success: err == nil, Duration: time.Since(started), CacheHit: cacheHit, ResultCount: resultCount, Error: err, RequestID: requestID, AttemptChain: recentAttemptChain(started, 12)})
+		telemetry.RecordEventContext(ctx, telemetry.Event{Kind: "tool", Tool: "smartsearch", Provider: engineName, Query: query, Success: err == nil, Duration: time.Since(started), CacheHit: cacheHit, ResultCount: resultCount, Error: err, RequestID: requestID, AttemptChain: recentAttemptChain(started, 12)})
 		if !cacheHit && engineName != "" && engineName != "hybrid" && engineName != "apipool" {
 			telemetry.Record(telemetry.Event{Kind: "provider", Provider: engineName, Query: query, Success: err == nil, Duration: time.Since(started), ResultCount: resultCount, Error: err, RequestID: requestID})
 		}

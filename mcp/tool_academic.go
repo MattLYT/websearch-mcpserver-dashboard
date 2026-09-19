@@ -19,19 +19,24 @@ import (
 // academicsearch 工具：handler、学术搜索与结果合并。
 // AcademicSearchHandler 学术搜索 tool handler。
 func AcademicSearchHandler(ctx context.Context, req *mcp.CallToolRequest, params *AcademicSearchParams) (*mcp.CallToolResult, any, error) {
-	return doAcademicSearch(params.Query, params.Engines, params.TimeRange, params.Page, telemetry.NewRequestID())
+	return doAcademicSearch(ctx, params.Query, params.Engines, params.TimeRange, params.Page)
 }
 
 // doWebSearch 通用网页搜索逻辑。
 // timeRangeMonths 控制搜索时间范围（月），默认 3，0 表示不限。
 
 // doAcademicSearch 学术搜索逻辑。
-func doAcademicSearch(query string, engines []string, timeRange string, page int, requestID string) (result *mcp.CallToolResult, extra any, err error) {
+func doAcademicSearch(ctx context.Context, query string, engines []string, timeRange string, page int) (result *mcp.CallToolResult, extra any, err error) {
 	started := time.Now()
+	requestID := telemetry.RequestID(ctx)
+	if requestID == "" {
+		requestID = telemetry.NewRequestID()
+		ctx = telemetry.WithRequestID(ctx, requestID)
+	}
 	cacheHit := false
 	resultCount := 0
 	defer func() {
-		telemetry.Record(telemetry.Event{Kind: "tool", Tool: "academicsearch", Query: query, Success: err == nil, Duration: time.Since(started), CacheHit: cacheHit, ResultCount: resultCount, Error: err, RequestID: requestID, AttemptChain: recentAttemptChain(started, 20)})
+		telemetry.RecordEventContext(ctx, telemetry.Event{Kind: "tool", Tool: "academicsearch", Query: query, Success: err == nil, Duration: time.Since(started), CacheHit: cacheHit, ResultCount: resultCount, Error: err, RequestID: requestID, AttemptChain: recentAttemptChain(started, 20)})
 	}()
 	if academicSearcher == nil {
 		return nil, nil, fmt.Errorf("学术搜索引擎未启用，请检查配置 bing.academic 是否为 true")

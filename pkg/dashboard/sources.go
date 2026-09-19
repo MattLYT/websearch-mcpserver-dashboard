@@ -53,6 +53,8 @@ type dashboardOverview struct {
 	AcademicSources []SourceView  `json:"academic_sources"`
 	// ConfiguredTools 是公开 MCP 工具的固定清单，不依赖是否已经产生调用。
 	ConfiguredTools []MCPToolView `json:"configured_tools"`
+	// Brand 是控制台品牌呈现（标题/主题/主色/logo），允许自托管用户自定义。
+	Brand map[string]any `json:"brand"`
 }
 
 func buildDashboardOverview(conf config.Config, observed telemetry.Overview) dashboardOverview {
@@ -61,12 +63,15 @@ func buildDashboardOverview(conf config.Config, observed telemetry.Overview) das
 	summary := summarizeSystem(web)
 	// Suspension covers both web and academic providers.
 	summary.Suspended += countSuspended(academic)
+	sortSources(web)
+	sortSources(academic)
 	return dashboardOverview{
 		Overview:        observed,
 		System:          summary,
 		Sources:         web,
 		AcademicSources: academic,
 		ConfiguredTools: mcpToolCatalog(conf),
+		Brand:           brandView(conf),
 	}
 }
 
@@ -178,6 +183,26 @@ func mergeErrorKindCounts(current, incoming []telemetry.ErrorKindCount) []teleme
 		return merged[i].Kind < merged[j].Kind
 	})
 	return merged
+}
+
+// sortSources 把源按展示优先级分层：已启用的最前，已配置未启用的居中，
+// 未配置的最后；同层内保持目录原顺序（稳定排序）。
+func sortSources(sources []SourceView) {
+	sort.SliceStable(sources, func(i, j int) bool {
+		return sourceTier(sources[i]) < sourceTier(sources[j])
+	})
+}
+
+// sourceTier 是源的展示层级：0 = 已启用，1 = 已配置未启用，2 = 未配置。
+func sourceTier(s SourceView) int {
+	switch {
+	case s.Active:
+		return 0
+	case s.Configured:
+		return 1
+	default:
+		return 2
+	}
 }
 
 func summarizeSystem(sources []SourceView) SystemSummary {
@@ -343,4 +368,24 @@ func activeSourceIDs(sources []SourceView) []string {
 	}
 	slices.Sort(out)
 	return out
+}
+
+// brandView 返回品牌呈现视图。logo 为 http(s) URL 时原样返回；本地文件路径
+// 统一经 /__admin/api/brand/logo 端点提供（与控制台同一访问边界）。
+func brandView(conf config.Config) map[string]any {
+	logo := ""
+	if l := strings.TrimSpace(conf.Dashboard.Brand.Logo); l != "" {
+		if strings.HasPrefix(l, "http://") || strings.HasPrefix(l, "https://") {
+			logo = l
+		} else {
+			logo = "/__admin/api/brand/logo"
+		}
+	}
+	return map[string]any{
+		"title":  conf.Dashboard.Brand.GetTitle(),
+		"theme":  conf.Dashboard.Brand.GetTheme(),
+		"accent": conf.Dashboard.Brand.GetAccent(),
+		"logo":   logo,
+		"footer": conf.Dashboard.Brand.GetFooter(),
+	}
 }

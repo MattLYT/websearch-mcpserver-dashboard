@@ -6,7 +6,7 @@ const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const REFRESH_MS = 60000;
 const TZ = { hour12: false, timeZone: 'Asia/Shanghai' };
-const PAGES = { overview: '运行总览', sources: '搜索源', usage: '调用记录', settings: '设置' };
+const PAGES = { overview: '运行总览', sources: '搜索源', events: '事件', usage: '调用记录', settings: '设置' };
 const HEALTH = { healthy: '正常', degraded: '不稳定', down: '异常', unknown: '未知' };
 const ERROR_KINDS = {
   rate_limit: '限流', captcha: '验证码', access_denied: '访问被拒', timeout: '超时',
@@ -23,13 +23,24 @@ const DISPLAY = {
   webfetch: '网页抓取器', jina: 'Jina Reader', pdf_pipeline: 'PDF 流水线',
 };
 const SECRETS = {
-  BAIDU_SK: '百度', TAVILY_SK: 'Tavily', EXA_API_KEY: 'Exa', ANYSEARCH_API_KEY: 'AnySearch',
+  BAIDU_SK: '百度千帆', TAVILY_SK: 'Tavily', EXA_API_KEY: 'Exa', ANYSEARCH_API_KEY: 'AnySearch',
   DOUBAO_SEARCH_API_KEY: '豆包', JINA_API_KEY: 'Jina Reader', MINERU_TOKEN: 'MinerU',
+};
+// 各供应商的官方「获取 Key」入口，配置页一键直达
+const SECRET_LINKS = {
+  BAIDU_SK: 'https://console.bce.baidu.com/iam/#/iam/apikey/list',
+  TAVILY_SK: 'https://app.tavily.com/home',
+  EXA_API_KEY: 'https://dashboard.exa.ai/api-keys',
+  ANYSEARCH_API_KEY: 'https://www.anysearch.com/console/api-keys',
+  DOUBAO_SEARCH_API_KEY: 'https://console.volcengine.com/search-infinity/api-key',
+  JINA_API_KEY: 'https://jina.ai/api-keys',
+  MINERU_TOKEN: 'https://mineru.net/apiManage/token',
 };
 
 const state = {
   overview: null, overviewError: null, overviewStale: false,
   quotas: null, quotaError: null,
+  clients: { rows: null, error: null, tab: '__total__' },
   settings: null, settingsError: null, settingsDirty: false, settingsLoaded: false,
   events: { rows: null, error: null, serverFiltered: true },
   providerEvents: { rows: null, error: null },
@@ -154,6 +165,7 @@ async function loadOverview() {
     // payloads are shown as-is but flagged so they are never read as current.
     state.overviewStale = !(data && data.system && Array.isArray(data.sources));
     state.overviewError = null;
+    if (data && data.brand) applyBrand(data.brand);
   } catch (e) {
     state.overviewError = e.message;
   }
@@ -164,6 +176,18 @@ async function loadOverview() {
   renderSourcePages();
   renderUsageSourceOptions();
   renderConfig();
+  loadClients();
+}
+
+async function loadClients() {
+  try {
+    const data = await fetchJSON('/__admin/api/clients');
+    state.clients.rows = Array.isArray(data.clients) ? data.clients : [];
+    state.clients.error = null;
+  } catch (e) {
+    state.clients.error = e.message;
+  }
+  renderClientsPanel();
 }
 
 async function loadQuotas() {
@@ -177,6 +201,7 @@ async function loadQuotas() {
   renderTavily();
   renderWebSources();
   renderSourcePages();
+  renderQuotaManage();
 }
 
 async function loadSettings() {
@@ -243,6 +268,7 @@ async function loadAll() {
   await Promise.allSettled([loadOverview(), loadQuotas(), loadSettings(), loadEvents(), loadProviderEvents()]);
   state.lastLoad = Date.now();
   renderUpdated();
+  refreshHScroll();
 }
 
 function anyFailure() {
@@ -294,8 +320,7 @@ function renderToolKpis() {
   const today = raw && raw.day ? raw : null;
   const avg = today && num(today.requests) > 0 ? Math.round(today.duration_ms / today.requests) : null;
   const cards = [
-    ['今日调用总数', today ? fmtInt(today.requests) : '—', today ? `缓存命中 ${fmtInt(today.cache_hits)} 次` : '暂无工具层调用'],
-    ['今日成功次数', today ? fmtInt(today.successes) : '—', '仅统计 MCP 工具层事件'],
+    ['今日成功调用', today ? fmtInt(today.successes) : '—', today ? `共 ${fmtInt(today.requests)} 次 · 缓存命中 ${fmtInt(today.cache_hits)}` : '暂无工具层调用'],
     ['今日失败次数', today ? fmtInt(today.failures) : '—', '仅统计 MCP 工具层事件'],
     ['今日平均响应时间', avg === null ? '—' : fmtMS(avg), today && num(today.requests) > 0 ? '工具层总耗时 ÷ 调用数' : '无调用时不计算'],
   ];
@@ -582,7 +607,7 @@ function renderConfig() {
 
 function eventCells(e, cols) {
   const out = [`<td class="nowrap">${esc(fmtAt(e.occurred_at))}</td>`];
-  if (cols !== 'overview') {
+  if (cols === 'usage') {
     out.push(`<td>${esc(e.kind === 'provider' ? '来源' : '工具')}</td>`);
   }
   const detail = e.detail ? `<small class="source-detail">${esc(e.detail)}</small>` : '';
@@ -596,20 +621,22 @@ function eventCells(e, cols) {
   const providerLabel = e.provider
     ? `<span class="source-name">${esc(displayName(e.provider))}</span>${detail}`
     : '<span class="dim">—</span>';
+  // 事件页只有 provider 事件流，不带恒为空的工具列
+  if (cols === 'usage') {
+    out.push(`<td>${toolLabel}</td>`);
+  }
   out.push(
-    `<td>${toolLabel}</td>`,
     `<td>${providerLabel}</td>`,
     `<td class="${e.success ? 'ok-text' : 'bad-text'}">${e.success ? '成功' : '失败'}</td>`,
   );
-  // 错误类型列只存在于调用记录表；总览事件表保持原有列定义。
-  if (cols !== 'overview') {
+  if (cols === 'usage') {
     out.push(`<td>${errorKindChip(e.error_kind)}</td>`);
   }
   out.push(
     `<td class="num">${esc(fmtMS(e.duration_ms))}</td>`,
     `<td class="num">${fmtInt(e.result_count)}</td>`,
   );
-  if (cols === 'overview') {
+  if (cols !== 'usage') {
     out.push(`<td>${esc([e.query_topic, e.query_language].filter(Boolean).join(' / ') || '—')}</td>`);
     out.push(`<td class="wrap-any">${esc(e.query_keywords || '—')}</td>`);
     out.push(`<td class="wrap-any">${e.error_summary ? '<span class="bad-text">' + esc(e.error_summary) + '</span>' : '<span class="dim">—</span>'}</td>`);
@@ -628,14 +655,14 @@ function renderOverviewEvents() {
   const note = $('#overview-events-note');
   const rows = state.providerEvents.rows;
   if (rows === null) {
-    body.innerHTML = emptyRow(9, state.providerEvents.error ? '读取失败' : '正在读取…');
+    body.innerHTML = emptyRow(8, state.providerEvents.error ? '读取失败' : '正在读取…');
     setNote(note, state.providerEvents.error ? '读取失败：' + state.providerEvents.error : '', state.providerEvents.error ? 'bad' : '');
     return;
   }
-  const top = rows.slice(0, 6);
+  const top = rows.slice(0, 20);
   body.innerHTML = top.length
-    ? top.map(e => `<tr>${eventCells(e, 'overview').join('')}</tr>`).join('')
-    : emptyRow(9, '暂无 Provider 事件（明细保留 30 天）');
+    ? top.map(e => `<tr>${eventCells(e, 'events').join('')}</tr>`).join('')
+    : emptyRow(8, '暂无 Provider 事件（明细保留 30 天）');
   if (state.providerEvents.error) setNote(note, '数据可能已过期：' + state.providerEvents.error, 'warn');
   else if (!top.length) setNote(note, '来源层调用后才会出现真实事件，不做模拟', '');
   else setNote(note, '', '');
@@ -851,12 +878,69 @@ function toast(message, bad) {
   setTimeout(() => el.classList.remove('show'), 2600);
 }
 
-async function postJSON(path, payload) {
+async function postJSON(path, payload, headers) {
   return fetchJSON(path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...(headers || {}) },
     body: JSON.stringify(payload),
   });
+}
+
+/* ---------- 管理员口令（写操作统一闸门） ---------- */
+// 服务端约束：写端点仅限本机 loopback + X-Admin-Password 头；
+// 口令只能配置在 dashboard.yaml，控制台永远读不到也改不了它。
+
+function adminConfigured() {
+  return Boolean(state.settings && state.settings.admin_password_configured);
+}
+
+function cachedAdminPass() {
+  return sessionStorage.getItem('adminPass') || '';
+}
+
+function usernameConfigured() {
+  return Boolean(state.settings && state.settings.admin_username_configured);
+}
+
+function cachedAdminUser() {
+  return sessionStorage.getItem('adminUser') || '';
+}
+
+// adminHeaders 取得（必要时先问一次）管理员口令；未配置或用户取消时抛错。
+async function adminHeaders() {
+  if (!adminConfigured()) {
+    throw new Error('管理员口令未配置：请在 dashboard.yaml 设置 dashboard.admin_password 后重启服务');
+  }
+  let pass = cachedAdminPass();
+  if (!pass) {
+    pass = prompt('输入管理员口令（dashboard.admin_password）');
+    if (!pass) throw new Error('已取消：本操作需要管理员口令');
+    sessionStorage.setItem('adminPass', pass);
+  }
+  const headers = { 'X-Admin-Password': pass };
+  // admin_username 配置了才要求用户名；未配置 = 口令-only，不做检查
+  if (usernameConfigured()) {
+    let user = cachedAdminUser();
+    if (!user) {
+      user = prompt('输入管理员用户名（dashboard.admin_username）');
+      if (!user) throw new Error('已取消：本操作需要管理员用户名');
+      sessionStorage.setItem('adminUser', user);
+    }
+    headers['X-Admin-User'] = user;
+  }
+  return headers;
+}
+
+// securePost 带口令的写请求；口令错误时清除缓存，下次重新询问。
+async function securePost(path, payload) {
+  const headers = await adminHeaders();
+  try {
+    return await postJSON(path, payload, headers);
+  } catch (e) {
+    if (String(e.message).includes('口令')) sessionStorage.removeItem('adminPass');
+    if (String(e.message).includes('用户名')) sessionStorage.removeItem('adminUser');
+    throw e;
+  }
 }
 
 async function saveSettings() {
@@ -866,9 +950,9 @@ async function saveSettings() {
     return;
   }
   try {
-    await postJSON('/__admin/api/settings', { changes: diff, confirm: false });
+    await securePost('/__admin/api/settings', { changes: diff, confirm: false });
     if (!(await confirmDialog('保存设置', '将备份当前 YAML，再写入以下更改。重启后生效。', JSON.stringify(diff, null, 2)))) return;
-    const res = await postJSON('/__admin/api/settings', { changes: diff, confirm: true });
+    const res = await securePost('/__admin/api/settings', { changes: diff, confirm: true });
     toast(res.backup ? '已保存，备份：' + res.backup : '已保存');
     await loadSettings();
   } catch (e) {
@@ -876,18 +960,264 @@ async function saveSettings() {
   }
 }
 
-async function editSecret(name) {
+function editSecret(name) {
   const label = SECRETS[name] || name;
-  const value = prompt('输入 ' + label + ' 的新值。内容不会回显，也不会写入 YAML；留空表示删除。');
-  if (value === null) return;
-  if (!(await confirmDialog('更新私密凭据', '新值将保存到 Docker 持久卷的私密覆盖文件，重启后生效。'))) return;
+  const d = $('#secret-dialog');
+  $('#secret-dialog-title').textContent = '更新 ' + label + ' Key';
+  const link = $('#secret-dialog-link');
+  const linkRow = link.closest('.secret-link-row');
+  if (SECRET_LINKS[name]) {
+    link.href = SECRET_LINKS[name];
+    linkRow.style.display = '';
+  } else {
+    linkRow.style.display = 'none';
+  }
+  $('#secret-dialog-input').value = '';
+  $('#secret-dialog-pass').value = cachedAdminPass();
+  $('#secret-dialog-user-row').classList.toggle('hidden', !usernameConfigured());
+  $('#secret-dialog-user').value = cachedAdminUser();
+  d.showModal();
+  d.addEventListener('close', async () => {
+    if (d.returnValue !== 'confirm') return;
+    const value = $('#secret-dialog-input').value;
+    const pass = $('#secret-dialog-pass').value.trim();
+    if (!adminConfigured()) {
+      toast('管理员口令未配置：请在 dashboard.yaml 设置 dashboard.admin_password 后重启服务', true);
+      return;
+    }
+    if (!pass) {
+      toast('需要管理员口令', true);
+      return;
+    }
+    sessionStorage.setItem('adminPass', pass);
+    const headers = { 'X-Admin-Password': pass };
+    if (usernameConfigured()) {
+      const user = $('#secret-dialog-user').value.trim();
+      if (!user) {
+        toast('需要管理员用户名', true);
+        return;
+      }
+      sessionStorage.setItem('adminUser', user);
+      headers['X-Admin-User'] = user;
+    }
+    try {
+      await postJSON('/__admin/api/secrets', { name: name, value: value, confirm: true }, headers);
+      toast(label + ' 已保存，需要重启服务');
+      await loadSettings();
+    } catch (e) {
+      if (String(e.message).includes('口令')) sessionStorage.removeItem('adminPass');
+      if (String(e.message).includes('用户名')) sessionStorage.removeItem('adminUser');
+      toast(e.message, true);
+    }
+  }, { once: true });
+}
+
+/* ---------- brand & theme（品牌与主题） ---------- */
+// 服务器默认主题来自 dashboard.yaml 的 dashboard.brand；本浏览器的选择
+// 保存在 localStorage，优先于服务器默认。
+
+const THEMES = ['green', 'blue', 'mono'];
+
+function pickTheme(t) {
+  return THEMES.includes(t) ? t : 'green';
+}
+
+function applyBrand(brand) {
+  if (!brand || typeof brand !== 'object') return;
+  const theme = pickTheme(localStorage.getItem('theme') || brand.theme);
+  document.documentElement.dataset.theme = theme;
+  const accent = localStorage.getItem('accent') || brand.accent || '';
+  if (accent) {
+    document.documentElement.style.setProperty('--accent', accent);
+  } else {
+    document.documentElement.style.removeProperty('--accent');
+  }
+  const title = brand.title || 'WebSearch 控制中心';
+  document.title = title;
+  $('#brand-title').textContent = title.split(/\s+/)[0] || title;
+  const about = $('#app-about');
+  if (about) {
+    about.classList.toggle('hidden', brand.footer === false);
+    $('#about-title').textContent = title;
+  }
+  const logo = brand.logo || 'logo-' + theme + '.png';
+  $('#brand-logo').src = logo;
+  $('#favicon').href = logo;
+  markActiveTheme();
+}
+
+function markActiveTheme() {
+  const active = document.documentElement.dataset.theme;
+  $$('#theme-picker [data-theme-pick]').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.themePick === active);
+  });
+}
+
+/* ---------- 额度管理（重置 / 修正，需管理员口令） ---------- */
+
+function renderQuotaManage() {
+  const body = $('#quota-manage-body');
+  const note = $('#quota-manage-note');
+  if (!body || !note) return;
+  if (state.quotaError) {
+    body.innerHTML = '';
+    setNote(note, '读取失败：' + state.quotaError, 'bad');
+    return;
+  }
+  const rows = (state.quotas || []).filter(q => q.source === 'local');
+  if (!rows.length) {
+    body.innerHTML = '';
+    setNote(note, '暂无本地用量数据：启用 dashboard 后的真实调用会自动累计（单 Key 上限默认 1000 次/周期，展示上限自动乘以 Key 数；可在 dashboard.yaml 的 dashboard.quotas 调整）。', '');
+    return;
+  }
+  setNote(note, '用量来自本地真实调用（成功次数）；上限 = 单 Key 上限 × 已配置 Key 数，与 apipool 实际消耗容量对齐。重置与修正需管理员口令，且仅限本机操作。', '');
+  body.innerHTML = rows.map(q => {
+    const used = q.used == null ? '—' : fmtInt(q.used);
+    const limit = q.limit == null ? '—' : fmtInt(q.limit);
+    const reset = q.reset_at ? fmtAt(q.reset_at) : '仅手动';
+    const name = esc(DISPLAY[q.provider] || q.provider);
+    return `<tr><td>${name}</td><td class="num">${used} / ${limit}</td><td>${esc(reset)}</td>` +
+      `<td class="nowrap"><button type="button" data-quota-reset="${esc(q.provider)}">重置</button> ` +
+      `<button type="button" data-quota-adjust="${esc(q.provider)}" data-used="${q.used || 0}">修正</button></td></tr>`;
+  }).join('');
+}
+
+async function quotaReset(provider) {
   try {
-    await postJSON('/__admin/api/secrets', { name: name, value: value, confirm: true });
-    toast(label + ' 已保存，需要重启服务');
-    await loadSettings();
+    await securePost('/__admin/api/quotas/reset', { provider: provider });
+    toast(DISPLAY[provider] || provider + ' 已重置，从现在重新累计');
+    await loadQuotas();
   } catch (e) {
     toast(e.message, true);
   }
+}
+
+async function quotaAdjust(provider, current) {
+  const raw = prompt('把「' + (DISPLAY[provider] || provider) + '」的已用次数修正为：', String(current));
+  if (raw === null) return;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) {
+    toast('请输入非负数字', true);
+    return;
+  }
+  try {
+    await securePost('/__admin/api/quotas/adjust', { provider: provider, set_used: value });
+    toast(DISPLAY[provider] || provider + ' 用量已修正为 ' + value);
+    await loadQuotas();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+/* ---------- 客户端用量（User-Agent 分组，tab 切换） ---------- */
+
+function renderClientsPanel() {
+  const panel = $('#clients-panel');
+  const tabs = $('#client-tabs');
+  const stats = $('#client-stats');
+  const note = $('#client-note');
+  if (!panel || !tabs || !stats) return;
+  const rows = state.clients.rows || [];
+  if (!rows.length) {
+    // 没有可识别的客户端数据时整块隐藏，不出空 tab 页
+    panel.classList.add('hidden');
+    return;
+  }
+  panel.classList.remove('hidden');
+  const tabDefs = [{ key: '__total__', label: '总计' }].concat(rows.map(r => ({ key: r.client, label: r.client })));
+  tabs.innerHTML = tabDefs.map(t =>
+    `<button type="button" class="client-tab${t.key === state.clients.tab ? ' active' : ''}" data-client-tab="${esc(t.key)}">${esc(t.label)}</button>`).join('');
+  $$('#client-tabs [data-client-tab]').forEach(b => b.addEventListener('click', () => {
+    state.clients.tab = b.dataset.clientTab;
+    renderClientsPanel();
+  }));
+
+  if (state.clients.error) {
+    stats.innerHTML = '';
+    setNote(note, '读取失败：' + state.clients.error, 'bad');
+    return;
+  }
+  if (!rows.length) {
+    stats.innerHTML = '<div class="data-table"><table><tbody><tr><td class="empty">还没有可识别的客户端调用：接入 MCP 客户端后按 User-Agent 自动归组</td></tr></tbody></table></div>';
+    setNote(note, '');
+    return;
+  }
+  setNote(note, '');
+  const selected = tabDefs.find(t => t.key === state.clients.tab) || tabDefs[0];
+  let agg;
+  if (selected.key === '__total__') {
+    agg = rows.reduce((acc, r) => ({
+      requests: acc.requests + r.requests, successes: acc.successes + r.successes, failures: acc.failures + r.failures,
+      weighted: acc.weighted + r.avg_ms * r.requests,
+      tools: acc.tools,
+    }), { requests: 0, successes: 0, failures: 0, weighted: 0, tools: null });
+  } else {
+    const r = rows.find(x => x.client === selected.key);
+    agg = r ? { requests: r.requests, successes: r.successes, failures: r.failures, weighted: r.avg_ms * r.requests, tools: r.tools } : null;
+  }
+  if (!agg) {
+    stats.innerHTML = '';
+    return;
+  }
+  const avg = agg.requests ? Math.round(agg.weighted / agg.requests) : 0;
+  const cards = [
+    ['调用数', fmtInt(agg.requests)],
+    ['成功', fmtInt(agg.successes)],
+    ['失败', fmtInt(agg.failures)],
+    ['平均耗时', agg.requests ? fmtInt(avg) + ' ms' : '—'],
+  ];
+  let html = '<div class="kpi-grid client-kpis">' + cards.map((c, i) =>
+    `<div class="kpi"><header><b>${esc(c[0])}</b></header><strong>${c[1]}</strong><small>最近 7 天</small></div>`).join('') + '</div>';
+  if (agg.tools && agg.tools.length) {
+    html += '<div class="table-scroll"><table class="data-table"><thead><tr><th>工具</th><th class="num">调用</th><th class="num">成功</th><th class="num">失败</th><th class="num">平均耗时</th></tr></thead><tbody>' +
+      agg.tools.map(t => `<tr><td>${esc(DISPLAY[t.tool] || t.tool)}</td><td class="num">${fmtInt(t.requests)}</td><td class="num">${fmtInt(t.successes)}</td><td class="num">${fmtInt(t.failures)}</td><td class="num">${t.avg_ms ? fmtInt(t.avg_ms) + ' ms' : '—'}</td></tr>`).join('') +
+      '</tbody></table></div>';
+  }
+  stats.innerHTML = html;
+}
+
+/* ---------- 宽表格粘性横向滚动条 ---------- */
+
+// 溢出的 .table-scroll 后面插入一条代理滚动条（sticky 吸可视区底部），
+// 双向同步 scrollLeft：长列表任何位置都能横向滚动，不必拖到表尾。
+function refreshHScroll() {
+  $$('.table-scroll').forEach(wrap => {
+    const overflow = wrap.scrollWidth > wrap.clientWidth + 2;
+    let proxy = wrap.__hproxy;
+    if (!overflow) {
+      if (proxy) proxy.classList.remove('on');
+      wrap.classList.remove('hs-nobar');
+      return;
+    }
+    if (!proxy) {
+      proxy = document.createElement('div');
+      proxy.className = 'hscroll-proxy';
+      proxy.appendChild(document.createElement('div'));
+      wrap.after(proxy);
+      wrap.__hproxy = proxy;
+      // 拖代理条期间只做 proxy→wrap 单向同步，禁止回写代理条——
+      // 否则瞬时不等时 JS 会跟手指抢滑块（右半段取整误差大，粘滞感最明显）
+      let dragging = false;
+      let raf = 0;
+      proxy.addEventListener('pointerdown', () => { dragging = true; });
+      window.addEventListener('pointerup', () => { dragging = false; });
+      proxy.addEventListener('scroll', () => {
+        if (raf) return;
+        raf = requestAnimationFrame(() => {
+          raf = 0;
+          wrap.scrollLeft = proxy.scrollLeft;
+        });
+      });
+      wrap.addEventListener('scroll', () => {
+        if (dragging || proxy.scrollLeft === wrap.scrollLeft) return;
+        proxy.scrollLeft = wrap.scrollLeft;
+      });
+    }
+    proxy.firstElementChild.style.width = wrap.scrollWidth + 'px';
+    proxy.classList.add('on');
+    // 代理条接管横向滚动，隐藏容器原生条（防同表双条）
+    wrap.classList.add('hs-nobar');
+  });
 }
 
 /* ---------- navigation & wiring ---------- */
@@ -898,6 +1228,8 @@ function nav(page, push) {
   $$('.nav').forEach(el => el.classList.toggle('active', el.dataset.page === page));
   $('#page-title').textContent = PAGES[page];
   if (push !== false) history.replaceState(null, '', '#' + page);
+  // 隐藏页的表格尺寸为 0，切页后重新判定溢出并挂粘性滚动条
+  refreshHScroll();
 }
 
 function wire() {
@@ -907,10 +1239,48 @@ function wire() {
   $('#reload-events').addEventListener('click', () => loadEvents());
   $('#export-csv').addEventListener('click', exportCSV);
   $('#save-settings').addEventListener('click', saveSettings);
+
+  // 外观主题：选择仅存本浏览器，立即生效
+  $$('#theme-picker [data-theme-pick]').forEach(btn => btn.addEventListener('click', () => {
+    localStorage.setItem('theme', btn.dataset.themePick);
+    applyLocalTheme();
+  }));
+  $('#accent-input').addEventListener('change', () => {
+    const v = $('#accent-input').value.trim();
+    if (v === '') {
+      localStorage.removeItem('accent');
+      document.documentElement.style.removeProperty('--accent');
+      toast('已恢复主题默认主色');
+      return;
+    }
+    if (!/^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(v)) {
+      toast('主色格式无效，示例 #14633f', true);
+      return;
+    }
+    localStorage.setItem('accent', v.toLowerCase());
+    document.documentElement.style.setProperty('--accent', v.toLowerCase());
+    toast('已应用自定义主色');
+  });
+
+  // 额度管理操作（事件委托）
+  const quotaBody = $('#quota-manage-body');
+  if (quotaBody) {
+    quotaBody.addEventListener('click', e => {
+      const resetBtn = e.target.closest('[data-quota-reset]');
+      if (resetBtn) {
+        quotaReset(resetBtn.dataset.quotaReset);
+        return;
+      }
+      const adjustBtn = e.target.closest('[data-quota-adjust]');
+      if (adjustBtn) {
+        quotaAdjust(adjustBtn.dataset.quotaAdjust, Number(adjustBtn.dataset.used) || 0);
+      }
+    });
+  }
   $('#restart-service').addEventListener('click', async () => {
     if (!(await confirmDialog('重启 WebSearch', '当前请求会短暂中断，Docker 将自动重新启动服务。'))) return;
     try {
-      await postJSON('/__admin/api/restart', { confirm: true });
+      await securePost('/__admin/api/restart', { confirm: true });
       toast('正在重启…');
       setTimeout(() => location.reload(), 3500);
     } catch (e) {
@@ -920,7 +1290,7 @@ function wire() {
   $('#clear-cache').addEventListener('click', async () => {
     if (!(await confirmDialog('清空搜索缓存', '此操作不可撤销，但不会删除监控历史。'))) return;
     try {
-      const res = await postJSON('/__admin/api/cache/clear', { confirm: true });
+      const res = await securePost('/__admin/api/cache/clear', { confirm: true });
       toast('已清理 ' + fmtInt(res.cleared) + ' 条缓存');
     } catch (e) {
       toast(e.message, true);
@@ -954,9 +1324,21 @@ function wire() {
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden && Date.now() - state.lastLoad > REFRESH_MS) loadAll();
   });
+  let resizeTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(refreshHScroll, 120);
+  });
+}
+
+function applyLocalTheme() {
+  const brand = (state.overview && state.overview.brand) || {};
+  applyBrand({ ...brand, theme: localStorage.getItem('theme') || brand.theme });
 }
 
 wire();
+applyLocalTheme();
+$('#accent-input').value = localStorage.getItem('accent') || '';
 nav(location.hash.slice(1) || 'overview', false);
 loadAll();
 setInterval(() => { if (!document.hidden) loadAll(); }, REFRESH_MS);
