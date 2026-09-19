@@ -353,3 +353,12 @@ log:
 #     tavily: 1200
 #     exa: 1200
 #     doubao: 500
+
+# ==============================================
+# 本机控制中心（可选；不执行主动健康探测）
+# ==============================================
+# dashboard:
+#   enabled: false
+#   storage_path: "./data/dashboard.db"
+#   retention_days: 30
+#   secrets_path: "./data/dashboard-secrets.json"

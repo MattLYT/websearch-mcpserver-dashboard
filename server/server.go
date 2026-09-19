@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -17,7 +18,9 @@ import (
 	"websearch/pkg/cache"
 	"websearch/pkg/config"
 	"websearch/pkg/daemon"
+	"websearch/pkg/dashboard"
 	"websearch/pkg/log"
+	"websearch/pkg/telemetry"
 	"websearch/searxng"
 )
 
@@ -53,7 +56,13 @@ func localOnlyMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		if err != nil {
 			host = r.RemoteAddr
 		}
-		if host != "127.0.0.1" && host != "::1" && host != "localhost" {
+		requestHost := strings.ToLower(r.Host)
+		hostHeaderLocal := requestHost == "localhost" || strings.HasPrefix(requestHost, "localhost:") ||
+			requestHost == "127.0.0.1" || strings.HasPrefix(requestHost, "127.0.0.1:") ||
+			requestHost == "[::1]" || strings.HasPrefix(requestHost, "[::1]:")
+		// Docker's loopback-published port reaches the container from its private
+		// bridge address. In that case the original Host header remains loopback.
+		if host != "127.0.0.1" && host != "::1" && host != "localhost" && !hostHeaderLocal {
 			http.Error(w, "Forbidden", http.StatusForbidden)
 			return
 		}
@@ -61,7 +70,7 @@ func localOnlyMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func (s *Server) registerAdminHandlers(mux *http.ServeMux) {
+func (s *Server) registerAdminHandlers(mux *http.ServeMux, conf config.Config, metrics *telemetry.Store) {
 	mux.HandleFunc("/__admin/refcount", localOnlyMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -123,6 +132,15 @@ func (s *Server) registerAdminHandlers(mux *http.ServeMux) {
 			Message:  "running",
 		})
 	})
+
+	if conf.Dashboard.Enabled {
+		dashboard.New(conf, metrics, mcpserver.GetCache(), func() {
+			select {
+			case s.shutdownCh <- struct{}{}:
+			default:
+			}
+		}).Register(mux, localOnlyMiddleware)
+	}
 }
 
 // Run 启动 HTTP 服务并阻塞直到收到关闭信号或引用计数归零。
@@ -130,6 +148,20 @@ func (s *Server) registerAdminHandlers(mux *http.ServeMux) {
 // 监听失败（如端口占用）返回错误，不 panic。
 // 外部项目可直接调用此方法将 MCP 服务嵌入到自己的 HTTP Server 中。
 func (s *Server) Run(conf config.Config, onListening ...func()) error {
+	var metrics *telemetry.Store
+	if conf.Dashboard.Enabled {
+		var err error
+		metrics, err = telemetry.Open(conf.GetDashboardStoragePath(), conf.Dashboard.RetentionDays)
+		if err != nil {
+			return fmt.Errorf("initialize dashboard telemetry: %w", err)
+		}
+		telemetry.SetDefault(metrics)
+		if policy, err := dashboard.SuspensionPolicy(conf.Dashboard.Suspension); err == nil {
+			telemetry.SetSuspensionPolicy(policy)
+		}
+		defer metrics.Close()
+		_ = metrics.Cleanup()
+	}
 	if err := mcpserver.Init(conf,
 		mcpserver.WithSearchEngine(conf),
 		mcpserver.WithSummarizer(conf),
@@ -143,7 +175,7 @@ func (s *Server) Run(conf config.Config, onListening ...func()) error {
 	mux := http.NewServeMux()
 	mcpserver.RegisterRouter(mux, conf)
 	searxng.RegisterRouter(mux, conf)
-	s.registerAdminHandlers(mux)
+	s.registerAdminHandlers(mux, conf, metrics)
 
 	// 启动缓存清理协程
 	var cleanup *cache.CleanupScheduler
@@ -245,6 +277,6 @@ func (s *Server) Handler(conf config.Config) http.Handler {
 	mux := http.NewServeMux()
 	mcpserver.RegisterRouter(mux, conf)
 	searxng.RegisterRouter(mux, conf)
-	s.registerAdminHandlers(mux)
+	s.registerAdminHandlers(mux, conf, nil)
 	return mux
 }

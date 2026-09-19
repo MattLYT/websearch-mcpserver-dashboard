@@ -136,7 +136,7 @@ func waitForHealthDown(port int, timeout time.Duration) bool {
 }
 
 func printUsage() {
-	fmt.Println("Usage: websearch-mcpserver <command>")
+	fmt.Println("Usage: websearch-mcpserver [-c <config.yaml>] <command>")
 	fmt.Println()
 	fmt.Println("Commands:")
 	fmt.Println("  start       Start the server or increase refcount if already running")
@@ -146,24 +146,53 @@ func printUsage() {
 	fmt.Println("  version     Show version")
 	fmt.Println("  install     Install autostart script and create shortcut in startup folder (Windows only)")
 	fmt.Println("  uninstall   Remove shortcut from startup folder (Windows only)")
+	fmt.Println("  help        Show this help")
+	fmt.Println()
+	fmt.Println("Flags:")
+	fmt.Println("  -c, --config   config file path (default: ./config.yaml, or $WEBSEARCH_CONFIG)")
+	fmt.Println("                 may appear before or after the command")
+	fmt.Println()
+	fmt.Println("Examples:")
+	fmt.Println("  websearch-mcpserver start")
+	fmt.Println("  websearch-mcpserver start -c /path/to/config.yaml")
+	fmt.Println("  websearch-mcpserver -c /path/to/config.yaml status")
 }
 
 func main() {
 	var configPath string
+	var showHelp bool
+	flag.Usage = printUsage
 	flag.StringVar(&configPath, "c", "", "config file path")
 	flag.StringVar(&configPath, "config", "", "config file path")
+	flag.BoolVar(&showHelp, "h", false, "show help")
+	flag.BoolVar(&showHelp, "help", false, "show help")
 	flag.Parse()
 
-	args := flag.Args()
+	// flag 包遇到首个非 flag 参数即停止，子命令后的 -c 需要二次解析；
+	// 命令名取自首轮解析结果，二次解析只负责补充 flag
+	firstArgs := flag.Args()
+	if len(firstArgs) > 1 {
+		_ = flag.CommandLine.Parse(firstArgs[1:])
+	}
+
+	if showHelp {
+		printUsage()
+		return
+	}
+
+	args := firstArgs
 	if len(args) < 1 {
 		printUsage()
 		os.Exit(1)
 	}
 
-	// 处理不需要配置文件的命令
+	// 处理不需要配置文件的命令（help 在配置加载之前，无配置也可查看）
 	switch args[0] {
 	case "version":
 		fmt.Println(version)
+		return
+	case "help", "-h", "--help":
+		printUsage()
 		return
 	case "install":
 		runInstall()
@@ -216,8 +245,6 @@ func main() {
 		runKill(conf)
 	case "status":
 		runStatus(conf)
-	case "-h", "--help", "help":
-		printUsage()
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n\n", args[0])
 		printUsage()

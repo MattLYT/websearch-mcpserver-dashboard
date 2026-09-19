@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -15,6 +16,7 @@ import (
 )
 
 var configDir string
+var configFile string
 
 const (
 	ModeBaidu     = "baidu"   // 百度千帆搜索（enable_ai_search 控制端点，失败自动回退网页搜索）
@@ -58,6 +60,7 @@ type Config struct {
 	Proxy              ProxyConfig       `mapstructure:"proxy"`
 	SmartSearch        SmartSearchConfig `mapstructure:"smartsearch"`
 	Apipool            ApipoolConfig     `mapstructure:"apipool"`
+	Dashboard          DashboardConfig   `mapstructure:"dashboard"`
 }
 
 // ── 各搜索引擎配置 ──
@@ -411,6 +414,26 @@ type CacheConfig struct {
 	CleanupInterval int    `mapstructure:"cleanup_interval"` // 清理间隔（分钟），默认30分钟，最大360分钟
 }
 
+// DashboardConfig controls the local-only observability dashboard. It does not
+// enable active provider probes; all health observations come from real calls.
+type DashboardConfig struct {
+	Enabled       bool             `mapstructure:"enabled"`
+	StoragePath   string           `mapstructure:"storage_path"`
+	RetentionDays int              `mapstructure:"retention_days"`
+	SecretsPath   string           `mapstructure:"secrets_path"`
+	Suspension    SuspensionConfig `mapstructure:"suspension"`
+}
+
+// SuspensionConfig mirrors SearXNG's ban_time_on_fail / max_ban_time_on_fail /
+// suspended_times knobs. Values are duration strings such as "5s", "10m",
+// "1h", "24h" (or plain numbers, treated as seconds). The control center only
+// reports suspension; it never skips a call.
+type SuspensionConfig struct {
+	BanTimeOnFail    string            `mapstructure:"ban_time_on_fail"`
+	MaxBanTimeOnFail string            `mapstructure:"max_ban_time_on_fail"`
+	SuspendedTimes   map[string]string `mapstructure:"suspended_times"`
+}
+
 type JinaConfig struct {
 	APIKey  string `mapstructure:"api_key"`
 	BaseURL string `mapstructure:"base_url"` // 默认 https://r.jina.ai
@@ -612,6 +635,7 @@ func Load(configPath string) (*Config, error) {
 
 	if cfgFile := viper.ConfigFileUsed(); cfgFile != "" {
 		configDir = filepath.Dir(cfgFile)
+		configFile = cfgFile
 	}
 
 	viper.SetEnvPrefix("APP")
@@ -750,6 +774,7 @@ func Load(configPath string) (*Config, error) {
 	// 环境变量回填：精简 yaml 缺字段时（如未写 tavily.api_key），
 	// viper 的 BindEnv 不会为不存在的 key 生效，这里显式覆盖。
 	applyKnownEnv(&conf)
+	applyDashboardSecrets(&conf)
 
 	return &conf, nil
 }
@@ -881,6 +906,64 @@ func GetConfigDir() string {
 		return cwd
 	}
 	return os.TempDir()
+}
+
+// GetConfigFile returns the exact file Viper loaded. The dashboard uses this
+// only for validated, backed-up settings changes.
+func GetConfigFile() string { return configFile }
+
+func (c Config) GetDashboardStoragePath() string {
+	if c.Dashboard.StoragePath != "" {
+		return c.Dashboard.StoragePath
+	}
+	return filepath.Join(filepath.Dir(c.GetCacheStoragePath()), "dashboard.db")
+}
+
+func (c Config) GetDashboardSecretsPath() string {
+	if c.Dashboard.SecretsPath != "" {
+		return c.Dashboard.SecretsPath
+	}
+	return filepath.Join(filepath.Dir(c.GetDashboardStoragePath()), "dashboard-secrets.json")
+}
+
+// applyDashboardSecrets loads an optional private overlay from the persistent
+// data volume. Values are intentionally kept out of config.yaml and logs.
+func applyDashboardSecrets(conf *Config) {
+	path := conf.GetDashboardSecretsPath()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	var values map[string]string
+	if json.Unmarshal(b, &values) != nil {
+		return
+	}
+	if v := values["BAIDU_SK"]; v != "" {
+		conf.Baidu.APIKey = v
+		conf.Baidu.SKList = nil
+	}
+	if v := values["TAVILY_SK"]; v != "" {
+		conf.Tavily.APIKey = v
+		conf.Tavily.SKList = nil
+	}
+	if v := values["EXA_API_KEY"]; v != "" {
+		conf.Exa.APIKey = v
+		conf.Exa.SKList = nil
+	}
+	if v := values["ANYSEARCH_API_KEY"]; v != "" {
+		conf.Anysearch.APIKey = v
+		conf.Anysearch.SKList = nil
+	}
+	if v := values["DOUBAO_SEARCH_API_KEY"]; v != "" {
+		conf.Doubao.APIKey = v
+		conf.Doubao.SKList = nil
+	}
+	if v := values["JINA_API_KEY"]; v != "" {
+		conf.Jina.APIKey = v
+	}
+	if v := values["MINERU_TOKEN"]; v != "" {
+		conf.PDFParser.MinerUToken = v
+	}
 }
 
 // ExeBaseDir 返回可执行文件所在目录，获取失败时回退配置目录。
