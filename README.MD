@@ -3,8 +3,8 @@
 > 本仓库是 [daidaiJ/websearch-mcpserver](https://github.com/daidaiJ/websearch-mcpserver) 的**扩展分支**，遵循上游 MIT 许可。
 > 上游项目提供四个 MCP 搜索工具与搜索引擎管线；本分支在**不改动这些行为**的前提下，加了一层本机可观测性模块，用来回答“哪个来源、在什么时候、因为什么失败”。
 
-- 本分支（对外主页）：<https://github.com/matt1060338871-pixel/websearch-mcpserver-matt>
-- 功能介绍页：<https://matt1060338871-pixel.github.io/websearch-mcpserver-matt/>
+- 本分支（对外主页）：<https://github.com/MattLYT/websearch-mcpserver-dashboard>
+- 功能介绍页：<https://mattlyt.github.io/websearch-mcpserver-dashboard/>
 - 上游项目（原作者维护）：<https://github.com/daidaiJ/websearch-mcpserver>
 
 ---
@@ -23,6 +23,7 @@
 | 请求级关联 | 无 | **新增**：一次工具调用与其触发的来源事件共享 request id，可在页面展开调用链 |
 | 机器可读出口 | 无 | **新增**：`GET /__admin/api/providers`、`GET /__admin/api/metrics`（Prometheus 文本） |
 | 部署与发布 | 二进制 / GHCR 镜像 / MCP Registry | 沿用上游方式；控制台只是可选开关 |
+| 仓库内 `ops/` 与部署笔记 | 无 | **本机运维脚本**，非产品功能：Windows 下 Docker 服务的计划任务自动恢复、维护开关与恢复测试；不需要自动恢复的部署可以完全忽略该目录 |
 
 > 控制中心默认 **关闭**（`dashboard.enabled: false`），不开启时行为与上游一致。
 
