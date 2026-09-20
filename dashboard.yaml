@@ -1,0 +1,33 @@
+# 控制中心配置（独立于主 config.yaml；WebUI 无法读取或修改本文件）
+# 写操作：仅本机 loopback + X-Admin-Password 口令；口令以 SHA-256 形式保存。
+dashboard:
+  enabled: true
+  shortcut: off
+  storage_path: /data/dashboard.db
+  retention_days: 30
+  secrets_path: /data/dashboard-secrets.json
+
+  # Docker 端口映射进来的请求源是网桥地址，需显式放行；写操作仍仅限 loopback。
+  allowed_networks: ["172.18.0.0/16"]
+
+  admin_password: ""
+  admin_password_sha256: "19402587f8575b354e2f64fe483f5c0e25dce8bfa47f8962c15f947329af4718"
+  admin_username: ""
+
+  suspension:
+    ban_time_on_fail: "5s"
+    max_ban_time_on_fail: "24h"
+
+  quotas:
+    reset: monthly
+    reset_day: 1
+    limits:
+      tavily: 1000
+      exa: 1000
+      anysearch: 1000
+      doubao: 1000
+
+  brand:
+    title: "WebSearch 控制中心"
+    theme: green
+    footer: true

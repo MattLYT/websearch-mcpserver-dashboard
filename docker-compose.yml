@@ -1,0 +1,50 @@
+services:
+  websearch:
+    build:
+      context: .
+      dockerfile: Dockerfile.codex
+    image: websearch-mcpserver:upstream-webui-6c4092f
+    # This is a locally built image. The reconciler builds it explicitly when
+    # Docker no longer has the image instead of trying a registry pull first.
+    pull_policy: never
+    container_name: websearch-mcpserver
+    restart: unless-stopped
+    init: true
+    ports:
+      - "127.0.0.1:8338:8338"
+    # Optional credentials are inherited from the host environment when
+    # present; no secret values are stored in this repository or image.
+    environment:
+      - BAIDU_SK
+      - TAVILY_SK
+      - EXA_API_KEY
+      - ANYSEARCH_API_KEY
+      - DOUBAO_SEARCH_API_KEY
+      - ASK_ECHO_SEARCH_INFINITY_API_KEY
+      - VOLCENGINE_SEARCH_API_KEY
+      - SEMANTIC_SCHOLAR_API_KEY
+      - JINA_API_KEY
+      # Upstream Viper uses APP_ plus the literal dotted configuration key.
+      - APP_JINA.API_KEY=${JINA_API_KEY:-}
+      - MINERU_TOKEN
+      - LLM_BASE_URL
+      - LLM_API_KEY
+      - HTTP_PROXY
+      - HTTPS_PROXY
+      - ALL_PROXY
+    volumes:
+      - websearch-data:/data
+      # Dashboard settings writes are validated and backed up under /data
+      # before this single file is updated. The repository remains loopback-only.
+      - ./config.yaml:/app/config.yaml:rw
+      - ./dashboard.yaml:/app/dashboard.yaml:rw
+    stop_grace_period: 15s
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8338/__admin/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  websearch-data:
