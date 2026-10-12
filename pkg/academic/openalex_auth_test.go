@@ -58,7 +58,7 @@ func TestOpenAlexAuthentication(t *testing.T) {
 			if err != nil || len(resp.Results) != 1 {
 				t.Fatalf("search failed: %v", err)
 			}
-			if results := LookupDOI(context.Background(), "10.1/test", antirobot.OpenAlexOpts{Enabled: true, APIKey: key}); len(results) != 1 {
+			if results, failures := LookupDOI(context.Background(), "10.1/test", antirobot.CrossrefOpts{Enabled: true}, antirobot.OpenAlexOpts{Enabled: true, APIKey: key}); len(results) != 1 || len(failures) != 0 {
 				t.Fatal("exact DOI lookup failed")
 			}
 			if hits.Load() != 3 {
@@ -82,7 +82,7 @@ func TestLookupDOIDisabledOpenAlex(t *testing.T) {
 	oldAPI, oldCrossref, oldClient := openalexAPI, crossrefPath, lookupClient
 	openalexAPI, crossrefPath, lookupClient = server.URL, server.URL+"/crossref", server.Client()
 	t.Cleanup(func() { openalexAPI, crossrefPath, lookupClient = oldAPI, oldCrossref, oldClient })
-	LookupDOI(context.Background(), "10.1/test", antirobot.OpenAlexOpts{Enabled: false, APIKey: "test-openalex-key"})
+	LookupDOI(context.Background(), "10.1/test", antirobot.CrossrefOpts{Enabled: true}, antirobot.OpenAlexOpts{Enabled: false, APIKey: "test-openalex-key"})
 	if openalexHits.Load() != 0 || crossrefHits.Load() != 1 {
 		t.Fatalf("disabled provider called: openalex=%d crossref=%d", openalexHits.Load(), crossrefHits.Load())
 	}

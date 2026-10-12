@@ -265,7 +265,7 @@ With `time_range`, each academic engine uses its official syntax (aligned in v3.
 | DOAJ | `bibjson.year:[startYear TO current UTC year]` (no `*`; `day`/`week`/`month` collapse to year granularity) |
 | arXiv | `submittedDate:[YYYYMMDDHHMM TO YYYYMMDDHHMM]` (UTC/GMT) |
 
-**Single-paper lookup (DOI / arXiv id short-circuit)**: when you already have a DOI or arXiv id, pass it directly as `query`, e.g. `10.1038/s41586-020-2649-2`, `doi:10.1038/s41586-020-2649-2`, `https://doi.org/10.1038/s41586-020-2649-2`, or `2401.04085`, `arXiv:2401.04085`, `https://arxiv.org/abs/2401.04085`. This triggers a single-paper lookup that ignores `engines` / `time_range` / `page`; once you have the `pdf_url` from the result, pass that URL as the `path` parameter of the `pdf_parser` tool to parse the full text instead of searching by title.
+**Single-paper lookup (DOI / arXiv id short-circuit)**: when you already have a DOI or arXiv id, pass it directly as `query`, e.g. `10.1038/s41586-020-2649-2`, `doi:10.1038/s41586-020-2649-2`, `https://doi.org/10.1038/s41586-020-2649-2`, or `2401.04085`, `arXiv:2401.04085`, `https://arxiv.org/abs/2401.04085`. This triggers a single-paper lookup that ignores `time_range` / `page` but respects enabled sources and requested `engines`; once you have the `pdf_url` from the result, pass that URL as the `path` parameter of the `pdf_parser` tool to parse the full text instead of searching by title.
 
 Results are ranked by the academic scoring enhancement (enabled by default): RRF fusion ranking + citation / journal authority / PDF availability / recency signals, with low-score papers auto-filtered (Top-1 + per-engine floor). Config: `academic.enhance` (default true), `academic.threshold` (default 0.02).
 

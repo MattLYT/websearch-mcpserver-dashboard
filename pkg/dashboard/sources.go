@@ -4,7 +4,9 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
+	"websearch/pkg/antirobot"
 	"websearch/pkg/config"
 	"websearch/pkg/telemetry"
 )
@@ -22,9 +24,15 @@ type SourceView struct {
 	ID                  string                     `json:"id"`
 	Name                string                     `json:"name"`
 	Group               string                     `json:"group"`
+	Category            string                     `json:"category"`
+	Enabled             bool                       `json:"enabled"`
+	ControlPath         string                     `json:"control_path"`
+	Inverted            bool                       `json:"inverted"`
+	Condition           string                     `json:"condition"`
 	Configured          bool                       `json:"configured"`
 	Active              bool                       `json:"active"`
 	Status              string                     `json:"status"`
+	ObservationStatus   string                     `json:"observation_status,omitempty"`
 	LastSuccessAt       string                     `json:"last_success_at,omitempty"`
 	LastFailureAt       string                     `json:"last_failure_at,omitempty"`
 	LastSeenAt          string                     `json:"last_seen_at,omitempty"`
@@ -40,10 +48,23 @@ type SourceView struct {
 	SuspendedUntil      string                     `json:"suspended_until,omitempty"`
 	SuspendReason       string                     `json:"suspend_reason,omitempty"`
 	SuspendCountdown    int64                      `json:"suspend_countdown_sec,omitempty"`
+	SuspensionScope     string                     `json:"suspension_scope"`
+	ActualCooldown      *ActualCooldownView        `json:"actual_cooldown"`
 	P95MS               int64                      `json:"p95_ms"`
 	ErrorKinds          []telemetry.ErrorKindCount `json:"error_kinds,omitempty"`
 	QuotaQueryable      bool                       `json:"quota_queryable"`
 	aliases             []string
+}
+
+// ActualCooldownView is the routing cooldown registry, not a telemetry warning.
+type ActualCooldownView struct {
+	Engine           string `json:"engine"`
+	Kind             string `json:"kind"`
+	Reason           string `json:"reason"`
+	Until            string `json:"until"`
+	RemainingSeconds int64  `json:"remaining_seconds"`
+	CooldownSeconds  int64  `json:"cooldown_seconds"`
+	PersistEnabled   bool   `json:"persist_enabled"`
 }
 
 type dashboardOverview struct {
@@ -76,20 +97,33 @@ func buildDashboardOverview(conf config.Config, observed telemetry.Overview) das
 }
 
 func joinSources(defs []SourceView, observed []telemetry.Health) []SourceView {
+	cooldowns := make(map[string]antirobot.HealthEntry)
+	for _, entry := range antirobot.HealthSnapshot() {
+		cooldowns[entry.Engine] = entry
+	}
+	persistEnabled := antirobot.HealthPersistEnabled()
 	byName := make(map[string]telemetry.Health, len(observed))
 	for _, h := range observed {
 		byName[h.Name] = h
 	}
 	for i := range defs {
 		s := &defs[i]
-		if !s.Configured {
-			s.Status = "not_configured"
-			continue
+		s.SuspensionScope = "observation"
+		s.ActualCooldown = nil
+		for _, alias := range append([]string{s.ID}, s.aliases...) {
+			if entry, ok := cooldowns[alias]; ok {
+				until := time.UnixMilli(int64(entry.Until * 1000))
+				remaining := int64(time.Until(until).Seconds())
+				if remaining < 1 {
+					remaining = 1
+				}
+				s.ActualCooldown = &ActualCooldownView{Engine: entry.Engine, Kind: entry.Kind,
+					Reason: entry.Reason, Until: until.Format(time.RFC3339),
+					RemainingSeconds: remaining, CooldownSeconds: int64(entry.Cooldown), PersistEnabled: persistEnabled}
+				break
+			}
 		}
-		if !s.Active {
-			s.Status = "inactive"
-			continue
-		}
+		// Preserve history even when a source is disabled or loses its key.
 		var h telemetry.Health
 		var ok bool
 		var today telemetry.DailyUsage
@@ -124,9 +158,15 @@ func joinSources(defs []SourceView, observed []telemetry.Health) []SourceView {
 		if !ok {
 			s.Status = "unknown"
 			s.State = "unknown"
+			if !s.Configured {
+				s.Status = "not_configured"
+			} else if !s.Active {
+				s.Status = "inactive"
+			}
 			continue
 		}
 		s.Status = h.Status
+		s.ObservationStatus = h.Status
 		s.LastSuccessAt = h.LastSuccessAt
 		s.LastFailureAt = h.LastFailureAt
 		s.LastSeenAt = h.LastSeenAt
@@ -155,6 +195,11 @@ func joinSources(defs []SourceView, observed []telemetry.Health) []SourceView {
 			s.Suspended = false
 		}
 		s.P95MS = h.P95MS
+		if !s.Configured {
+			s.Status = "not_configured"
+		} else if !s.Active {
+			s.Status = "inactive"
+		}
 	}
 	return defs
 }
@@ -239,7 +284,7 @@ func summarizeSystem(sources []SourceView) SystemSummary {
 	return out
 }
 
-// countSuspended counts active sources whose read-only circuit breaker is open.
+// countSuspended counts passive observation warnings; it does not affect routing.
 func countSuspended(sources []SourceView) int {
 	count := 0
 	for _, source := range sources {
@@ -252,27 +297,40 @@ func countSuspended(sources []SourceView) int {
 
 func webSourceCatalog(conf config.Config) []SourceView {
 	mode := conf.GetMode()
+	proxyAllowed := conf.Proxy.ProxyResolver() != nil
+	proxyResolved := conf.Proxy.GetProxyEndpoint() != ""
 	apiConfigured := map[string]bool{
-		"anysearch": len(conf.Anysearch.EffectiveSKList()) > 0,
+		"anysearch": true, // Anonymous mode needs no key.
 		"baidu":     len(conf.Baidu.EffectiveSKList()) > 0,
 		"tavily":    len(conf.Tavily.EffectiveSKList()) > 0,
 		"exa":       len(conf.Exa.EffectiveSKList()) > 0,
 		"doubao":    len(conf.Doubao.EffectiveSKList()) > 0,
 	}
 	engineConfigured := map[string]bool{
-		"baidu_web":  conf.Baidu.WebEnabled,
-		"bing":       conf.Bing.Enabled,
-		"google":     conf.Google.Enabled,
-		"duckduckgo": conf.DuckDuckGo.Enabled && conf.Proxy.NeedsProxy(),
+		"baidu_web": true, "bing": true, "google": true, "duckduckgo": true,
+		"so360": true, "wikipedia": true, "googlenews": true,
+	}
+	engineEnabled := map[string]bool{
+		"baidu_web": conf.Baidu.WebEnabled, "bing": conf.Bing.Enabled,
+		"google": conf.Google.Enabled, "duckduckgo": conf.DuckDuckGo.Enabled,
+		"so360": conf.So360.Enabled, "wikipedia": conf.Wikipedia.Enabled,
+		"googlenews": conf.GoogleNews.Enabled,
+	}
+	engineReady := map[string]bool{}
+	for name, enabled := range engineEnabled {
+		engineReady[name] = enabled
+		if name == "duckduckgo" || name == "wikipedia" || name == "googlenews" {
+			engineReady[name] = enabled && proxyAllowed
+		}
 	}
 	active := map[string]bool{}
 	activateAPI := func(name string) {
-		if apiConfigured[name] {
+		if apiConfigured[name] && conf.APISourceEnabled(name) {
 			active[name] = true
 		}
 	}
 	activateEngines := func() {
-		for name, configured := range engineConfigured {
+		for name, configured := range engineReady {
 			if configured {
 				active[name] = true
 			}
@@ -290,28 +348,30 @@ func webSourceCatalog(conf config.Config) []SourceView {
 		for _, name := range conf.Apipool.GetEngines() {
 			activateAPI(strings.ToLower(name))
 		}
-		if engineConfigured["baidu_web"] {
+		if engineReady["baidu_web"] {
 			active["baidu_web"] = true
 		}
 	case config.ModeBaidu:
-		if apiConfigured["baidu"] {
+		if apiConfigured["baidu"] && conf.APISourceEnabled("baidu") {
 			active["baidu"] = true
-			if engineConfigured["baidu_web"] {
+			if engineReady["baidu_web"] {
 				active["baidu_web"] = true
 			}
-		} else if engineConfigured["baidu_web"] {
+		} else if engineReady["baidu_web"] {
 			active["baidu_web"] = true
-		} else if engineConfigured["bing"] {
+		} else if engineReady["bing"] {
 			active["bing"] = true
 		}
 	default:
 		selected := mode
-		if apiConfigured[selected] {
+		if apiConfigured[selected] && conf.APISourceEnabled(selected) {
 			active[selected] = true
-		} else if engineConfigured["bing"] {
+		} else if engineReady["bing"] {
 			active["bing"] = true
 		}
 	}
+	// The MCP handler can retry Bing after a primary failure in every mode.
+	active["bing"] = engineReady["bing"]
 
 	baiduAPIAliases := []string{"baidu_ai", "baidu_api"}
 	baiduWebAliases := []string{"baidu"}
@@ -319,7 +379,7 @@ func webSourceCatalog(conf config.Config) []SourceView {
 		baiduAPIAliases = append(baiduAPIAliases, "baidu")
 		baiduWebAliases = []string{"baidu_web"}
 	}
-	return []SourceView{
+	out := []SourceView{
 		{ID: "anysearch", Name: "AnySearch", Group: "web", Configured: apiConfigured["anysearch"], Active: active["anysearch"], aliases: []string{"anysearch"}},
 		{ID: "baidu", Name: "百度千帆", Group: "web", Configured: apiConfigured["baidu"], Active: active["baidu"], aliases: baiduAPIAliases},
 		{ID: "tavily", Name: "Tavily", Group: "web", Configured: apiConfigured["tavily"], Active: active["tavily"], QuotaQueryable: true, aliases: []string{"tavily", "tavily_api"}},
@@ -329,11 +389,57 @@ func webSourceCatalog(conf config.Config) []SourceView {
 		{ID: "bing", Name: "Bing", Group: "web", Configured: engineConfigured["bing"], Active: active["bing"], aliases: []string{"bing"}},
 		{ID: "google", Name: "Google", Group: "web", Configured: engineConfigured["google"], Active: active["google"], aliases: []string{"google"}},
 		{ID: "duckduckgo", Name: "DuckDuckGo", Group: "web", Configured: engineConfigured["duckduckgo"], Active: active["duckduckgo"], aliases: []string{"duckduckgo"}},
+		{ID: "so360", Name: "360 搜索", Group: "web", Configured: true, Active: active["so360"], aliases: []string{"so360"}},
+		{ID: "wikipedia", Name: "Wikipedia", Group: "web", Configured: true, Active: active["wikipedia"], aliases: []string{"wikipedia"}},
+		{ID: "googlenews", Name: "Google News", Group: "web", Configured: true, Active: active["googlenews"], aliases: []string{"googlenews", "google_news"}},
 	}
+	for i := range out {
+		s := &out[i]
+		s.SuspensionScope = "observation"
+		if _, engine := engineEnabled[s.ID]; engine {
+			s.Category, s.Enabled = "engine", engineEnabled[s.ID]
+			s.ControlPath = s.ID + ".enabled"
+			s.Condition = "参与 engine/hybrid 模式"
+			switch s.ID {
+			case "baidu_web":
+				s.ControlPath = "baidu.web_enabled"
+				s.Condition = "参与 engine/hybrid；baidu/apipool 可作为网页回退"
+			case "bing":
+				s.Condition = "各模式的失败回退；engine/hybrid 同时参与主检索"
+			case "googlenews":
+				s.ControlPath = "google_news.enabled"
+				fallthrough
+			case "duckduckgo", "wikipedia":
+				s.Condition = "参与 engine/hybrid；需要代理解析器；未探测连接"
+				if !proxyResolved {
+					s.Condition += "；代理端点当前未解析"
+				}
+			}
+		} else {
+			s.Category, s.Enabled = "api", conf.APISourceEnabled(s.ID)
+			s.ControlPath = s.ID + ".enabled"
+			s.Condition = "需要已配置 Key；参与对应单源/hybrid 或 apipool.engines"
+			if s.ID == "anysearch" {
+				s.Condition = "无 Key 可用匿名档；参与 anysearch/hybrid 或 apipool.engines"
+			}
+			if s.ID == "doubao" {
+				if conf.Doubao.GetVersion() == "custom" {
+					s.Condition += "；Custom；ICP 限制不适用"
+				} else if conf.Doubao.ICPHostOnly {
+					s.Condition += "；Global；仅国内 ICP 备案站点"
+				} else {
+					s.Condition += "；Global；不限制 ICP 备案"
+				}
+			}
+		}
+	}
+	return out
 }
 
 func academicSourceCatalog(conf config.Config) []SourceView {
 	enabled := conf.Academic.Enabled
+	proxyAllowed := conf.Proxy.ProxyResolver() != nil
+	proxyResolved := conf.Proxy.GetProxyEndpoint() != ""
 	defs := []struct {
 		id       string
 		name     string
@@ -352,11 +458,24 @@ func academicSourceCatalog(conf config.Config) []SourceView {
 	}
 	out := make([]SourceView, 0, len(defs))
 	for _, d := range defs {
-		configured := enabled && !d.disabled
-		active := configured && (!d.intlOnly || (conf.IsInternational() && conf.Proxy.NeedsProxy()))
-		out = append(out, SourceView{ID: d.id, Name: d.name, Group: "academic", Configured: configured, Active: active, aliases: []string{d.id}})
+		active := enabled && !d.disabled && (!d.intlOnly || (conf.IsInternational() && proxyAllowed))
+		condition := "需要 academic.enabled；无需 Key"
+		if d.intlOnly {
+			condition += "；需要 international 网络与代理解析器；未探测连接"
+			if !proxyResolved {
+				condition += "；代理端点当前未解析"
+			}
+		}
+		out = append(out, SourceView{ID: d.id, Name: d.name, Group: "academic", Category: "academic",
+			Configured: true, Enabled: !d.disabled, Active: active, ControlPath: "academic.disable_" + d.id,
+			Inverted: true, Condition: condition, SuspensionScope: "observation", aliases: []string{d.id}})
 	}
 	return out
+}
+
+// SourceCatalog returns configuration/routing conditions without health probes.
+func SourceCatalog(conf config.Config) []SourceView {
+	return append(webSourceCatalog(conf), academicSourceCatalog(conf)...)
 }
 
 func activeSourceIDs(sources []SourceView) []string {

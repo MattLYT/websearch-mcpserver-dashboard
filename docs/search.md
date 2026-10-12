@@ -265,7 +265,7 @@ apipool:
 | DOAJ | `bibjson.year:[起始年 TO 当前 UTC 年]`（禁止 `*`；`day`/`week`/`month` 退化成年粒度） |
 | arXiv | `submittedDate:[YYYYMMDDHHMM TO YYYYMMDDHHMM]`（UTC/GMT） |
 
-**单篇精确查询（DOI / arXiv id 短路）**：已持有 DOI 或 arXiv id 时直接将其作为 `query`，如 `10.1038/s41586-020-2649-2`、`doi:10.1038/s41586-020-2649-2`、`https://doi.org/10.1038/s41586-020-2649-2`，或 `2401.04085`、`arXiv:2401.04085`、`https://arxiv.org/abs/2401.04085`。此时走单篇精确查询并忽略 `engines` / `time_range` / `page`；拿到结果中的 `pdf_url` 后，可将该 URL 作为 `pdf_parser` 工具的 `path` 参数解析全文，不要再用标题做关键词搜索。
+**单篇精确查询（DOI / arXiv id 短路）**：已持有 DOI 或 arXiv id 时直接将其作为 `query`，如 `10.1038/s41586-020-2649-2`、`doi:10.1038/s41586-020-2649-2`、`https://doi.org/10.1038/s41586-020-2649-2`，或 `2401.04085`、`arXiv:2401.04085`、`https://arxiv.org/abs/2401.04085`。此时走单篇精确查询并忽略 `time_range` / `page`，仍遵守已启用来源与指定 `engines`；拿到结果中的 `pdf_url` 后，可将该 URL 作为 `pdf_parser` 工具的 `path` 参数解析全文，不要再用标题做关键词搜索。
 
 结果按学术评分增强排序（默认开启）：RRF 融合排名 + 引用数 / 期刊权威 / PDF 全文 / 新鲜度信号，低分论文自动过滤（Top-1 + 每引擎保底）。配置项：`academic.enhance`（默认 true）、`academic.threshold`（默认 0.02）。
 

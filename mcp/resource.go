@@ -75,28 +75,37 @@ func renderCapabilities(conf config.Config) string {
 	fmt.Fprintf(&b, "- 搜索模式: %s\n", conf.GetMode())
 
 	b.WriteString("\n## 工具（已注册）\n\n")
+	registered := make(map[string]bool)
+	for _, state := range ToolSnapshot() {
+		registered[state.Name] = state.Registered
+	}
 	anyTool := false
-	if conf.Bing.Enabled {
+	if registered["smartsearch"] {
 		anyTool = true
 		b.WriteString("- `smartsearch`：通用联网检索，多引擎并发编排 + 失败清单透出；支持 intent 摘要与 fetch_top_n 正文补抓\n")
 	}
-	if conf.Academic.Enabled && academicSearcher != nil {
+	if registered["academicsearch"] && academicSearcher != nil {
 		anyTool = true
 		fmt.Fprintf(&b, "- `academicsearch`：学术检索（引擎: %s）\n", strings.Join(academicSearcher.AcademicEngines(), " / "))
 	}
-	if conf.CleanFetch.Enabled {
+	if registered["cleanfetch"] {
 		anyTool = true
 		b.WriteString("- `cleanfetch`：网页干净 Markdown 抓取（SSRF 防护，支持批量）\n")
 	}
-	if conf.PDFParser.Enabled {
+	if registered["pdf_parser"] {
 		anyTool = true
 		b.WriteString("- `pdf_parser`：PDF 解析（本地库 + MinerU 增强回退）\n")
+	}
+	if registered["file_search"] {
+		anyTool = true
+		b.WriteString("- `file_search`：Everything 本地文件索引检索（只读）\n")
 	}
 	if !anyTool {
 		b.WriteString("- （无已注册工具）\n")
 	}
 
-	b.WriteString("\n## 网页引擎（零 Key，兜底 Bing 恒可用）\n\n")
+	b.WriteString("\n## 网页引擎（配置开关；不代表联网可用性）\n\n")
+	fmt.Fprintf(&b, "- bing: %v\n", conf.Bing.Enabled)
 	fmt.Fprintf(&b, "- baidu_web: %v（默认关闭，实测被 CAPTCHA 识别）\n", conf.Baidu.WebEnabled)
 	fmt.Fprintf(&b, "- so360: %v（国内直连可用）\n", conf.So360.Enabled)
 	fmt.Fprintf(&b, "- wikipedia: %v（需代理）\n", conf.Wikipedia.Enabled)

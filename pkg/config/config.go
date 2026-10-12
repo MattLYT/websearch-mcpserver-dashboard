@@ -41,11 +41,11 @@ type Config struct {
 	Host               string            `mapstructure:"host"`                 // 监听地址，默认 127.0.0.1；"0.0.0.0" 才对所有网卡开放
 	AuthToken          string            `mapstructure:"auth_token"`           // 业务端点 Bearer token，空 = 不鉴权；环境变量 WEBSEARCH_TOKEN
 	MCPStateless       bool              `mapstructure:"mcp_stateless"`        // MCP 无状态 HTTP 模式：每个 POST 独立处理，无需 initialize 握手与 Mcp-Session-Id 会话（对齐 MCP 2026-07-28 stateless-first 方向），便于水平扩展；代价是 GET SSE 长连与 sampling/elicitation 等服务端主动交互不可用（本项目未使用，见 mcp/server.go RegisterRouter）
-MCPResources       *bool             `mapstructure:"mcp_resources"`        // MCP Resource 观测开关（search://capabilities 与 search://health）：只读、结构上不含密钥、不占工具槽位；省略 = 启用，显式 false 关闭
+	MCPResources       *bool             `mapstructure:"mcp_resources"`        // MCP Resource 观测开关（search://capabilities 与 search://health）：只读、结构上不含密钥、不占工具槽位；省略 = 启用，显式 false 关闭
 	UpstreamTimeoutSec int               `mapstructure:"upstream_timeout_sec"` // API 上游超时（秒），默认 30；显式 0 = 不设超时（有挂起风险）
 	LogLevel           string            `mapstructure:"log_level"`
 	Mode               string            `mapstructure:"mode"`
-	Network            string            `mapstructure:"network"`         // 全局网络区域: china / international
+	Network            string            `mapstructure:"network"`         // 学术搜索适配区域: china / international，不是网页来源或豆包过滤
 	BlackListHost      []string          `mapstructure:"black_list_host"` // 全局屏蔽站点
 	RateLimit          RateLimitConfig   `mapstructure:"rate_limit"`      // 全局限流配置
 	Baidu              BaiduConfig       `mapstructure:"baidu"`
@@ -76,6 +76,7 @@ MCPResources       *bool             `mapstructure:"mcp_resources"`        // MC
 // ── 各搜索引擎配置 ──
 
 type BaiduConfig struct {
+	Enabled *bool `mapstructure:"enabled"` // API source switch; nil preserves existing behavior.
 	// 反爬现状（2026-09-03 实测，勿照抄上游）：
 	// SearXNG baidu.py 用 www.baidu.com/s?tn=json JSON 接口绕开 HTML 反爬，配合
 	// 302→wappass 验证码探测与 antiFlag 检查，图片分类另做 image.baidu.com cookie
@@ -113,8 +114,9 @@ func (c BaiduConfig) EffectiveSKList() []string {
 }
 
 type TavilyConfig struct {
-	APIKey string   `mapstructure:"api_key"` // Tavily Search API Key（单 key 时自动作为 sk_list）
-	SKList []string `mapstructure:"sk_list"` // 多 Key 轮转列表（优先级高于 api_key）
+	Enabled *bool    `mapstructure:"enabled"`
+	APIKey  string   `mapstructure:"api_key"` // Tavily Search API Key（单 key 时自动作为 sk_list）
+	SKList  []string `mapstructure:"sk_list"` // 多 Key 轮转列表（优先级高于 api_key）
 	// IncludeRawContent 是否请求 API 返回页面原文（raw_content），默认 true；
 	// 显式 false 退回摘要片段，减小响应体与配额消耗
 	IncludeRawContent *bool `mapstructure:"include_raw_content"`
@@ -132,6 +134,7 @@ func (c TavilyConfig) EffectiveSKList() []string {
 }
 
 type ExaConfig struct {
+	Enabled      *bool    `mapstructure:"enabled"`
 	APIKey       string   `mapstructure:"api_key"`       // Exa Search API Key（单 key 时自动作为 sk_list）
 	SKList       []string `mapstructure:"sk_list"`       // 多 Key 轮转列表（优先级高于 api_key）
 	NumResults   int      `mapstructure:"num_results"`   // 单次搜索结果数量（默认 5）
@@ -154,6 +157,7 @@ func (c ExaConfig) EffectiveSKList() []string {
 }
 
 type AnysearchConfig struct {
+	Enabled    *bool    `mapstructure:"enabled"`
 	APIKey     string   `mapstructure:"api_key"`     // AnySearch API Key（单 key 时自动作为 sk_list；https://www.anysearch.com/docs）
 	SKList     []string `mapstructure:"sk_list"`     // 多 Key 轮询列表（优先级高于 api_key）
 	NumResults int      `mapstructure:"num_results"` // 单次搜索结果数量（默认 10）
@@ -174,6 +178,7 @@ func (c AnysearchConfig) EffectiveSKList() []string {
 // API Key 来自「联网搜索 API」控制台，与 Ark 豆包大模型 Key 不通用。
 // 免费档每月默认 500 积分；显式加入 apipool.engines 时 weighted 默认权重 500。
 type DoubaoConfig struct {
+	Enabled             *bool    `mapstructure:"enabled"`
 	APIKey              string   `mapstructure:"api_key"`                 // 搜索 API Key；环境变量 DOUBAO_SEARCH_API_KEY
 	SKList              []string `mapstructure:"sk_list"`                 // 多 Key 轮询列表（优先级高于 api_key）
 	Version             string   `mapstructure:"version"`                 // global（默认）/ custom
@@ -281,7 +286,7 @@ type RateLimitConfig struct {
 
 type AcademicConfig struct {
 	Enabled      bool    `mapstructure:"enabled"`       // 学术引擎总开关（默认 true）
-	BingFallback bool    `mapstructure:"bing_fallback"` // 学术搜索时用 Bing 兜底（默认 true）
+	BingFallback bool    `mapstructure:"bing_fallback"` // 兼容保留键（默认 true）；当前学术链路不使用 Bing
 	Enhance      bool    `mapstructure:"enhance"`       // 学术搜索评分增强（RRF 融合 + 引用数/期刊权威/PDF/新鲜度信号），默认 true
 	Threshold    float64 `mapstructure:"threshold"`     // 学术结果阀值（比通用搜索更宽松），默认 0.02
 
@@ -311,9 +316,9 @@ type EverythingConfig struct {
 	URL        string   `mapstructure:"url"`         // Everything HTTP Server 地址（默认 http://127.0.0.1:4180）
 	Username   string   `mapstructure:"username"`    // Basic 鉴权用户名（服务端启用了鉴权时必填）
 	Password   string   `mapstructure:"password"`    // Basic 鉴权密码
-	Roots      []string `mapstructure:"roots"`        // 目录白名单（绝对路径）：非空时检索强制限定在白名单内，空 = 不限
-	MaxResults int      `mapstructure:"max_results"`  // 单页返回上限（默认 10，硬上限 20）；更多结果用 file_search 的 page 翻页
-	TimeoutSec int      `mapstructure:"timeout_sec"`  // 单次请求超时（秒），默认 5
+	Roots      []string `mapstructure:"roots"`       // 目录白名单（绝对路径）：非空时检索强制限定在白名单内，空 = 不限
+	MaxResults int      `mapstructure:"max_results"` // 单页返回上限（默认 10，硬上限 20）；更多结果用 file_search 的 page 翻页
+	TimeoutSec int      `mapstructure:"timeout_sec"` // 单次请求超时（秒），默认 5
 	// NoiseDirs 噪声目录：命中片段的结果排序减半（不剔除）。nil = 内置默认
 	// （node_modules/.git/target 等）；显式空数组 = 关闭降权。
 	NoiseDirs []string `mapstructure:"noise_dirs"`
@@ -468,8 +473,8 @@ func (c PDFParserConfig) GetMinerUPageBudget() int {
 // 显式设置 enabled: false 可关闭代理；显式设置 enabled: true 使用 endpoint。
 
 type ProxyConfig struct {
-	Enabled      bool   `mapstructure:"enabled"`  // 显式启用代理（默认 false，未设置时自动检测）
-	Endpoint     string `mapstructure:"endpoint"` // 代理地址（默认 http://127.0.0.1:7897")
+	Enabled  bool   `mapstructure:"enabled"`  // 显式启用代理（默认 false，未设置时自动检测）
+	Endpoint string `mapstructure:"endpoint"` // 代理地址（默认 http://127.0.0.1:7897")
 	// APIProviders 控制 API 供应商上游请求（baidu/tavily/exa/anysearch/doubao/LLM 等）
 	// 是否走代理。默认 false = 强制直连：显式置空 transport 的 Proxy，不吃
 	// HTTP(S)_PROXY 等环境变量，避免本机代理环境静默劫持供应商请求。
@@ -554,17 +559,20 @@ type CacheConfig struct {
 // DashboardConfig controls the local-only observability dashboard. It does not
 // enable active provider probes; all health observations come from real calls.
 type DashboardConfig struct {
-	Enabled       bool             `mapstructure:"enabled"`
-	StoragePath   string           `mapstructure:"storage_path"`
-	RetentionDays int              `mapstructure:"retention_days"`
-	SecretsPath   string           `mapstructure:"secrets_path"`
+	Enabled       bool   `mapstructure:"enabled"`
+	StoragePath   string `mapstructure:"storage_path"`
+	RetentionDays int    `mapstructure:"retention_days"`
+	SecretsPath   string `mapstructure:"secrets_path"`
 	// ConfigPath 指定控制中心独立配置文件（dashboard.yaml）。空 = 主配置
 	// 同目录的 dashboard.yaml；也可用环境变量 WEBSEARCH_DASHBOARD_CONFIG 覆盖。
 	// 独立文件按字段覆盖主配置的 dashboard: 块，删除该文件即完整回退。
-	ConfigPath    string           `mapstructure:"config_path"`
+	ConfigPath string `mapstructure:"config_path"`
 	// AllowedNetworks 显式放行可「查看」控制台的来源网段（CIDR，如 192.168.1.0/24）。
-	// 空列表 = 仅本机 loopback 可访问；放行仅限只读，写操作永远仅限 loopback。
+	// 空列表 = 仅本机 loopback 可访问；不授予写权限。
 	AllowedNetworks []string `mapstructure:"allowed_networks"`
+	// WriteAllowedNetworks grants password-protected writes from explicit IPs/CIDRs.
+	// Empty lists or invalid entries fail closed to loopback-only writes.
+	WriteAllowedNetworks []string `mapstructure:"write_allowed_networks"`
 	// Shortcut 控制快捷方式落位行为（Windows）：desktop（默认，桌面）/
 	// start（开始菜单，可在开始屏幕搜索并手动固定）/ both / off（不创建）。
 	// 仅 start/open 安装路径生效；uninstall 始终清理全部已知位置。
@@ -930,10 +938,10 @@ func (c Config) CacheEnabled() bool {
 // ResourcesEnabled MCP Resource 观测是否启用：只读、无密钥、按需读取，
 // 未显式配置时默认开启；客户端不需要观测时显式 mcp_resources: false 关闭。
 func (c Config) ResourcesEnabled() bool {
-if c.MCPResources != nil {
-return *c.MCPResources
-}
-return true
+	if c.MCPResources != nil {
+		return *c.MCPResources
+	}
+	return true
 }
 
 // GetCacheStoragePath 返回缓存 SQLite 数据库路径。
@@ -1356,8 +1364,17 @@ func (c Config) GetDashboardSecretsPath() string {
 // ParseAllowedNetworks 解析 allowed_networks 中的 CIDR 网段；裸 IP 视为单地址
 // 网段。任一条目非法即返回错误，调用方必须 fail-closed（回退为仅 loopback）。
 func (d DashboardConfig) ParseAllowedNetworks() ([]*net.IPNet, error) {
-	out := make([]*net.IPNet, 0, len(d.AllowedNetworks))
-	for _, raw := range d.AllowedNetworks {
+	return parseAllowedNetworks(d.AllowedNetworks)
+}
+
+// ParseWriteAllowedNetworks uses the same fail-closed IP/CIDR rules as reads.
+func (d DashboardConfig) ParseWriteAllowedNetworks() ([]*net.IPNet, error) {
+	return parseAllowedNetworks(d.WriteAllowedNetworks)
+}
+
+func parseAllowedNetworks(entries []string) ([]*net.IPNet, error) {
+	out := make([]*net.IPNet, 0, len(entries))
+	for _, raw := range entries {
 		s := strings.TrimSpace(raw)
 		if s == "" {
 			continue
@@ -1455,6 +1472,9 @@ func applyDashboardOverlay(conf *Config) {
 	}
 	if len(dash.AllowedNetworks) > 0 {
 		conf.Dashboard.AllowedNetworks = dash.AllowedNetworks
+	}
+	if v.IsSet("dashboard.write_allowed_networks") {
+		conf.Dashboard.WriteAllowedNetworks = dash.WriteAllowedNetworks
 	}
 	if dash.Shortcut != "" {
 		conf.Dashboard.Shortcut = dash.Shortcut

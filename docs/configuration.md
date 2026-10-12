@@ -7,6 +7,7 @@
 - [配置文件路径](#配置文件路径)
 - [stdio CLI 配置说明](#stdio-cli-配置说明)
 - [完整配置](#完整配置)
+- [搜索源与模式路由](#搜索源与模式路由)
 - [环境变量覆盖](#环境变量覆盖)
 - [默认值速查](#默认值速查)
 
@@ -74,7 +75,7 @@ mcp_stateless: false        # MCP 无状态 HTTP 模式（默认 false = 会话�
                             # GET SSE 长连返回 405。本服务工具均为请求-响应式，无状态模式下功能无损
 log_level: info             # debug / info / warn / error
 mode: engine                # baidu / apipool / tavily / exa / anysearch / doubao / hybrid / engine
-network: china              # china（跳过海外引擎） / international
+network: china              # 学术适配区域 china / international；不切换网页来源或豆包站点范围
 
 # 全局限流（对所有搜索引擎统一生效）
 rate_limit:
@@ -88,6 +89,7 @@ black_list_host:
 
 # 百度千帆（mode=baidu/apipool/hybrid 时需要）
 baidu:
+  enabled: true             # 千帆 API 源开关；false 保留 Key，不影响 web_enabled
   web_enabled: false        # 百度网页搜索引擎（tn=json 直抓）默认禁用：实测被百度 CAPTCHA 识别，
                             # 出口 IP 干净的部署环境可显式开启
   api_key: ""               # 环境变量: BAIDU_SK（sk_list 为空时自动作为单元素列表）
@@ -101,12 +103,14 @@ baidu:
 
 # Tavily（mode=tavily/apipool/hybrid 时需要）
 tavily:
+  enabled: true             # API 源开关；false 保留 api_key/sk_list
   api_key: ""               # 环境变量: TAVILY_SK（sk_list 为空时自动作为单元素列表）
   sk_list: []               # 多 Key 轮询列表（优先级高于 api_key）
 
 # Exa（mode=exa/apipool/hybrid 时需要）
 # 获取地址: https://dashboard.exa.ai/api-keys
 exa:
+  enabled: true             # API 源开关；false 保留 api_key/sk_list
   api_key: ""               # 环境变量: EXA_API_KEY（sk_list 为空时自动作为单元素列表）
   sk_list: []               # 多 Key 轮询列表（优先级高于 api_key）
   num_results: 5            # 单次搜索结果数量（默认 5）
@@ -115,6 +119,7 @@ exa:
 # AnySearch（mode=anysearch/apipool/hybrid 时需要；也可零 Key 使用匿名档）
 # 获取地址: https://www.anysearch.com/console/api-keys
 anysearch:
+  enabled: true             # API 源开关；false 保留 api_key/sk_list，匿名档也禁用
   api_key: ""               # 环境变量: ANYSEARCH_API_KEY（sk_list 为空时自动作为单元素列表）
   sk_list: []               # 多 Key 轮询列表（优先级高于 api_key；重复 Key 自动去重）
   num_results: 10           # 单次搜索结果数量（默认 10）
@@ -126,6 +131,7 @@ anysearch:
 # API Key 获取: https://console.volcengine.com/search-infinity/api-key
 # 免费档每月默认 500 积分；apipool.weights.doubao 默认 500
 doubao:
+  enabled: true             # API 源开关；false 保留 api_key/sk_list
   api_key: ""               # 环境变量: DOUBAO_SEARCH_API_KEY（兼容 ASK_ECHO_SEARCH_INFINITY_API_KEY）
   sk_list: []               # 多 Key 轮询列表（优先级高于 api_key；重复 Key 自动去重）
   version: global           # global（默认）/ custom
@@ -139,6 +145,7 @@ doubao:
   need_content: false       # Custom: 是否请求网页正文
 
 # Bing 引擎（兜底 + engine 模式主力，无需 Key）
+# 仅控制 Bing 源，不是 smartsearch 工具总开关
 bing:
   enabled: true             # 总开关
   blocked: []               # Bing 专用屏蔽（与 black_list_host 合并）
@@ -180,7 +187,7 @@ google:
 # 学术引擎（无需 Key）
 academic:
   enabled: true             # 总开关，开启后注册 academicsearch 工具
-  bing_fallback: true       # 学术搜索用 Bing 兜底
+  bing_fallback: true       # 兼容保留键；当前 academicsearch 不调用 Bing
   enhance: true             # 学术评分增强（RRF 融合 + 引用数/期刊权威/PDF/新鲜度信号），默认 true
   threshold: 0.02           # 学术结果阀值（比通用搜索更宽松），默认 0.02
   # Semantic Scholar 可选 API key（匿名限流严格，带 key 连续 429 自动降级匿名）
@@ -237,6 +244,7 @@ cache:
 #   admin_password: ""       # 写操作口令（明文）；与 admin_password_sha256 二选一
 #   admin_password_sha256: "" # 写操作口令（SHA-256 十六进制）
 #   allowed_networks: []     # 只读放行网段（CIDR/裸 IP）；空 = 仅本机 loopback
+#   write_allowed_networks: [] # 独立写白名单；空/非法 = 仅 loopback，仍需管理员口令
 #   quotas:
 #     reset: monthly         # monthly / weekly / daily / none（仅手动重置）
 #     reset_day: 1           # monthly 的每月重置日（1-28）
@@ -376,6 +384,33 @@ log:
 
 ---
 
+## 搜索源与模式路由
+
+`baidu.enabled`、`tavily.enabled`、`exa.enabled`、`anysearch.enabled`、`doubao.enabled` 是各 API 的独立开关，省略时均视为 `true`，保持旧配置行为。关闭只停止参与路由，不删除 `api_key`、`sk_list` 或私密覆盖中的 Key。AnySearch 的有 Key 和无 Key 匿名档共用开关；其余四个 API 仍须有可用 Key。`baidu.web_enabled` 单独控制百度网页源，不受 `baidu.enabled` 影响。
+
+开关决定源是否允许使用，`mode` 决定从允许源中如何选用：
+
+| 模式 | 路由 |
+|------|------|
+| `engine` | 仅组合已启用的网页源，不因 API 开关开启而添加 API |
+| `baidu` | 已启用且有 Key 的千帆 API，可回退至独立启用的百度网页源；无可用主源时使用已启用 Bing |
+| `tavily` / `exa` / `doubao` | 对应已启用且有 Key 的 API；不可用时使用已启用 Bing |
+| `anysearch` | 已启用的 AnySearch，有 Key 用 Key 池，否则匿名；关闭后仅可回退至已启用 Bing |
+| `apipool` | 按 `apipool.engines` 顺序过滤禁用/不可用 API，再执行轮转与失败切换；百度网页源单独启用后作为末尾兜底；全部为空时可使用已启用 Bing |
+| `hybrid` | 并发组合已启用、可用的 API 与网页源；禁用源不参与，包括匿名 AnySearch |
+
+`bing.enabled` 只控制 Bing 源及其回退，不是 `smartsearch` 的工具总开关。关闭 Bing 后，当前模式仍有其他可用路由时 `smartsearch` 继续可用；模式没有任何可用主源或回退时才不注册工具。
+
+控制台提供 `hybrid`、`engine`、`apipool` 和单供应商四个入口；单供应商下选择原有五个供应商，保存的八种 `mode` 值不变。模式与所选供应商提供悬停、聚焦或点击展开的说明。`apipool` 的实际首选还由 `apipool.strategy` 与权重决定，不承诺总按列表顺序调用。供应商优先模式仍可能使用已启用的 Bing 回退，不代表完全独占该供应商。
+
+`network` 当前只传入独立学术检索适配器，国内区域不注册 Semantic Scholar / Google Scholar；国际区域仍需各源开关和代理条件。它不是全局“国内/国外网页”选择，也不自动开代理。控制台将其放在高级学术连接设置。豆包站点范围独立使用 `doubao.icp_host_only`：Global 版 `true` 仅搜索国内 ICP 备案站点，`false` 不限制，并非“仅国外”；Custom 不消费此字段。版本与过滤位于供应商启动参数，保存并重启才生效，并失效旧搜索缓存。[官方 Global API](https://docs.volcengine.com/docs/Networkedsearch/doubao-search-global-edition?lang=zh)
+
+学术搜索先从已注册源中按请求 `engines` 过滤。DOI 精确查询只使用该集合中的 Crossref/OpenAlex；arXiv ID 精确查询只使用其中的 arXiv。没有对应精确源时，仅在所选可用源执行普通检索，不跨源补查；指定源全部不可用时返回错误。关闭学术源同样约束精确查询。
+
+`academic.bing_fallback` 是兼容保留键，当前学术链路不消费它，也不调用 Bing；学术源全部不可用时不会借助网页源注册 `academicsearch`。
+
+---
+
 ## 控制中心安全与品牌（dashboard）
 
 > 本文只覆盖安全要点；**完整配置参考**（含 `shortcut` 快捷方式落位、`brand.footer` 关于块、全部键的默认值）见 [dashboard.md](dashboard.md)。
@@ -385,11 +420,21 @@ log:
 | 场景 | 规则 |
 |------|------|
 | 读取（页面 + 只读 API） | 默认仅本机 loopback；`dashboard.allowed_networks` 显式放行的网段只读 |
-| 写操作（设置 / 密钥 / 重启 / 清缓存 / 额度重置与修正） | **仅限本机 loopback + `X-Admin-Password` 头**，二者缺一不可 |
+| 写操作（设置 / 密钥 / 重启 / 清缓存 / 额度重置与修正） | **默认仅 loopback**；显式 `dashboard.write_allowed_networks` 可放行指定来源；所有来源仍须 `X-Admin-Password` 头，已配置用户名时还须匹配 `X-Admin-User` |
 | 管理员口令 | 只能配置在 `dashboard.yaml`（`admin_password` 明文或 `admin_password_sha256` 十六进制），**WebUI 无法读取或修改**；未配置 = 所有写端点禁用（安全的默认） |
 
-- 放行网段写法：`allowed_networks: ["192.168.1.0/24", "10.0.0.3"]`（CIDR 或裸 IP）；任一条目非法时**整体回退为仅本机**（fail-closed）。
-- Docker 部署发布到本机回环时，容器来源是 bridge 网关（如 `172.17.0.1`），需把对应网段加入 `allowed_networks` 才能从宿主机浏览器打开控制台。
+- 两份白名单均接受 CIDR 或裸 IP；任一条目非法时，该白名单**整体回退为仅 loopback**（fail-closed）。读白名单 `allowed_networks` 不授予写权限，写白名单 `write_allowed_networks` 不替代页面/API 的读取访问门槛，也不替代管理员口令。
+- Docker 固定发布到宿主回环，如 `-p 127.0.0.1:8338:8338`。宿主浏览器请求在容器内可能表现为 bridge 网关；须以服务端实际看到的请求来源 IP 为准，`docker inspect` 的网关地址只供核对，不能单独作为已实测的访问来源。需要宿主写入时，只把这个实测地址的 `/32` 同时加入读/写白名单，不放行整个 bridge 子网。
+
+```yaml
+# dashboard.yaml；地址仅示意，必须替换成服务端实测的宿主请求来源
+dashboard:
+  allowed_networks: ["172.17.0.1/32"]
+  write_allowed_networks: ["172.17.0.1/32"]
+  admin_password: "replace-with-a-private-admin-password"
+```
+
+- 未确认请求来源前保持 `write_allowed_networks: []`；不要照抄示意地址。独立 overlay 显式配置 `[]` 可清空主配置中的写白名单。
 - 远程链路为明文 HTTP，只建议放行受信内网；不受信网络请走 SSH 隧道或带 TLS 的反向代理。
 - 口令校验为常量时间比较；推荐配置 `admin_password_sha256`（`sha256sum` 明文的小写十六进制）避免明文落盘。
 
@@ -397,7 +442,7 @@ log:
 
 - 本地用量 = 遥测中的真实成功调用（按供应商、按周期计数），不主动探测供应商；Tavily 官方用量端点可用时优先展示官方数字。
 - 上限 `quotas.limits` 未配置的供应商默认 **1000 次/周期**；周期 `reset` 支持 monthly / weekly / daily / none（仅手动）。
-- WebUI「设置 → 额度管理」可手动重置（从现在重新累计）或把展示用量修正为指定值（真实记录不动），两者都需管理员口令且仅限本机。
+- WebUI「设置 → 额度管理」可手动重置（从现在重新累计）或把展示用量修正为指定值（真实记录不动），两者都遵守同一来源白名单与管理员口令规则。
 
 ### 品牌与主题
 
@@ -448,11 +493,14 @@ log:
 | 字段 | 默认值 | 说明 |
 |------|--------|------|
 | `port` | 8338 | stop/kill/status 无配置时也用此端口 |
-| `mode` | engine | 无 Key 时自动回退 engine；`apipool` 为 API Key 池轮转模式，支持 round-robin / priority / weighted 策略 |
+| `mode` | engine | 按模式组合允许源；不可用时仅可使用已启用回退，AnySearch 无 Key 可走匿名档 |
+| `baidu.enabled` / `tavily.enabled` / `exa.enabled` / `anysearch.enabled` / `doubao.enabled` | true（省略） | API 源独立开关；false 保留 Key，约束所有模式；AnySearch 匿名档同受约束 |
+| `dashboard.write_allowed_networks` | [] | 独立写白名单；默认仅 loopback；非法条目整体 fail-closed，仍需管理员口令 |
 | `mcp_resources` | true | MCP Resource 观测开关：`search://capabilities` 与 `search://health`，只读、不含密钥、不占工具槽位 |
 | `mcp_stateless` | false | MCP 无状态 HTTP 模式：每个 POST 独立处理、免会话握手，便于水平扩展；GET SSE 返回 405 |
 | `baidu.web_enabled` | false | 百度网页搜索引擎默认禁用（实测被 CAPTCHA 识别），出口 IP 干净时可显式开启 |
-| `network` | china | |
+| `network` | china | 学术检索适配区域；不是网页来源、代理开关或豆包站点过滤 |
+| `doubao.icp_host_only` | false | 仅 Global：true 限国内 ICP 备案站点，false 不限制；Custom 不使用 |
 | `rate_limit.per_sec` | 3 | 全局限流 |
 | `rate_limit.per_min` | 60 | 全局限流 |
 | `apipool.strategy` | round-robin | `round-robin` 跨请求轮转供应商 / `priority` 固定优先级顺序 / `weighted` 加权随机 |
@@ -466,11 +514,11 @@ log:
 | `exa.include_text` | true | Exa 请求返回页面正文（contents.text） |
 | `exa.text_max_characters` | 3000 | Exa 正文最大字符数 |
 | `baidu.enable_ai_search` | true | true=智能搜索 chat/completions，false=网页搜索 web_search；不传 model 不产生 LLM 费用 |
-| `bing.enabled` | true | |
+| `bing.enabled` | true | 仅控制 Bing 源与回退，不是 smartsearch 工具总开关 |
 | `duckduckgo.enabled` | true | 需代理，代理可用时自动参与 |
 | `google.enabled` | false | 被反爬拦截，需显式启用 |
 | `academic.enabled` | true | |
-| `academic.bing_fallback` | true | |
+| `academic.bing_fallback` | true | 兼容保留键；当前 academicsearch 不使用 Bing |
 | `academic.enhance` | true | 学术评分增强 |
 | `academic.threshold` | 0.02 | 学术结果阀值 |
 | `academic.disable_semantic_scholar` | true | 默认禁用，开启后自动走代理 |

@@ -15,7 +15,7 @@ const ERROR_KINDS = {
 const SYSTEM = { healthy: '运行正常', degraded: '部分降级', down: '部分异常', waiting: '等待真实调用' };
 const DOT = { healthy: 'healthy', degraded: 'degraded', down: 'down', unknown: 'unknown' };
 const DISPLAY = {
-  smartsearch: '智能搜索', academicsearch: '学术检索', cleanfetch: '网页抓取', pdf_parser: 'PDF 解析',
+  smartsearch: '智能搜索', academicsearch: '学术检索', cleanfetch: '网页抓取', pdf_parser: 'PDF 解析', file_search: '本地文件检索',
   anysearch: 'AnySearch', baidu: '百度千帆', tavily: 'Tavily', exa: 'Exa', doubao: '豆包搜索',
   baidu_web: '百度网页', bing: 'Bing', google: 'Google', duckduckgo: 'DuckDuckGo',
   arxiv: 'arXiv', crossref: 'Crossref', openalex: 'OpenAlex', pubmed: 'PubMed', europepmc: 'Europe PMC',
@@ -42,6 +42,7 @@ const state = {
   quotas: null, quotaError: null,
   clients: { rows: null, error: null, tab: '__total__' },
   settings: null, settingsError: null, settingsDirty: false, settingsLoaded: false,
+  draft: {}, draftBefore: {}, draftRevision: '', saving: false, applying: false, applyResult: null, adminPass: '', adminUser: '',
   events: { rows: null, error: null, serverFiltered: true },
   providerEvents: { rows: null, error: null },
   filters: { kind: 'provider', status: '', errorKind: '', tool: '', provider: '', requestId: '', limit: 50 },
@@ -94,9 +95,6 @@ function formatErrorKinds(list) {
     `<span class="kind-chip bad">${esc(errorKindLabel(item.kind))} ×${fmtInt(item.count)}</span>`
   ).join(' ');
 }
-function formatP95(s) {
-  return s && num(s.p95_ms) > 0 ? fmtMS(s.p95_ms) : '<span class="dim">—</span>';
-}
 function dot(status) {
   return `<i class="dot ${DOT[status] || 'unknown'}"></i>`;
 }
@@ -128,16 +126,10 @@ function matchesFilters(e) {
   if (!f.tool && !f.provider && f.kind && e.kind !== f.kind) return false;
   return true;
 }
-function activationOf(s) {
-  if (s.configured === false) return { key: 'not_configured', label: '未配置' };
-  if (s.active === true) return { key: 'active', label: '当前启用' };
-  if (s.active === false) return { key: 'inactive', label: '已配置未使用' };
-  return { key: 'unknown', label: '未知' };
-}
 function healthOf(s) {
-  if (s.active === false || s.configured === false) return { dot: 'unknown', label: '—' };
   if (!s.last_seen_at) return { dot: 'unknown', label: '尚无调用' };
-  return { dot: DOT[s.status] || 'unknown', label: HEALTH[s.status] || '未知' };
+  const status = s.observation_status || s.status;
+  return { dot: DOT[status] || 'unknown', label: HEALTH[status] || '未知' };
 }
 
 /* ---------- transport ---------- */
@@ -206,15 +198,25 @@ async function loadQuotas() {
 
 async function loadSettings() {
   try {
-    const data = await fetchJSON('/__admin/api/settings');
+    const data = await fetchJSON('/__admin/api/settings', { signal: AbortSignal.timeout(5000) });
     if (!data || !data.values) throw new Error('设置响应缺少 values 字段');
     state.settings = data;
     state.settingsError = null;
+    const pending = data.pending_changes || {};
+    if (Object.keys(pending).length && !state.applying && !state.saving && (!state.applyResult || !state.applyResult.failed)) {
+      state.applyResult = {
+        targets: { ...pending }, backup: (data.backups || [])[0]?.name,
+        failed: true, status: '配置已保存，尚未确认生效',
+      };
+    }
   } catch (e) {
     state.settingsError = e.message;
   }
   renderConfig();
-  if (!state.settingsLoaded || !state.settingsDirty) renderSettingsForm();
+  renderSettingsForm();
+  renderSourcePages();
+  renderWriteAccess();
+  renderApplyResult();
 }
 
 async function loadEvents() {
@@ -301,8 +303,8 @@ function renderSystem() {
   } else {
     label.textContent = SYSTEM[sys.status] || '未知';
     d.className = 'dot ' + (sys.status === 'waiting' ? 'unknown' : (DOT[sys.status] || 'unknown'));
-    const summary = `已启用 ${fmtInt(sys.enabled)} 个 · 已观察 ${fmtInt(sys.observed)} 个 · 异常 ${fmtInt(sys.down)} 个` +
-    (num(sys.suspended) > 0 ? ` · 熔断 ${fmtInt(sys.suspended)} 个` : '');
+    const summary = `参与运行 ${fmtInt(sys.enabled)} 个 · 已观察 ${fmtInt(sys.observed)} 个 · 异常 ${fmtInt(sys.down)} 个` +
+    (num(sys.suspended) > 0 ? ` · 观测告警 ${fmtInt(sys.suspended)} 个` : '');
     if (state.overviewError) setNote(note, summary + ' · 数据可能已过期：' + state.overviewError, 'warn');
     else if (sys.status === 'waiting') setNote(note, summary + ' · 尚未观察到近期真实调用', '');
     else setNote(note, summary, '');
@@ -357,6 +359,10 @@ function renderMCPTools() {
     let dotClass;
     if (!tool.enabled) {
       stateLabel = '配置未启用';
+      if (tool.name === 'file_search' && (tool.registration_state || tool.state) === 'unprobed') stateLabel += ' · 尚未探测';
+      dotClass = 'unknown';
+    } else if (['unprobed', 'pending', 'unavailable', 'disabled'].includes(tool.registration_state || tool.state)) {
+      stateLabel = ({ unprobed: '尚未探测', pending: '等待注册', unavailable: '不可用', disabled: '未注册' })[tool.registration_state || tool.state];
       dotClass = 'unknown';
     } else if (health && health.last_seen_at) {
       stateLabel = HEALTH[health.status] || '未知';
@@ -368,10 +374,12 @@ function renderMCPTools() {
     const stats = health && health.today
       ? `<small>${fmtInt(health.today.requests)} 次 · ${fmtInt(health.today.successes)} 成功 · ${fmtInt(health.today.failures)} 失败</small>`
       : '<small>尚未产生工具层事件</small>';
+    const pdf = tool.pdf ? `<small class="pdf-params">默认页数 ${esc(tool.pdf.max_pages)} · 单任务页限 ${esc(tool.pdf.mineru_page_limit)} · 批大小 ${esc(tool.pdf.mineru_page_batch_size)} · 调用预算 ${esc(tool.pdf.mineru_page_budget)} · OCR ${tool.pdf.ocr_enabled ? '开' : '关'}${tool.pdf.page_progress === 'not_collected' ? ' · 页进度未采集' : ''}</small>` : '';
+    const file = tool.file ? `<small class="pdf-params">白名单根目录 ${esc(tool.file.allowed_root_count)} · ${tool.file.whitelist_enforced ? '白名单限制' : '目录未限制'}${tool.file.path_metadata_only ? ' · 仅路径/元数据' : ''}</small>` : '';
     return `<div class="tool-row"><span class="tool-head">${dot(dotClass)}` +
       `<b>${esc(tool.label || displayName(tool.name))}</b><small class="mono">${esc(tool.name)}</small></span>` +
       `<span class="tool-state">${esc(stateLabel)}</span>` +
-      `<p class="tool-stats">${stats}</p></div>`;
+      `<p class="tool-stats">${stats}${pdf}${file}</p></div>`;
   }).join('');
 }
 
@@ -398,16 +406,6 @@ function tavilyItem() {
   return state.quotas.find(q => q && q.provider === 'tavily') || null;
 }
 
-function quotaCell(s) {
-  if (!s || s.quota_queryable !== true) return '<span class="dim">不可查询</span>';
-  const q = tavilyItem();
-  if (!q) return state.quotaError ? '<span class="dim">查询失败</span>' : '<span class="dim">尚未返回</span>';
-  if (q.status === 'available') return `${esc(fmtInt(q.remaining))} / ${esc(fmtInt(q.limit))} ${esc(q.unit || '')}`.trim();
-  if (q.status === 'not_configured') return '未配置';
-  if (q.status === 'query_failed') return '<span class="bad-text">查询失败</span>';
-  return '未知';
-}
-
 function healthStrip(s) {
   const outcomes = Array.isArray(s.recent_outcomes) ? s.recent_outcomes.slice(-20) : [];
   const cells = Array(Math.max(0, 20 - outcomes.length)).fill(null).concat(outcomes);
@@ -417,35 +415,22 @@ function healthStrip(s) {
 }
 
 function sourceRowHtml(s, detailed) {
-  const act = activationOf(s);
   const health = healthOf(s);
   const today = s.today && s.today.day ? s.today : null;
   const name = s.name || displayName(s.id);
   const id = s.id || '';
+  const successRate = today && num(today.requests) > 0 ? today.successes / today.requests : null;
+  const avg = today && num(today.requests) > 0 ? fmtMS(Math.round(today.duration_ms / today.requests)) : '<span class="dim">—</span>';
   const cells = [
-    `<td class="src-name"><b>${esc(name)}</b>${id ? `<small class="dim">${esc(id)}</small>` : ''}</td>`,
-    `<td><span class="tag ${esc(act.key)}">${esc(act.label)}</span></td>`,
-    `<td class="nowrap">${s.active === false || s.configured === false ? '<span class="dim">—</span>' : dot(health.dot) + ' ' + esc(health.label) + suspendBadge(s)}</td>`,
+    `<td class="src-name"><b>${esc(name)}</b>${detailed && id === 'doubao' ? doubaoVersionControl() : ''}</td>`,
+    `<td>${sourceControl(s)}</td>`,
+    `<td><span class="nowrap" title="最近观测：${esc(fmtAt(s.last_seen_at))}">${dot(health.dot)} ${esc(health.label)}</span>${suspendBadge(s)}</td>`,
     `<td>${healthStrip(s)}</td>`,
     `<td class="num">${today ? fmtInt(today.requests) : '<span class="dim">—</span>'}</td>`,
+    `<td class="num">${successRate === null ? '<span class="dim">—</span>' : esc(Math.round(successRate * 100) + '%')}</td>`,
+    `<td class="num">${avg}</td>`,
+    `<td class="wrap-any">${s.last_error ? '<span class="bad-text">' + esc(s.last_error) + '</span>' : '<span class="dim">—</span>'}</td>`,
   ];
-  if (detailed) {
-    cells.push(`<td class="wrap-any">${formatErrorKinds(s.error_kinds)}</td>`);
-  }
-  if (detailed) {
-    cells.push(`<td class="num">${today ? fmtInt(today.successes) + ' / ' + fmtInt(today.failures) : '<span class="dim">—</span>'}</td>`);
-  }
-  const successRate = today && num(today.requests) > 0 ? today.successes / today.requests : null;
-  cells.push(`<td class="num">${successRate === null ? '<span class="dim">—</span>' : esc(Math.round(successRate * 100) + '%')}</td>`);
-  const avg = today && num(today.requests) > 0 ? fmtMS(Math.round(today.duration_ms / today.requests)) : '<span class="dim">—</span>';
-  cells.push(`<td class="num">${avg} <small class="dim">/ ${formatP95(s)}</small></td>`);
-  if (detailed) {
-    cells.push(`<td class="nowrap">${esc(fmtAt(s.last_seen_at))}</td>`);
-  }
-  cells.push(`<td>${quotaCell(s)}</td>`);
-  if (detailed) {
-    cells.push(`<td class="wrap-any">${s.last_error ? '<span class="bad-text">' + esc(s.last_error) + '</span>' : '<span class="dim">—</span>'}</td>`);
-  }
   const rowClass = s.active === true && s.suspended === true ? 'row-suspended' : (s.active === true && s.status === 'down' ? 'row-down' : '');
   return `<tr class="${rowClass}">${cells.join('')}</tr>`;
 }
@@ -455,18 +440,41 @@ function suspendBadge(s) {
   const reason = s.suspend_reason ? errorKindLabel(s.suspend_reason) : '连续失败';
   const secs = num(s.suspend_countdown_sec);
   const countdown = secs && secs > 0 ? (secs >= 60 ? Math.ceil(secs / 60) + ' 分' : secs + ' 秒') : '';
-  return `<span class="kind-chip suspend" title="${esc(reason)}${countdown ? '，约 ' + countdown + ' 后恢复' : ''}">熔断${countdown ? ' · ' + esc(countdown) : ''}</span>`;
+  return `<span class="kind-chip suspend" title="历史观测告警：${esc(reason)}${countdown ? '，' + countdown : ''}">观测告警</span>`;
+}
+
+function savedValues() {
+  return state.settings && (state.settings.saved_values || state.settings.values) || {};
+}
+
+function doubaoVersionControl() {
+  const key = 'doubao.version';
+  const locked = state.settings && state.settings.locked_fields && state.settings.locked_fields[key];
+  const value = locked ? state.settings.values[key] : draftValue(key);
+  const reason = settingsFieldReason(key);
+  return `<select class="source-version" data-source-setting="${key}" aria-label="豆包接口版本" title="${esc(reason || '豆包接口版本')}" ${reason ? 'disabled' : ''}><option value="global" ${value === 'global' ? 'selected' : ''}>Global</option><option value="custom" ${value === 'custom' ? 'selected' : ''}>Custom</option></select>`;
+}
+
+function draftValue(key) {
+  return Object.hasOwn(state.draft, key) ? state.draft[key] : savedValues()[key];
+}
+
+function writeAllowed() {
+  return Boolean(!state.settingsError && state.settings && !state.settings.config_error && state.settings.revision && state.settings.write_access && state.settings.write_access.allowed && adminConfigured());
+}
+
+function sourceControl(s) {
+  const key = s.control_path;
+  const inputId = 'source-switch-' + s.id;
+  const value = key && Object.hasOwn(savedValues(), key) ? draftValue(key) : s.inverted ? !s.enabled : s.enabled;
+  const enabled = s.inverted ? value === false : value === true;
+  const locked = key && state.settings && state.settings.locked_fields && state.settings.locked_fields[key];
+  const disabled = !key || !writeAllowed() || locked || state.applying || state.saving;
+  return `<div class="form-check form-switch source-toggle" title="${esc(locked || (!writeAllowed() ? writeReason() : ''))}"><input class="form-check-input" type="checkbox" role="switch" id="${esc(inputId)}" data-source-key="${esc(key || '')}" data-inverted="${s.inverted === true}" aria-label="${esc(s.name || s.id)} 配置启用" ${enabled ? 'checked' : ''} ${disabled ? 'disabled' : ''}></div>`;
 }
 
 function countsLabel(list) {
-  let active = 0, inactive = 0, unconfigured = 0;
-  list.forEach(s => {
-    if (s.configured === false) unconfigured++;
-    else if (s.active === true) active++;
-    else if (s.active === false) inactive++;
-    else unconfigured++;
-  });
-  return `启用 ${active} · 已配置未用 ${inactive} · 未配置 ${unconfigured}`;
+  return `已启用 ${list.filter(s => s.enabled).length} / ${list.length}`;
 }
 
 function renderWebSources() {
@@ -476,7 +484,7 @@ function renderWebSources() {
   if (!body) return;
   const list = webSources();
   if (list === null) {
-    body.innerHTML = emptyRow(6, state.overviewError ? '读取失败' : '正在读取…');
+    body.innerHTML = emptyRow(8, state.overviewError ? '读取失败' : '正在读取…');
     setNote(note, state.overviewError ? '读取失败：' + state.overviewError : '', state.overviewError ? 'bad' : '');
     return;
   }
@@ -491,32 +499,15 @@ function renderWebSources() {
 function renderSourcePages() {
   const webList = webSources();
   const acadList = academicSources();
-
-  const webBody = $('#sources-web-body');
-  if (webList === null) {
-    webBody.innerHTML = emptyRow(11, state.overviewError ? '读取失败' : '正在读取…');
-    setNote($('#sources-web-note'), state.overviewError ? '读取失败：' + state.overviewError : '', state.overviewError ? 'bad' : '');
-    setText('#sources-web-counts', '—');
-  } else {
-    webBody.innerHTML = webList.length ? webList.map(s => sourceRowHtml(s, true)).join('') : emptyRow(11, '暂无 Web 来源');
-    setText('#sources-web-counts', countsLabel(webList));
-    if (state.overviewError) setNote($('#sources-web-note'), '数据可能已过期：' + state.overviewError, 'warn');
-    else if (!Array.isArray(state.overview.sources)) setNote($('#sources-web-note'), '数据可能已过期：接口未返回来源清单（sources）', 'warn');
-    else setNote($('#sources-web-note'), '', '');
-  }
-
-  const acadBody = $('#sources-academic-body');
-  if (acadList === null) {
-    acadBody.innerHTML = emptyRow(11, state.overviewError ? '读取失败' : '正在读取…');
-    setText('#sources-academic-counts', '—');
-    setNote($('#sources-academic-note'), state.overviewError
-      ? '读取失败：' + state.overviewError
-      : '数据可能已过期：概览接口未返回学术来源清单（academic_sources）', state.overviewError ? 'bad' : 'warn');
-  } else {
-    acadBody.innerHTML = acadList.length ? acadList.map(s => sourceRowHtml(s, true)).join('') : emptyRow(11, '暂无学术来源');
-    setText('#sources-academic-counts', countsLabel(acadList));
-    setNote($('#sources-academic-note'), state.overviewError ? '数据可能已过期：' + state.overviewError : '', state.overviewError ? 'warn' : '');
-  }
+  const groups = [['web', webList && webList.filter(s => s.category !== 'api')], ['api', webList && webList.filter(s => s.category === 'api')], ['academic', acadList]];
+  groups.forEach(([id, list]) => {
+    const body = $('#sources-' + id + '-body');
+    if (!body) return;
+    body.innerHTML = list === null ? emptyRow(8, '正在读取…') : list.length ? list.map(s => sourceRowHtml(s, true)).join('') : emptyRow(8, '暂无来源');
+    setText('#sources-' + id + '-counts', list ? countsLabel(list) : '—');
+    setNote($('#sources-' + id + '-note'), state.overviewError ? '数据可能已过期：' + state.overviewError : '', state.overviewError ? 'warn' : '');
+  });
+  renderDraftState();
 }
 
 /* ---------- Tavily quota card ---------- */
@@ -591,10 +582,10 @@ function renderConfig() {
   const yn = value => value === true ? '启用' : value === false ? '关闭' : '未知';
   const rows = [
     ['搜索模式', typeof v.mode === 'string' ? v.mode : ''],
-    ['网络区域', v.network === 'china' ? '中国' : v.network === 'international' ? '国际' : ''],
+    ['学术搜索网络环境', v.network === 'china' ? '国内网络' : v.network === 'international' ? '国际网络' : ''],
     ['上游超时', num(v.upstream_timeout_sec) === null ? '' : String(v.upstream_timeout_sec) + ' 秒'],
     ['缓存', yn(v['cache.enabled'])],
-    ['熔断暂停', [v['dashboard.suspension.ban_time_on_fail'], v['dashboard.suspension.max_ban_time_on_fail']].filter(Boolean).join(' / ')],
+    ['观测告警暂停窗口', [v['dashboard.suspension.ban_time_on_fail'], v['dashboard.suspension.max_ban_time_on_fail']].filter(Boolean).join(' / ')],
     ['已启用来源', state.overview && state.overview.system ? fmtInt(state.overview.system.enabled) + ' 个' : ''],
   ];
   list.innerHTML = rows.filter(r => r[1]).map(r => `<div><dt>${esc(r[0])}</dt><dd>${esc(r[1])}</dd></div>`).join('');
@@ -812,23 +803,37 @@ function renderUsageSourceOptions() {
 
 /* ---------- settings & advanced actions ---------- */
 
+function settingsFieldReason(key) {
+  const locked = state.settings && state.settings.locked_fields && state.settings.locked_fields[key];
+  if (locked) return locked;
+  if (!writeAllowed()) return writeReason();
+  if (state.applying || state.saving) return '正在应用配置';
+  const versionLocked = state.settings.locked_fields && state.settings.locked_fields['doubao.version'];
+  const version = versionLocked ? state.settings.values['doubao.version'] : draftValue('doubao.version');
+  return key === 'doubao.icp_host_only' && version !== 'global' ? '仅适用于 Global；当前值保留' : '';
+}
+
 function renderSettingsForm() {
   const s = state.settings;
   if (!s || !s.values) return;
   $$('[data-key]').forEach(el => {
-    const value = s.values[el.dataset.key];
+    const lockedValue = ['mode', 'doubao.version', 'doubao.icp_host_only'].includes(el.dataset.key) && s.locked_fields && s.locked_fields[el.dataset.key];
+    const value = lockedValue ? s.values[el.dataset.key] : draftValue(el.dataset.key);
     if (el.type === 'checkbox') el.checked = value === true;
+    else if (el.type === 'radio') el.checked = el.value === value;
     else el.value = value === null || value === undefined ? '' : value;
+    const reason = settingsFieldReason(el.dataset.key);
+    el.disabled = Boolean(reason);
+    el.title = reason;
   });
-  $('#settings-dirty').classList.add('hidden');
-  state.settingsDirty = false;
 
+  renderModeControls();
   const flags = s.secrets || {};
   $('#secret-list').innerHTML = Object.keys(flags).map(key => {
     const on = flags[key] === true;
     return `<div class="secret-row">${dot(on ? 'healthy' : 'unknown')}` +
       `<div><b>${esc(SECRETS[key] || key)}</b><small>${on ? '已配置' : '未配置'}</small></div>` +
-      `<button type="button" data-secret="${esc(key)}">${on ? '替换' : '设置'}</button></div>`;
+      `<button type="button" data-secret="${esc(key)}" ${!writeAllowed() || state.applying || state.saving ? 'disabled' : ''}>${on ? '替换' : '设置'}</button></div>`;
   }).join('');
   $$('[data-secret]').forEach(b => { b.onclick = () => editSecret(b.dataset.secret); });
   $$('[data-request]').forEach(el => {
@@ -838,23 +843,117 @@ function renderSettingsForm() {
     };
   });
   state.settingsLoaded = true;
+  renderDraftState();
+}
+
+const PROVIDER_MODES = ['baidu', 'tavily', 'exa', 'anysearch', 'doubao'];
+
+function renderModeControls() {
+  if (!state.settings) return;
+  const locked = state.settings.locked_fields && state.settings.locked_fields.mode;
+  const mode = locked ? state.settings.values.mode : draftValue('mode');
+  const single = PROVIDER_MODES.includes(mode);
+  const select = $('#mode-provider');
+  if (single) select.value = mode;
+  if (!PROVIDER_MODES.includes(select.value)) select.value = 'baidu';
+  const reason = settingsFieldReason('mode');
+  $$('input[name="mode"]').forEach(el => {
+    el.checked = el.value === (single ? 'provider' : mode);
+    el.disabled = Boolean(reason);
+    el.title = reason;
+  });
+  $('#mode-provider-options').classList.toggle('hidden', !single);
+  select.disabled = !single || Boolean(reason);
+  select.title = reason;
+  const info = $('#mode-provider-info');
+  info.setAttribute('aria-label', select.value + ' 模式说明');
+  info.setAttribute('aria-describedby', 'mode-note-' + select.value);
+  PROVIDER_MODES.forEach(id => $('#mode-note-' + id).classList.toggle('hidden', id !== select.value));
+}
+
+function changeSingleProvider(e) {
+  if (e.target.type === 'radio' && !e.target.checked) return;
+  setDraft('mode', $('#mode-provider').value);
+  renderSettingsForm();
 }
 
 function changes() {
-  if (!state.settings) return {};
-  const out = {};
-  $$('[data-key]').forEach(el => {
-    const value = el.type === 'checkbox' ? el.checked : el.type === 'number' ? Number(el.value) : el.value;
-    const before = state.settings.values[el.dataset.key];
-    if (JSON.stringify(value) !== JSON.stringify(before)) out[el.dataset.key] = value;
-  });
-  return out;
+  return { ...state.draft };
 }
 
-function markDirty() {
-  const dirty = Object.keys(changes()).length > 0;
+function setDraft(key, value) {
+  if (!key || settingsFieldReason(key)) return;
+  if (!state.settingsDirty) state.draftRevision = state.settings.revision;
+  if (!Object.hasOwn(state.draftBefore, key)) state.draftBefore[key] = savedValues()[key];
+  if (JSON.stringify(value) === JSON.stringify(state.draftBefore[key])) {
+    delete state.draft[key];
+    delete state.draftBefore[key];
+  } else state.draft[key] = value;
+  renderDraftState();
+  if (key === 'mode') renderModeControls();
+}
+
+function markDirty(e) {
+  const el = e.target;
+  if (el.type === 'radio' && !el.checked) return;
+  setDraft(el.dataset.key, el.type === 'checkbox' ? el.checked : el.type === 'number' ? Number(el.value) : el.value);
+}
+
+function setModeHelp(button, expanded, dismissed = false) {
+  const help = button.parentElement;
+  help.classList.toggle('open', expanded);
+  help.classList.toggle('dismissed', dismissed);
+  button.setAttribute('aria-expanded', String(expanded));
+}
+
+function renderDraftState() {
+  const count = Object.keys(state.draft).length;
+  const dirty = count > 0;
   state.settingsDirty = dirty;
   $('#settings-dirty').classList.toggle('hidden', !dirty);
+  setText('#source-draft-count', dirty ? count + ' 项草稿' : '');
+  ['#save-settings', '#save-sources'].forEach(sel => { const el = $(sel); if (el) el.disabled = !dirty || !writeAllowed() || state.applying || state.saving; });
+  ['#undo-settings', '#undo-sources'].forEach(sel => { const el = $(sel); if (el) el.disabled = !dirty || state.applying || state.saving; });
+}
+
+function discardDraft() {
+  state.draft = {};
+  state.draftBefore = {};
+  state.draftRevision = '';
+  renderSettingsForm();
+  renderSourcePages();
+}
+
+function writeReason() {
+  if (!state.settings) return '正在读取写入权限';
+  if (state.settingsError) return '只读：权限读取失败，' + state.settingsError;
+  if (state.settings.config_error) return '只读：' + state.settings.config_error;
+  if (!state.settings.revision) return '只读：配置版本不可用';
+  if (!adminConfigured()) return '只读：未配置管理员口令';
+  return state.settings.write_access && state.settings.write_access.reason || '只读：当前连接无写入权限';
+}
+
+function renderWriteAccess() {
+  ['#source-write-note', '#settings-write-note'].forEach(sel => setNote($(sel), writeAllowed() ? '' : writeReason(), writeAllowed() ? '' : 'warn'));
+  ['#restart-service', '#clear-cache', '#retry-apply', '#restore-backup'].forEach(sel => { const el = $(sel); if (el) el.disabled = !writeAllowed() || state.applying || state.saving; });
+  $$('[data-quota-reset], [data-quota-adjust]').forEach(el => { el.disabled = !writeAllowed() || state.applying || state.saving; });
+  $$('[data-key]').forEach(el => {
+    const reason = settingsFieldReason(el.dataset.key);
+    el.disabled = Boolean(reason);
+    el.title = reason;
+  });
+  renderModeControls();
+  const backups = state.settings && state.settings.backups || [];
+  const select = $('#backup-select');
+  if (select) {
+    const previous = select.value;
+    select.innerHTML = '<option value="">选择备份</option>' + backups.map(b => `<option value="${esc(b.name)}">${esc(fmtAt(b.created_at))} · ${esc(b.name)}</option>`).join('');
+    if (backups.some(b => b.name === previous)) select.value = previous;
+    else if (state.applyResult && backups.some(b => b.name === state.applyResult.backup)) select.value = state.applyResult.backup;
+    select.disabled = !writeAllowed() || state.applying || state.saving;
+    $('#restore-backup').disabled = !writeAllowed() || state.applying || state.saving || !select.value;
+  }
+  renderDraftState();
 }
 
 async function confirmDialog(title, copy, diff) {
@@ -880,6 +979,7 @@ function toast(message, bad) {
 
 async function postJSON(path, payload, headers) {
   return fetchJSON(path, {
+    ...(path === '/__admin/api/restart' ? { signal: AbortSignal.timeout(5000) } : {}),
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...(headers || {}) },
     body: JSON.stringify(payload),
@@ -887,7 +987,7 @@ async function postJSON(path, payload, headers) {
 }
 
 /* ---------- 管理员口令（写操作统一闸门） ---------- */
-// 服务端约束：写端点仅限本机 loopback + X-Admin-Password 头；
+// 服务端约束：写端点限 loopback 或独立写白名单 + X-Admin-Password 头；
 // 口令只能配置在 dashboard.yaml，控制台永远读不到也改不了它。
 
 function adminConfigured() {
@@ -895,7 +995,7 @@ function adminConfigured() {
 }
 
 function cachedAdminPass() {
-  return sessionStorage.getItem('adminPass') || '';
+  return state.adminPass;
 }
 
 function usernameConfigured() {
@@ -903,11 +1003,12 @@ function usernameConfigured() {
 }
 
 function cachedAdminUser() {
-  return sessionStorage.getItem('adminUser') || '';
+  return state.adminUser;
 }
 
 // adminHeaders 取得（必要时先问一次）管理员口令；未配置或用户取消时抛错。
 async function adminHeaders() {
+  if (!writeAllowed()) throw new Error(writeReason());
   if (!adminConfigured()) {
     throw new Error('管理员口令未配置：请在 dashboard.yaml 设置 dashboard.admin_password 后重启服务');
   }
@@ -915,7 +1016,7 @@ async function adminHeaders() {
   if (!pass) {
     pass = prompt('输入管理员口令（dashboard.admin_password）');
     if (!pass) throw new Error('已取消：本操作需要管理员口令');
-    sessionStorage.setItem('adminPass', pass);
+    state.adminPass = pass;
   }
   const headers = { 'X-Admin-Password': pass };
   // admin_username 配置了才要求用户名；未配置 = 口令-only，不做检查
@@ -924,7 +1025,7 @@ async function adminHeaders() {
     if (!user) {
       user = prompt('输入管理员用户名（dashboard.admin_username）');
       if (!user) throw new Error('已取消：本操作需要管理员用户名');
-      sessionStorage.setItem('adminUser', user);
+      state.adminUser = user;
     }
     headers['X-Admin-User'] = user;
   }
@@ -937,30 +1038,137 @@ async function securePost(path, payload) {
   try {
     return await postJSON(path, payload, headers);
   } catch (e) {
-    if (String(e.message).includes('口令')) sessionStorage.removeItem('adminPass');
-    if (String(e.message).includes('用户名')) sessionStorage.removeItem('adminUser');
+    if (String(e.message).includes('口令')) state.adminPass = '';
+    if (String(e.message).includes('用户名')) state.adminUser = '';
     throw e;
   }
 }
 
 async function saveSettings() {
+  if (state.applying || state.saving || !writeAllowed()) return;
   const diff = changes();
+  const invalid = $$('[data-key]').find(el => Object.hasOwn(diff, el.dataset.key) && !el.reportValidity());
+  if (invalid) return;
   if (!Object.keys(diff).length) {
     toast('没有需要保存的更改');
     return;
   }
+  state.saving = true;
+  renderSettingsForm();
+  renderSourcePages();
+  renderWriteAccess();
   try {
-    await securePost('/__admin/api/settings', { changes: diff, confirm: false });
-    if (!(await confirmDialog('保存设置', '将备份当前 YAML，再写入以下更改。重启后生效。', JSON.stringify(diff, null, 2)))) return;
-    const res = await securePost('/__admin/api/settings', { changes: diff, confirm: true });
-    toast(res.backup ? '已保存，备份：' + res.backup : '已保存');
+    const revision = state.draftRevision || state.settings.revision;
+    await securePost('/__admin/api/settings', { changes: diff, revision, confirm: false });
+    const detail = Object.entries(diff).map(([key, value]) => key + ': ' + JSON.stringify(state.draftBefore[key]) + ' → ' + JSON.stringify(value)).join('\n');
+    if (!(await confirmDialog('保存并重启', '将备份当前配置，保存更改并重启服务。', detail))) return;
+    const res = await securePost('/__admin/api/settings', { changes: diff, revision, confirm: true });
+    state.applyResult = { backup: res.backup, targets: { ...(state.settings.pending_changes || {}), ...diff }, status: '已保存，正在重启…' };
+    renderApplyResult();
+    discardDraft();
     await loadSettings();
+    await restartAndVerify();
   } catch (e) {
     toast(e.message, true);
+  } finally {
+    state.saving = false;
+    renderSettingsForm();
+    renderSourcePages();
+    renderWriteAccess();
+  }
+}
+
+function runtimeMatches(settings, targets) {
+  return Object.entries(targets).every(([key, value]) => JSON.stringify(settings.values[key]) === JSON.stringify(value) && JSON.stringify((settings.saved_values || settings.values)[key]) === JSON.stringify(value));
+}
+
+function renderApplyResult() {
+  const result = state.applyResult;
+  setNote($('#apply-note'), result ? result.status : '', result && result.failed ? 'warn' : '');
+  const pending = Object.keys(state.settings && state.settings.pending_changes || {}).length > 0;
+  const retry = Boolean(result && result.failed) || pending;
+  const backups = Boolean(state.settings && state.settings.backups && state.settings.backups.length);
+  $('#apply-recovery').classList.toggle('hidden', !retry && !backups);
+  $('#retry-apply').classList.toggle('hidden', !retry);
+  renderWriteAccess();
+}
+
+async function restartAndVerify() {
+  if (state.applying) return;
+  if (!writeAllowed()) {
+    if (state.applyResult) {
+      state.applyResult.failed = true;
+      state.applyResult.status = '已保存，未确认生效：' + writeReason();
+      renderApplyResult();
+    }
+    return;
+  }
+  if (!state.applyResult) state.applyResult = { targets: { ...(state.settings.pending_changes || {}) } };
+  state.applying = true;
+  state.applyResult.failed = false;
+  state.applyResult.status = '正在重启并核对运行配置…';
+  renderApplyResult();
+  renderSettingsForm();
+  renderSourcePages();
+  const deadline = Date.now() + 60000;
+  try {
+    await securePost('/__admin/api/restart', { confirm: true });
+    let confirmed = false;
+    while (Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      try {
+        const settings = await fetchJSON('/__admin/api/settings', { signal: AbortSignal.timeout(Math.max(1, Math.min(3000, deadline - Date.now()))) });
+        const overview = await fetchJSON('/__admin/api/overview', { signal: AbortSignal.timeout(Math.max(1, Math.min(3000, deadline - Date.now()))) });
+        if (settings.values && overview.system && runtimeMatches(settings, state.applyResult.targets)) {
+          state.settings = settings;
+          state.overview = overview;
+          state.settingsError = null;
+          state.overviewError = null;
+          confirmed = true;
+          break;
+        }
+      } catch (e) { /* Restart temporarily disconnects the API. */ }
+    }
+    if (!confirmed) throw new Error('已保存，60 秒内未确认生效');
+    state.applyResult.status = '运行配置已确认生效';
+    toast(state.applyResult.status);
+  } catch (e) {
+    state.applyResult.failed = true;
+    state.applyResult.status = '未确认生效：' + e.message;
+  } finally {
+    state.applying = false;
+    renderApplyResult();
+    loadAll();
+  }
+}
+
+async function restoreBackup() {
+  const backup = $('#backup-select').value;
+  if (!backup || !writeAllowed() || state.applying || state.saving) return;
+  state.saving = true;
+  renderWriteAccess();
+  renderSourcePages();
+  try {
+    const revision = state.settings.revision;
+    const preview = await securePost('/__admin/api/settings', { restore_backup: backup, revision, confirm: false });
+    const detail = Object.entries(preview.changes || {}).map(([key, value]) => key + ': ' + JSON.stringify(savedValues()[key]) + ' → ' + JSON.stringify(value)).join('\n');
+    if (!(await confirmDialog('恢复备份并重启', backup + '；当前草稿将被撤销。', detail))) return;
+    const res = await securePost('/__admin/api/settings', { restore_backup: backup, revision, confirm: true });
+    discardDraft();
+    await loadSettings();
+    state.applyResult = { backup: res.backup, targets: { ...(state.settings.pending_changes || {}) }, status: '备份已恢复，正在重启…' };
+    await restartAndVerify();
+  } catch (e) { toast(e.message, true); }
+  finally {
+    state.saving = false;
+    renderSettingsForm();
+    renderSourcePages();
+    renderWriteAccess();
   }
 }
 
 function editSecret(name) {
+  if (!writeAllowed()) return;
   const label = SECRETS[name] || name;
   const d = $('#secret-dialog');
   $('#secret-dialog-title').textContent = '更新 ' + label + ' Key';
@@ -978,7 +1186,11 @@ function editSecret(name) {
   $('#secret-dialog-user').value = cachedAdminUser();
   d.showModal();
   d.addEventListener('close', async () => {
-    if (d.returnValue !== 'confirm') return;
+    if (d.returnValue !== 'confirm') {
+      $('#secret-dialog-input').value = '';
+      $('#secret-dialog-pass').value = '';
+      return;
+    }
     const value = $('#secret-dialog-input').value;
     const pass = $('#secret-dialog-pass').value.trim();
     if (!adminConfigured()) {
@@ -989,7 +1201,7 @@ function editSecret(name) {
       toast('需要管理员口令', true);
       return;
     }
-    sessionStorage.setItem('adminPass', pass);
+    state.adminPass = pass;
     const headers = { 'X-Admin-Password': pass };
     if (usernameConfigured()) {
       const user = $('#secret-dialog-user').value.trim();
@@ -997,7 +1209,7 @@ function editSecret(name) {
         toast('需要管理员用户名', true);
         return;
       }
-      sessionStorage.setItem('adminUser', user);
+      state.adminUser = user;
       headers['X-Admin-User'] = user;
     }
     try {
@@ -1005,9 +1217,13 @@ function editSecret(name) {
       toast(label + ' 已保存，需要重启服务');
       await loadSettings();
     } catch (e) {
-      if (String(e.message).includes('口令')) sessionStorage.removeItem('adminPass');
-      if (String(e.message).includes('用户名')) sessionStorage.removeItem('adminUser');
+      if (String(e.message).includes('口令')) state.adminPass = '';
+      if (String(e.message).includes('用户名')) state.adminUser = '';
       toast(e.message, true);
+    } finally {
+      $('#secret-dialog-input').value = '';
+      $('#secret-dialog-pass').value = '';
+      $('#secret-dialog-user').value = '';
     }
   }, { once: true });
 }
@@ -1080,6 +1296,7 @@ function renderQuotaManage() {
       `<td class="nowrap"><button type="button" data-quota-reset="${esc(q.provider)}">重置</button> ` +
       `<button type="button" data-quota-adjust="${esc(q.provider)}" data-used="${q.used || 0}">修正</button></td></tr>`;
   }).join('');
+  renderWriteAccess();
 }
 
 async function quotaReset(provider) {
@@ -1209,6 +1426,9 @@ function refreshHScroll() {
         });
       });
       wrap.addEventListener('scroll', () => {
+        if (wrap.closest('#page-sources')) $$('#page-sources .table-scroll').forEach(other => {
+          if (other.scrollLeft !== wrap.scrollLeft) other.scrollLeft = wrap.scrollLeft;
+        });
         if (dragging || proxy.scrollLeft === wrap.scrollLeft) return;
         proxy.scrollLeft = wrap.scrollLeft;
       });
@@ -1239,6 +1459,25 @@ function wire() {
   $('#reload-events').addEventListener('click', () => loadEvents());
   $('#export-csv').addEventListener('click', exportCSV);
   $('#save-settings').addEventListener('click', saveSettings);
+  $('#save-sources').addEventListener('click', saveSettings);
+  $('#undo-settings').addEventListener('click', discardDraft);
+  $('#undo-sources').addEventListener('click', discardDraft);
+  $('#retry-apply').addEventListener('click', restartAndVerify);
+  $('#restore-backup').addEventListener('click', restoreBackup);
+  $('#backup-select').addEventListener('change', renderWriteAccess);
+  $('#page-sources').addEventListener('change', e => {
+    if (e.target.dataset.sourceSetting) {
+      setDraft(e.target.dataset.sourceSetting, e.target.value);
+      renderSettingsForm();
+      renderSourcePages();
+      return;
+    }
+    const el = e.target.closest('[data-source-key]');
+    if (!el) return;
+    setDraft(el.dataset.sourceKey, el.dataset.inverted === 'true' ? !el.checked : el.checked);
+    renderSettingsForm();
+    renderSourcePages();
+  });
 
   // 外观主题：选择仅存本浏览器，立即生效
   $$('#theme-picker [data-theme-pick]').forEach(btn => btn.addEventListener('click', () => {
@@ -1280,9 +1519,8 @@ function wire() {
   $('#restart-service').addEventListener('click', async () => {
     if (!(await confirmDialog('重启 WebSearch', '当前请求会短暂中断，Docker 将自动重新启动服务。'))) return;
     try {
-      await securePost('/__admin/api/restart', { confirm: true });
-      toast('正在重启…');
-      setTimeout(() => location.reload(), 3500);
+      state.applyResult = { targets: { ...(state.settings.pending_changes || {}) } };
+      await restartAndVerify();
     } catch (e) {
       toast(e.message, true);
     }
@@ -1296,7 +1534,26 @@ function wire() {
       toast(e.message, true);
     }
   });
-  $$('[data-key]').forEach(el => el.addEventListener('change', markDirty));
+  $$('[data-key]').forEach(el => el.addEventListener('input', markDirty));
+  $('#mode-single').addEventListener('change', changeSingleProvider);
+  $('#mode-provider').addEventListener('change', changeSingleProvider);
+  $$('.mode-info').forEach(button => {
+    button.addEventListener('click', () => {
+      const expanded = button.getAttribute('aria-expanded') !== 'true';
+      setModeHelp(button, expanded, !expanded);
+    });
+    button.addEventListener('focus', () => button.parentElement.classList.remove('dismissed'));
+    button.addEventListener('mouseenter', () => button.parentElement.classList.remove('dismissed'));
+    button.addEventListener('blur', () => setModeHelp(button, false));
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') $$('.mode-info').forEach(button => setModeHelp(button, false, true));
+  });
+  window.addEventListener('beforeunload', e => {
+    if (!state.settingsDirty) return;
+    e.preventDefault();
+    e.returnValue = '';
+  });
   const applyFilter = () => {
     state.filters.status = $('#filter-status').value;
     state.filters.errorKind = $('#filter-error-kind').value;
@@ -1336,7 +1593,11 @@ function applyLocalTheme() {
   applyBrand({ ...brand, theme: localStorage.getItem('theme') || brand.theme });
 }
 
+// Remove credentials retained by older frontend versions; new credentials live only in memory.
+sessionStorage.removeItem('adminPass');
+sessionStorage.removeItem('adminUser');
 wire();
+renderWriteAccess();
 applyLocalTheme();
 $('#accent-input').value = localStorage.getItem('accent') || '';
 nav(location.hash.slice(1) || 'overview', false);

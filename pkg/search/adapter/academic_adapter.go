@@ -1,10 +1,11 @@
 package adapter
 
 import (
-	"websearch/pkg/search/enhance"
 	"websearch/pkg/search/core"
+	"websearch/pkg/search/enhance"
 
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -29,12 +30,11 @@ import (
 type AcademicAdapter struct {
 	searcher       *antirobot.Searcher
 	engines        []antirobot.Engine // 保存全部引擎引用，用于按名过滤
-	enhance        bool              // 是否启用学术评分增强（RRF 融合 + 学术信号）
-	threshold      float64           // 学术结果阀值（默认 0.02）
+	enhance        bool               // 是否启用学术评分增强（RRF 融合 + 学术信号）
+	threshold      float64            // 学术结果阀值（默认 0.02）
 	unpaywallEmail string
 	openalexOpts   antirobot.OpenAlexOpts
 }
-
 
 // SetEnhance 启用/关闭学术评分增强，threshold <= 0 时使用默认 0.02。
 func (a *AcademicAdapter) SetEnhance(enabled bool, threshold float64) {
@@ -109,14 +109,6 @@ func (a *AcademicAdapter) SearchAcademicRaw(query string, opts ...core.AcademicS
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	if kind, id := academic.ParsePaperQuery(query); kind != "" {
-		return a.lookupPaper(ctx, kind, id)
-	}
-
-	// 设置时间范围
-	tr := core.ParseTimeRange(opt.TimeRange)
-	a.searcher.TimeRange = tr
-
 	// 按引擎名过滤
 	searcher := a.searcher
 	if len(opt.Engines) > 0 {
@@ -125,8 +117,18 @@ func (a *AcademicAdapter) SearchAcademicRaw(query string, opts ...core.AcademicS
 			return core.AcademicSearchResult{}, fmt.Errorf("指定的引擎均不可用: %v", opt.Engines)
 		}
 		searcher = antirobot.NewSearcher(antirobot.StrategyParallel, filtered)
-		searcher.TimeRange = tr
 	}
+	if kind, id := academic.ParsePaperQuery(query); kind != "" {
+		names := searcher.Engines()
+		exactEnabled := kind == "doi" && (slices.Contains(names, "crossref") || slices.Contains(names, "openalex")) ||
+			kind == "arxiv" && slices.Contains(names, "arxiv")
+		if exactEnabled {
+			return a.lookupPaper(ctx, kind, id, names)
+		}
+	}
+
+	// 设置时间范围
+	searcher.TimeRange = core.ParseTimeRange(opt.TimeRange)
 
 	responses := searcher.Search(ctx, query, opt.Page)
 
@@ -185,16 +187,40 @@ func (a *AcademicAdapter) SearchAcademicRaw(query string, opts ...core.AcademicS
 	return core.AcademicSearchResult{Results: results, EngineErrors: engineErrors}, nil
 }
 
-func (a *AcademicAdapter) lookupPaper(ctx context.Context, kind, id string) (core.AcademicSearchResult, error) {
+func (a *AcademicAdapter) lookupPaper(ctx context.Context, kind, id string, engines []string) (core.AcademicSearchResult, error) {
 	var raw []antirobot.Result
+	var failures map[string]error
+	attempted := make([]string, 0, 2)
 	switch kind {
 	case "doi":
-		raw = academic.LookupDOI(ctx, id, a.openalexOpts)
+		for _, name := range []string{"crossref", "openalex"} {
+			if slices.Contains(engines, name) {
+				attempted = append(attempted, name)
+			}
+		}
+		openalex := a.openalexOpts
+		openalex.Enabled = slices.Contains(engines, "openalex")
+		raw, failures = academic.LookupDOI(ctx, id, antirobot.CrossrefOpts{Enabled: slices.Contains(engines, "crossref")}, openalex)
 	case "arxiv":
-		raw = academic.LookupArxivID(ctx, id)
+		attempted = append(attempted, "arxiv")
+		var err error
+		raw, err = academic.LookupArxivID(ctx, id)
+		if err != nil {
+			failures = map[string]error{"arxiv": err}
+		}
+	}
+	engineErrors := make(map[string]string, len(failures))
+	var causes []error
+	for _, name := range slices.Sorted(maps.Keys(failures)) {
+		engineErrors[name] = failures[name].Error()
+		causes = append(causes, fmt.Errorf("%s: %w", name, failures[name]))
 	}
 	if len(raw) == 0 {
-		return core.AcademicSearchResult{}, fmt.Errorf("学术引擎搜索无结果")
+		result := core.AcademicSearchResult{EngineErrors: engineErrors, AttemptedEngines: attempted}
+		if len(causes) > 0 {
+			return result, fmt.Errorf("精确学术检索失败: %w", errors.Join(causes...))
+		}
+		return result, fmt.Errorf("学术引擎搜索无结果")
 	}
 	raw = antirobot.DeduplicateResults(raw)
 	results := toSearchResults(raw)
@@ -202,7 +228,7 @@ func (a *AcademicAdapter) lookupPaper(ctx context.Context, kind, id string) (cor
 		results = results[:1]
 	}
 	a.enrichOAPDF(ctx, results)
-	return core.AcademicSearchResult{Results: results}, nil
+	return core.AcademicSearchResult{Results: results, EngineErrors: engineErrors, AttemptedEngines: attempted}, nil
 }
 
 func (a *AcademicAdapter) enrichOAPDF(ctx context.Context, results []core.SearchResult) {
