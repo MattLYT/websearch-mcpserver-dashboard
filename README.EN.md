@@ -215,7 +215,7 @@ curl http://127.0.0.1:8338/__admin/api/metrics     # Prometheus text metrics
 - Only sanitized metadata is stored: queries are persisted as hash + topic + language + keywords; **full queries and URLs never reach the database**. Error text is sanitized server-side (URLs / emails / secret-like strings replaced with placeholders) before storage and truncation.
 - Secrets live in a separate private overlay file; pages and APIs **never echo the value** — the server simply never sends it, not a client-side mask. The settings page links each provider's official "get key" console.
 - Loopback-only by default; networks listed in `allowed_networks` are **read-only**. Writes (settings / keys / restart / cache clear / quota management) require `dashboard.admin_password` and loopback; the password itself cannot be changed through the WebUI.
-- The overview "client usage" panel groups calls by MCP client (identified from the initialize handshake `clientInfo` and User-Agent; local display grouping only, never affects search).
+- The overview groups calls by application or project; collapsed rows and CSV include attribution. Standard MCP identity identifies applications, with optional explicit HTTP labels. Codex can automatically label configured projects and Git projects through a header helper; other clients use project-scoped configuration. Unsupported historical calls remain untagged. See [first-time setup and automatic attribution](docs/installation.en.md#codex--applicationproject-attribution). No conversation content is collected and search permissions are unchanged.
 - No active probing of any provider.
 
 Full configuration reference: [docs/configuration.en.md](docs/configuration.en.md).

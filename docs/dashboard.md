@@ -109,6 +109,7 @@ dashboard:
 | `shortcut` | string | `desktop` | 快捷方式落位，详见下节 |
 | `storage_path` | path | `./data/dashboard.db` | 遥测库；相对主配置目录 |
 | `retention_days` | int | `30` | 明细滚动清理周期（每 6 小时执行）；日聚合不受影响 |
+| `client_projects` | map<string,string> | `{}` | 精确客户端名到项目简称的显式映射；仅用于缺少项目头时的统计归属 |
 | `secrets_path` | path | `./data/dashboard-secrets.json` | WebUI 写入的 Key 存这里，接口只返回「已配置」状态 |
 | `config_path` | path | 空 | dashboard.yaml 的自定义位置（也可用环境变量） |
 | `allowed_networks` | []string | `[]` | 只读放行网段；fail-closed |
@@ -120,8 +121,6 @@ dashboard:
 | `quotas.reset` | enum | `monthly` | 自动重置周期；`none` 表示只手动重置 |
 | `quotas.reset_day` | int | `1` | monthly 的重置日（1-28） |
 | `quotas.limits` | map | 单 Key 1000 | 供应商 → 单 Key 上限（次/周期）；多 Key 自动乘以 Key 数；**仅用于展示与剩余量计算，不会阻断调用** |
-
-DBLP 返回已识别的 Anubis 挑战页时，工具和来源事件记为人机验证，不当作正常空检索。没有可用结果且存在引擎失败时，保留逐源原因；历史解析失败记录不会被重写。此识别不绕过上游验证，也不自动改变来源开关或实际冷却。
 
 ## 额度管理（`quotas`）
 
@@ -145,6 +144,16 @@ DBLP 返回已识别的 Anubis 挑战页时，工具和来源事件记为人机�
 | `brand.accent` | color | 空 | `#RGB`/`#RRGGBB`；设置后覆盖主题主色 |
 | `brand.icon` | path | 空 | 自定义 .ico；每次启动轻量检查，变化即重建快捷方式 |
 | `brand.footer` | bool | `true` | 侧边栏底部「关于」项目介绍（GitHub 链接）；`false` 整块隐藏 |
+
+## 调用追踪
+
+侧栏仅保留调用记录，默认显示最近 100 次工具调用。每次调用一行，展开按钮显示请求编号、脱敏元数据及完整已保留的来源尝试；历史记录没有请求编号时不推测关联。原来的 #events 链接兼容转到调用记录。
+
+工具、来源、状态、错误类型可以组合筛选。状态表示工具最终结局；来源和错误类型按同一请求的来源证据筛选，局部来源失败不把成功的工具调用改为失败。CSV 导出当前工具列表和这些请求的完整来源明细，读取失败时中止而不输出不完整文件。
+
+GET /__admin/api/calls 缺省最多 100 条工具记录，接受 tool、provider、status、error_kind 和 limit；原 /events 契约保留兼容。GET /__admin/api/request-events?request_id= 按精确非空请求编号读取完整保留明细，不受列表条数或其它筛选限制。数据仍受实际保留期限制，接口沿用现有读取授权和脱敏字段，不返回查询全文或密钥。
+
+DBLP 返回已识别的 Anubis 挑战页时，工具和来源事件记为人机验证，不当作正常空检索。没有可用结果且存在引擎失败时，保留逐源原因；历史解析失败记录不会被重写。此识别不绕过上游验证，也不自动改变来源开关或实际冷却。
 
 ## 源管理与保存
 
@@ -219,6 +228,20 @@ dashboard:
 未确认来源前保持 `write_allowed_networks: []`。卷映射（`dashboard.yaml`、`data/`）见 [installation.md#docker](installation.md#docker)。
 
 ## 数据与生命周期
+
+### 搜索调用用量
+
+总览按应用或项目显示全部工具层调用、成功率、平均耗时和调用占比，可筛选最近 1 / 7 / 30 天及应用。Codex、WorkBuddy 等已知客户端别名合并展示；脚本调用也计入项目使用。调用记录主行直接显示应用与项目，详情保留原始客户端名，CSV 同样导出归属。应用身份使用 SDK 提供的标准逐调用 clientInfo，缺失时回退握手身份，适用于 HTTP 与 stdio；无身份时再参考 User-Agent。通用 `websearch` 名称不能单独证明宿主应用。
+
+已知应用名单参考 [Token Monitor 的应用列表](https://github.com/Javis603/token-monitor#supported-tools)，覆盖 DeepSeek Harness（`dsh-mcp-client`）、OpenCode、OpenClaw、Hermes Agent、Antigravity、Amp、Factory Droid、Kimi、GitHub Copilot、Pi、Oh My Pi、Kilo Code、Command Code、MiMo Code、Muse Code、ZCode、Kiro、CodeBuddy、Proma、CatPaw、Qoder、Reasonix、LM Studio、Unsloth Studio、Devin、MiniMax Code，以及 Goose。已有 Codex、WorkBuddy 等分组保持不变。客户端必须自报匹配的应用名或已知别名。所有调用采用相同归组规则，不按测试、验收或诊断用途分组或排除；通用客户端和模型供应商不能单独证明宿主应用。保留期内的历史调用按同一规则实时归组，不修改原始记录。
+
+HTTP 客户端若只发送通用名称，可在其 WebSearch 配置中添加 `X-WebSearch-Client: workbuddy` 等已确认的应用简称。合法显式标签优先于协议身份；只接受最多 32 个字母、数字、空格及 `._-`，不接受路径、URL、控制字符或 `.` / `..`。无法确认时显示「未识别应用」。所有归属都是客户端自报的统计标签，不是可信身份或权限依据。
+
+项目归属优先取每次工具调用合法的 `project` 参数，其次使用兼容的 `X-WebSearch-Project` 请求头；缺少或无效时可采用 `dashboard.client_projects` 已确认的精确客户端映射，其余保持「未标注项目」。标签最多 64 个字母、数字、空格及 `._-`，支持中文，不接受路径、URL、控制字符及 `.` / `..`。标签只用于统计，不作为权限、检索范围或配额依据；调用主行悬停明确其为自报信息。
+
+本仓库 [WebSearch Skill](../skills/websearch-mcp/SKILL.md) 在当前项目明确时传递非敏感简称，不要求逐项目配置，不读取会话日志。Skill 未加载、上下文未知或 Agent 漏传时仍可能未标注，不承诺全应用自动识别。项目属于当前调用，不从 initialize 或其他请求继承；不采集对话标识，不把缺失标签判为独立对话，不猜测或重写历史。接入方式见 [Skill 说明](installation.md#skill--应用项目归属)。
+
+这不是模型 Token、金额或账户剩余额度。供应商额度仍在原额度面板按供应商展示，不按项目平分。应用 / 项目统计依赖保留明细，窗口以 `retention_days` 为上限，返回实际 `window_days`；不展示不完整的「全部历史」。`GET /__admin/api/clients?days=1|7|30` 保留原 `clients` 字段，新增按客户端、项目、MCP 工具聚合的 `usage`，不把 provider 并发计成额外客户端调用。
 
 - 遥测明细按 `retention_days` 每 6 小时滚动清理；每日聚合长期保留（体积极小）
 - `dashboard.db` 建表自动迁移（含 quota_state/client 列），老库升级零操作；回退旧版本时新表/新列被忽略

@@ -18,6 +18,52 @@ func openTestStore(t *testing.T) *Store {
 	return s
 }
 
+func TestClientUsageFractionalAverage(t *testing.T) {
+	for _, mixedTools := range []bool{false, true} {
+		t.Run(map[bool]string{false: "client_average", true: "tool_average"}[mixedTools], func(t *testing.T) {
+			s := openTestStore(t)
+			if rows, err := s.ClientUsageStats(7); err != nil || len(rows) != 0 {
+				t.Fatalf("empty clients: %v, %v", rows, err)
+			}
+			for i, duration := range []time.Duration{10, 11, 11, 12} {
+				if !mixedTools && i >= 2 {
+					break
+				}
+				tool := "smartsearch"
+				if i >= 2 {
+					tool = "cleanfetch"
+				}
+				if err := s.Record(Event{Kind: "tool", Client: "test-client", Tool: tool,
+					Duration: duration * time.Millisecond, Success: i%2 == 0}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			rows, err := s.ClientUsageStats(7)
+			if err != nil || len(rows) != 1 {
+				t.Fatalf("clients: %v, %v", rows, err)
+			}
+			wantRequests, wantAverage, wantTools := int64(2), int64(10), 1
+			if mixedTools {
+				wantRequests, wantAverage, wantTools = 4, 11, 2
+			}
+			u := rows[0]
+			if u.Client != "test-client" || u.Requests != wantRequests || u.Successes != wantRequests/2 ||
+				u.Failures != wantRequests/2 || u.AvgMS != wantAverage || len(u.Tools) != wantTools {
+				t.Fatalf("client aggregate: %+v", u)
+			}
+			for _, tool := range u.Tools {
+				want := int64(10)
+				if tool.Tool == "cleanfetch" {
+					want = 11
+				}
+				if tool.Requests != 2 || tool.Successes != 1 || tool.Failures != 1 || tool.AvgMS != want {
+					t.Fatalf("tool aggregate: %+v", tool)
+				}
+			}
+		})
+	}
+}
+
 func shanghaiLocation(t *testing.T) *time.Location {
 	t.Helper()
 	loc, err := time.LoadLocation("Asia/Shanghai")

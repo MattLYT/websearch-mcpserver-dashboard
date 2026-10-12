@@ -14,6 +14,7 @@ import (
 
 // FileSearchParams file_search 工具参数。
 type FileSearchParams struct {
+	projectParams
 	Query string `json:"query" jsonschema:"description,检索词，支持 Everything 搜索语法：如 'factory'、'*.go'、'ext:pdf report'、'dm:lastweek'、'size:>1mb'。不要写 '**/' 前缀，目录范围已由 folder 参数限定；正则请用 match_regex 参数"`
 
 	// 目录范围（白名单约束见 ScopeQuery）

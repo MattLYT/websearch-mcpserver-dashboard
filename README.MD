@@ -215,7 +215,7 @@ curl http://127.0.0.1:8338/__admin/api/metrics     # Prometheus 文本指标
 - 只保存脱敏元数据：查询以哈希 + 主题 + 语言 + 关键词落库，**完整查询与 URL 不写入数据库**；错误文本在服务端先把 URL / 邮箱 / 疑似密钥替换为占位符再截断落库。
 - 密钥保存在独立的私密覆盖文件，页面与接口**永不回显原值**——是服务端不出网，不是前端掩码；配置页内置各供应商「获取 Key」直达链接。
 - 默认仅本机 loopback 可访问；`allowed_networks` 放行的网段**只读**。写操作（设置 / 密钥 / 重启 / 清缓存 / 额度管理）需 `dashboard.admin_password` 且仅限本机，口令不可经 WebUI 修改。
-- 总览页「客户端用量」按接入的 MCP 客户端归组展示（识别来源：initialize 握手的 clientInfo 与 User-Agent，仅用于本机展示分组，不影响搜索）。
+- 总览按应用或项目统计，调用主行与 CSV 显示应用/项目。应用优先使用标准 MCP 身份；HTTP 可显式发送应用和项目标签。Codex 可使用动态请求头自动识别已标注项目与 Git 项目，其他客户端使用项目级配置；缺少证据的历史保持未标注。见[首次接入与自动归属](docs/installation.md#codex--应用项目归属)，不采集对话内容或改变检索权限。
 - 不发起任何主动探测。
 
 完整配置项见 [docs/configuration.md](docs/configuration.md)。

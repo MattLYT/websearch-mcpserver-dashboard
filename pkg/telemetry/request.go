@@ -162,6 +162,9 @@ func (s *Store) RecordContext(ctx context.Context, event Event) {
 	if event.Client == "" {
 		event.Client = ClientFromContext(ctx)
 	}
+	if event.Project == "" {
+		event.Project = ProjectFromContext(ctx)
+	}
 	if collector := CollectorFromContext(ctx); collector != nil {
 		collector.Add(event)
 		return
@@ -178,6 +181,9 @@ func RecordEventContext(ctx context.Context, event Event) {
 	}
 	if event.Client == "" {
 		event.Client = ClientFromContext(ctx)
+	}
+	if event.Project == "" {
+		event.Project = ProjectFromContext(ctx)
 	}
 	if collector := CollectorFromContext(ctx); collector != nil {
 		collector.Add(event)

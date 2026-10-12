@@ -19,9 +19,6 @@
         <button class="nav" type="button" data-page="sources">
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="8" cy="8" r="6.4"/><path d="M1.6 8h12.8M8 1.6c-4.8 4-4.8 8.8 0 12.8M8 1.6c4.8 4 4.8 8.8 0 12.8"/></svg>
           搜索源</button>
-        <button class="nav" type="button" data-page="events">
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M2.5 11.5 6 7l2.5 2.5L13 4"/><path d="M13 7.5V4h-3.5"/></svg>
-          事件</button>
         <button class="nav" type="button" data-page="usage">
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M2 3.5h12M2 8h9M2 12.5h12"/></svg>
           调用记录</button>
@@ -44,7 +41,7 @@
         <div><p class="eyebrow">LOCAL OBSERVABILITY</p><h1 id="page-title">运行总览</h1></div>
         <div class="header-actions">
           <span id="updated" class="updated">尚未刷新</span>
-          <button id="refresh" class="icon-btn" type="button" title="立即刷新全部数据" aria-label="立即刷新全部数据">↻</button>
+          <button id="refresh" class="icon-btn" type="button" title="立即刷新全部数据" aria-label="立即刷新全部数据" data-icon="refresh-cw"></button>
         </div>
       </header>
 
@@ -79,8 +76,8 @@
           </article>
         </div>
 
-        <article class="panel hidden" id="clients-panel">
-          <div class="panel-head"><div><p class="eyebrow">MCP CLIENTS</p><h2>客户端用量</h2></div><span class="muted">按 User-Agent 归组 · 最近 7 天 · 工具层调用</span></div>
+        <article class="panel" id="clients-panel">
+          <div class="panel-head"><div><p class="eyebrow">MCP USAGE</p><h2>搜索调用用量</h2></div><span class="muted" id="client-scope">搜索调用 · 最近 7 天</span></div>
           <div class="client-tabs" id="client-tabs"></div>
           <p class="panel-note" id="client-note"></p>
           <div id="client-stats"></div>
@@ -88,24 +85,11 @@
 
       </section>
 
-      <section id="page-events" class="page">
-        <article class="panel">
-          <div class="panel-head"><div><p class="eyebrow">REDACTED METADATA</p><h2>Provider 事件流</h2></div><span class="muted">最近 20 条 · 查询全文不保存</span></div>
-          <p class="panel-note" id="overview-events-note"></p>
-          <div class="table-scroll">
-            <table class="data-table">
-              <thead><tr><th>时间</th><th>来源</th><th>状态</th><th class="num">耗时</th><th class="num">结果数</th><th>主题 / 语言</th><th>关键词</th><th>错误摘要</th></tr></thead>
-              <tbody id="overview-events-body"></tbody>
-            </table>
-          </div>
-        </article>
-      </section>
-
       <section id="page-sources" class="page">
         <div class="draft-actions source-actions">
           <span id="source-draft-count" class="muted"></span>
-          <button type="button" id="undo-sources" title="撤销全部未保存更改" aria-label="撤销全部未保存更改" disabled>↶</button>
-          <button type="button" id="save-sources" class="primary-btn" disabled>保存并重启</button>
+          <button type="button" id="undo-sources" class="icon-btn" title="撤销全部未保存更改" aria-label="撤销全部未保存更改" data-icon="undo-2" disabled></button>
+          <button type="button" id="save-sources" class="primary-btn" disabled><span data-icon="save" aria-hidden="true"></span>保存并重启</button>
         </div>
         <p id="source-write-note" class="panel-note"></p>
         <div class="status-key">
@@ -151,15 +135,8 @@
 
       <section id="page-usage" class="page">
         <article class="panel">
-          <div class="panel-head"><div><p class="eyebrow">REDACTED METADATA</p><h2>调用记录</h2></div><span class="muted">明细保留 30 天</span></div>
+          <div class="panel-head"><div><p class="eyebrow">REDACTED METADATA</p><h2>调用记录</h2></div><span class="muted">最近 100 条</span></div>
           <div class="toolbar">
-            <label class="field"><span>层级</span>
-              <select id="filter-kind">
-                <option value="">全部</option>
-                <option value="tool">工具</option>
-                <option value="provider" selected>来源</option>
-              </select>
-            </label>
             <label class="field"><span>状态</span>
               <select id="filter-status">
                 <option value="">全部</option>
@@ -176,22 +153,16 @@
             <label class="field"><span>来源</span>
               <select id="filter-provider"><option value="">全部</option></select>
             </label>
-            <label class="field"><span>条数</span>
-              <select id="filter-limit">
-                <option value="20">20</option>
-                <option value="50" selected>50</option>
-                <option value="100">100</option>
-              </select>
-            </label>
             <div class="toolbar-actions">
-              <button id="reload-events" type="button" class="primary-btn">应用筛选</button>
-              <button id="export-csv" type="button">导出 CSV</button>
+              <button id="reload-events" type="button" class="icon-btn" title="刷新调用记录" aria-label="刷新调用记录" data-icon="refresh-cw"></button>
+              <button id="export-csv" type="button" class="icon-btn" title="导出 CSV" aria-label="导出 CSV" data-icon="download"></button>
             </div>
           </div>
           <p class="panel-note" id="events-note"></p>
           <div class="table-scroll">
-            <table class="data-table">
-              <thead><tr><th>时间</th><th>层级</th><th>工具</th><th>来源</th><th>状态</th><th>错误类型</th><th class="num">耗时</th><th class="num">结果数</th><th>缓存</th><th>主题 / 语言</th><th>关键词</th><th>查询哈希</th><th>错误摘要</th></tr></thead>
+            <table class="data-table call-table">
+              <colgroup><col style="width:48px"><col style="width:20%"><col style="width:12%"><col style="width:20%"><col style="width:7%"><col style="width:10%"><col style="width:7%"><col></colgroup>
+              <thead><tr><th aria-label="详情"></th><th>时间</th><th>工具</th><th>应用 / 项目</th><th>状态</th><th class="num">耗时</th><th class="num">结果数</th><th>错误摘要</th></tr></thead>
               <tbody id="usage-body"></tbody>
             </table>
           </div>
@@ -228,10 +199,10 @@
               <label>最大结果数<input type="number" min="1" max="50" name="smartsearch.max_size" data-key="smartsearch.max_size"></label>
               <label>相关性阈值<input type="number" min="0" max="1" step="0.01" name="smartsearch.relevance_threshold" data-key="smartsearch.relevance_threshold"></label>
               <label>MMR λ<input type="number" min="0" max="1" step="0.05" name="smartsearch.mmr.lambda" data-key="smartsearch.mmr.lambda"></label>
-              <label class="toggle"><input type="checkbox" name="cache.enabled" data-key="cache.enabled"><span></span>启用缓存</label>
-              <label class="toggle"><input type="checkbox" name="academic.enabled" data-key="academic.enabled"><span></span>学术检索</label>
-              <label class="toggle"><input type="checkbox" name="cleanfetch.enabled" data-key="cleanfetch.enabled"><span></span>网页抓取</label>
-              <label class="toggle"><input type="checkbox" name="pdf_parser.enabled" data-key="pdf_parser.enabled"><span></span>PDF 解析</label>
+              <label class="settings-toggle form-check form-switch"><input class="form-check-input" type="checkbox" role="switch" name="cache.enabled" data-key="cache.enabled"><span class="form-check-label">启用缓存</span></label>
+              <label class="settings-toggle form-check form-switch"><input class="form-check-input" type="checkbox" role="switch" name="academic.enabled" data-key="academic.enabled"><span class="form-check-label">学术检索</span></label>
+              <label class="settings-toggle form-check form-switch"><input class="form-check-input" type="checkbox" role="switch" name="cleanfetch.enabled" data-key="cleanfetch.enabled"><span class="form-check-label">网页抓取</span></label>
+              <label class="settings-toggle form-check form-switch"><input class="form-check-input" type="checkbox" role="switch" name="pdf_parser.enabled" data-key="pdf_parser.enabled"><span class="form-check-label">PDF 解析</span></label>
               <details class="settings-advanced settings-wide">
                 <summary>高级连接与学术设置</summary>
                 <div class="form-grid">
@@ -245,7 +216,7 @@
                   <label>暂停上限<input type="text" placeholder="24h" name="dashboard.suspension.max_ban_time_on_fail" data-key="dashboard.suspension.max_ban_time_on_fail"></label>
                 </div>
               </details>
-              <div class="form-actions draft-actions"><button type="button" id="undo-settings" title="撤销全部未保存更改" aria-label="撤销全部未保存更改" disabled>↶</button><button type="button" id="save-settings" class="primary-btn" disabled>保存并重启</button></div>
+              <div class="form-actions draft-actions"><button type="button" id="undo-settings" class="icon-btn" title="撤销全部未保存更改" aria-label="撤销全部未保存更改" data-icon="undo-2" disabled></button><button type="button" id="save-settings" class="primary-btn" disabled><span data-icon="save" aria-hidden="true"></span>保存并重启</button></div>
             </form>
           </article>
           <article class="panel">
@@ -260,8 +231,8 @@
             <p class="panel-note">选择仅保存在本浏览器；服务器默认主题由 dashboard.yaml 的 dashboard.brand.theme 控制。</p>
             <h3 class="sub-head">高级操作</h3>
             <div class="advanced-actions">
-              <div><b>重启服务</b><small>应用已保存的设置或新密钥</small><button id="restart-service" type="button">确认并重启</button></div>
-              <div><b>清空搜索缓存</b><small>监控历史不会被删除</small><button id="clear-cache" type="button" class="danger">确认并清空</button></div>
+              <div><b>重启服务</b><small>应用已保存的设置或新密钥</small><button id="restart-service" type="button" class="icon-btn" title="确认并重启服务" aria-label="确认并重启服务" data-icon="refresh-cw"></button></div>
+              <div><b>清空搜索缓存</b><small>监控历史不会被删除</small><button id="clear-cache" type="button" class="danger icon-btn" title="确认并清空搜索缓存" aria-label="确认并清空搜索缓存" data-icon="rotate-ccw"></button></div>
             </div>
             <div class="apply-status" aria-live="polite">
               <h3 class="sub-head">配置恢复</h3>

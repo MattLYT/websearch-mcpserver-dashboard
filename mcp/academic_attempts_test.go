@@ -64,7 +64,9 @@ func TestAcademicProviderEventsRespectActualAttempts(t *testing.T) {
 				}
 			}
 			academicSearcher, searchapi, cacheInst = searcher, fakeSearchAPI{}, nil
-			_, _, err = doAcademicSearch(context.Background(), tc.query, tc.requested, "", 1)
+			ctx := telemetry.WithProject(telemetry.WithClient(context.Background(), "workbuddy"), "检索测试")
+			ctx = telemetry.WithRequestID(ctx, "academic-attribution-test")
+			_, _, err = doAcademicSearch(ctx, tc.query, tc.requested, "", 1)
 			if (err != nil) != tc.failure {
 				t.Fatalf("unexpected search error: %v", err)
 			}
@@ -74,6 +76,9 @@ func TestAcademicProviderEventsRespectActualAttempts(t *testing.T) {
 			}
 			got := make(map[string]bool)
 			for _, row := range rows {
+				if row.Client != "workbuddy" || row.Project != "检索测试" || row.RequestID != "academic-attribution-test" {
+					t.Errorf("%s event lost request attribution: %+v", row.Kind, row)
+				}
 				if row.Kind != "provider" {
 					continue
 				}
@@ -86,6 +91,47 @@ func TestAcademicProviderEventsRespectActualAttempts(t *testing.T) {
 				t.Fatalf("provider attempts=%v, want %v; rows=%+v", got, tc.want, rows)
 			}
 		})
+	}
+}
+
+func TestAcademicPartialFailureRetainsPerCallAttribution(t *testing.T) {
+	initTestLogger()
+	restoreGlobals(t)
+	store, err := telemetry.Open(filepath.Join(t.TempDir(), "telemetry.db"), 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	previous := telemetry.Default()
+	telemetry.SetDefault(store)
+	defer telemetry.SetDefault(previous)
+	academicSearcher = &attemptedAcademic{registered: []string{"arxiv", "semantic_scholar"}, result: search.AcademicSearchResult{
+		AttemptedEngines: []string{"arxiv", "semantic_scholar"},
+		Results:          []search.SearchResult{{Title: "paper", Engine: "arxiv"}},
+		EngineErrors:     map[string]string{"semantic_scholar": "synthetic timeout"},
+	}}
+	searchapi, cacheInst = fakeSearchAPI{}, nil
+	for _, labels := range []struct{ client, project string }{{"workbuddy", "检索测试"}, {"codex-mcp-client", "Other"}, {"", ""}} {
+		requestID := telemetry.NewRequestID()
+		ctx := telemetry.WithRequestID(telemetry.WithProject(telemetry.WithClient(context.Background(), labels.client), labels.project), requestID)
+		if _, _, err := doAcademicSearch(ctx, "keyword query", nil, "", 1); err != nil {
+			t.Fatal(err)
+		}
+		rows, err := store.RecentFiltered(telemetry.EventFilter{RequestID: requestID, Limit: 20})
+		if err != nil || len(rows) != 3 {
+			t.Fatalf("request events: %+v %v", rows, err)
+		}
+		outcomes := make(map[string]bool)
+		for _, row := range rows {
+			if row.Client != labels.client || row.Project != labels.project || row.RequestID != requestID {
+				t.Fatalf("event attribution crossed calls: %+v", row)
+			}
+			outcomes[row.Kind+":"+row.Provider] = row.Success
+		}
+		want := map[string]bool{"tool:": true, "provider:arxiv": true, "provider:semantic_scholar": false}
+		if !reflect.DeepEqual(outcomes, want) {
+			t.Fatalf("partial failure changed tool/provider outcomes: %v", outcomes)
+		}
 	}
 }
 
