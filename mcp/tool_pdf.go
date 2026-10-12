@@ -22,8 +22,10 @@ import (
 // pdf_parser 工具：本地/远程 PDF 解析与页码范围。
 // PDFParserParams pdf_parser 工具参数。
 type PDFParserParams struct {
-	Path  string `json:"path" jsonschema:"description,本地 PDF 文件路径（绝对路径或 file://）或远程 http(s) PDF URL。学术搜索结果中的 pdf_url 直接作为本参数传入"`
-	Pages string `json:"pages,omitempty" jsonschema:"description,可选页码范围（1-based），如 '1-10'、'1,3,5-7'。省略时仅解析前 max_pages 页（默认 20），超长文档会提示已截断"`
+	Path        string `json:"path,omitempty" jsonschema:"description,新解析任务必填：服务进程可见的本地 PDF 绝对路径（或 file://），或远程 http(s) PDF URL。Docker 中只能读取容器内或已挂载路径，file_search 返回的宿主机路径不能直接通用。学术搜索结果中的 pdf_url 可直接传入；查询已有 task_ref 时省略"`
+	Pages       string `json:"pages,omitempty" jsonschema:"description,可选页码范围（1-based），如 '1-10'、'1,3,5-7'。省略时仅解析前 max_pages 页（默认 20），超长文档会提示已截断"`
+	TaskRef     string `json:"task_ref,omitempty" jsonschema:"description,MinerU 返回的任务引用：standard:<task_id>、batch:<batch_id> 或 agent:<task_id>。查询或取回原任务，不新建任务；与 path/pages 互斥。默认只查一次，仍处理时返回状态与引用"`
+	WaitSeconds *int   `json:"wait_seconds,omitempty" jsonschema:"description,MinerU 每个任务的轮询等待秒数，0-1800。新解析默认300秒，task_ref 默认0（只查一次）；超时保留引用以便续查，不表示上游解析失败"`
 }
 
 // CleanFetch 通过 go-webfetch 抓取网页，失败时回退到 Jina Reader。
@@ -34,7 +36,7 @@ func resolvePDFPath(path string) (fetchURL string, remote bool) {
 	p := strings.TrimSpace(path)
 	lower := strings.ToLower(p)
 	if strings.HasPrefix(lower, "https://") || strings.HasPrefix(lower, "http://") {
-		return p, true
+		return normalizePDFDownloadURL(p), true
 	}
 	if strings.HasPrefix(p, "file://") {
 		return p, false
@@ -50,6 +52,7 @@ func PDFParserHandler(ctx context.Context, req *mcp.CallToolRequest, params *PDF
 	started := time.Now()
 	parsedPages := 0
 	parseEngine := ""
+	var pending *mineru.TaskPendingError
 	defer func() {
 		telemetry.RecordEventContext(ctx, telemetry.Event{
 			Kind:         "tool",
@@ -65,6 +68,44 @@ func PDFParserHandler(ctx context.Context, req *mcp.CallToolRequest, params *PDF
 			AttemptChain: recentAttemptChain(started, 10),
 		})
 	}()
+	defer func() {
+		if ctx.Err() == nil {
+			if pending == nil {
+				errors.As(err, &pending)
+			}
+			if pending != nil && resultOut == nil {
+				parseEngine = "mineru-task"
+			}
+			resultOut, err = pdfTaskResult(resultOut, pending, err)
+		}
+	}()
+	if params.WaitSeconds != nil && (*params.WaitSeconds < 0 || *params.WaitSeconds > 1800) {
+		return nil, nil, fmt.Errorf("wait_seconds 必须在 0-1800 秒之间")
+	}
+	if params.WaitSeconds != nil {
+		ctx = mineru.WithTaskWait(ctx, time.Duration(*params.WaitSeconds)*time.Second)
+	}
+	ctx = mineru.WithTaskProgress(ctx, func(status string) {
+		notifyProgress(ctx, req, 0, 1, "MinerU: "+status)
+	})
+	if params.TaskRef != "" {
+		if params.Path != "" || params.Pages != "" {
+			return nil, nil, fmt.Errorf("task_ref 查询沿用原任务页码，请省略 path 和 pages")
+		}
+		if webfetchInst == nil {
+			return nil, nil, fmt.Errorf("webfetch 未初始化，请先启用 cleanfetch")
+		}
+		result, resumeErr := webfetchInst.ResumeMinerUTask(ctx, params.TaskRef)
+		if errors.As(resumeErr, &pending) {
+			parseEngine = "mineru-task"
+			return textResult("> 任务状态（尚无正文）\n\n" + pending.Error()), nil, nil
+		}
+		if resumeErr != nil {
+			return nil, nil, resumeErr
+		}
+		parseEngine = result.ParseEngine
+		return textResult(fmt.Sprintf("> PDF 解析器: %s\n\n%s", parseEngine, formatWebFetchResult(result))), nil, nil
+	}
 	if params.Path == "" {
 		return nil, nil, fmt.Errorf("path 参数不能为空")
 	}
@@ -102,16 +143,80 @@ func PDFParserHandler(ctx context.Context, req *mcp.CallToolRequest, params *PDF
 		}
 	}
 
-	result, err := webfetchInst.FetchPDFWithPages(ctx, pdfPath, pages, maxPages)
-	if remote && (errors.Is(err, mineru.ErrPageLimit) || errors.Is(err, mineru.ErrRemoteURLRejected)) {
-		result, err = parseRemotePDFWithCrop(ctx, req, pdfPath, pages, maxPages)
+	var result *webfetch.Result
+	if remote {
+		var mineruErr error
+		if webfetchInst.CanUseMinerURemotePDF(pdfPath) {
+			result, mineruErr = webfetchInst.ParseMinerUPDFWithPages(ctx, pdfPath, pages, maxPages)
+		}
+		if errors.Is(mineruErr, mineru.ErrPageLimit) || errors.Is(mineruErr, mineru.ErrRemoteURLRejected) {
+			result, mineruErr = parseRemotePDFWithCrop(ctx, req, pdfPath, pages, maxPages)
+		}
+		errors.As(mineruErr, &pending)
+		if ctx.Err() != nil {
+			return nil, nil, fmt.Errorf("PDF 解析已取消: %w", errors.Join(ctx.Err(), mineruErr))
+		}
+		if result == nil {
+			maxSizeMB := cleanFetchMaxSizeMB
+			if maxSizeMB <= 0 {
+				maxSizeMB = 10
+			}
+			source, cleanup, downloadErr := downloadPDFWithLimit(ctx, pdfPath, int64(maxSizeMB)*1024*1024)
+			err = downloadErr
+			if err == nil {
+				defer cleanup()
+				localURL, _ := resolvePDFPath(source)
+				result, err = webfetchInst.FetchPDFWithPages(ctx, localURL, pages, maxPages)
+				if err == nil {
+					err = webfetchInst.StoreLargePDFResult(result, pdfPath)
+				}
+			}
+			if mineruErr != nil {
+				if err != nil {
+					err = fmt.Errorf("MinerU 解析失败: %w；PDF 文本回退失败: %w", mineruErr, err)
+				} else {
+					result.Preamble = fmt.Sprintf("> MinerU 未取得精准结果（%v），本次返回 PDF 文本提取；图片未随文本返回。\n\n%s", mineruErr, result.Preamble)
+				}
+			}
+		}
+	} else {
+		result, err = webfetchInst.FetchPDFWithPages(ctx, pdfPath, pages, maxPages)
 	}
 	if err != nil {
-		return nil, nil, fmt.Errorf("PDF 解析失败: %v", err)
+		if !remote {
+			return nil, nil, fmt.Errorf("PDF 解析失败: %w；本地路径须对服务进程可见，Docker 中须使用容器内或已挂载路径，不能直接使用 file_search 的宿主机路径", err)
+		}
+		return nil, nil, fmt.Errorf("PDF 解析失败: %w", err)
 	}
 	parseEngine = result.ParseEngine
 	parsedPages = result.ParsedPages
-	return textResult(formatWebFetchResult(result)), nil, nil
+	text := formatWebFetchResult(result)
+	if parseEngine != "" {
+		text = fmt.Sprintf("> PDF 解析器: %s\n\n%s", parseEngine, text)
+	}
+	return textResult(text), nil, nil
+}
+
+// pdfTaskResult keeps unfinished task state separate from document content.
+func pdfTaskResult(result *mcp.CallToolResult, pending *mineru.TaskPendingError, err error) (*mcp.CallToolResult, error) {
+	if pending == nil {
+		errors.As(err, &pending)
+	}
+	if pending == nil {
+		return result, err
+	}
+	if result == nil {
+		message := pending.Error()
+		if err != nil {
+			message = err.Error()
+		}
+		result = textResult("> 任务状态（尚无正文）\n\n" + message)
+		err = nil
+	}
+	result.Meta = mcp.Meta{"websearch/mineru_task": map[string]any{
+		"task_ref": pending.TaskRef, "status": pending.Status, "completed": false,
+	}}
+	return result, nil
 }
 
 // parseRemotePDFWithCrop 远程 PDF 的本地裁切回退：MinerU 拒绝原文件（页数超限
@@ -156,10 +261,24 @@ func parseRemotePDFWithCrop(ctx context.Context, req *mcp.CallToolRequest, pdfPa
 		if cropErr != nil {
 			return nil, cropErr
 		}
-		part, err := webfetchInst.ParseCroppedPDF(ctx, cropped)
+		batchCtx := mineru.WithTaskProgress(ctx, func(status string) {
+			notifyProgress(ctx, req, float64(parsed), float64(len(selected)), "MinerU: "+status)
+		})
+		part, err := webfetchInst.ParseCroppedPDF(batchCtx, cropped)
 		removeCropped()
 		if err != nil {
 			if parsed > 0 {
+				var pending *mineru.TaskPendingError
+				if errors.As(err, &pending) {
+					partial := &webfetch.Result{Mode: "inline", Markdown: merged.String(), PageCount: total,
+						ParsedPages: parsed, ParseEngine: "mineru-remote", Preamble: fmt.Sprintf(
+							"> 已取得前 %d 批（%d 页）的精准正文；第 %d/%d 批原页码 %d-%d 尚未完成。续查引用只返回该批，批内页码从 1 编号。\n> %s",
+							i, parsed, i+1, len(batches), batch[0], batch[len(batch)-1], pending.Error())}
+					if saveErr := webfetchInst.StoreLargePDFResult(partial, pdfPath); saveErr != nil {
+						return nil, fmt.Errorf("保存已完成批次失败: %w；%w", saveErr, err)
+					}
+					return partial, err
+				}
 				return nil, fmt.Errorf("第 %d/%d 批（原页码 %d-%d）解析失败（前 %d 页已成功，可用 pages 续读）: %w",
 					i+1, len(batches), batch[0], batch[len(batch)-1], parsed, err)
 			}

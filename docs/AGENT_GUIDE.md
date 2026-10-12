@@ -69,8 +69,10 @@ curl -s http://127.0.0.1:8338/__admin/health   # 期望 {"ref_count":N,"message"
 
 | 参数 | 必填 | 说明 |
 |------|------|------|
-| `path` | ✅ | 本地 PDF 路径或 http(s) URL（学术结果的 `pdf_url` 可直接传入） |
+| `path` | 新解析必填 | 本地 PDF 路径或 http(s) URL（学术结果的 `pdf_url` 可直接传入）；续查 `task_ref` 时省略 |
 | `pages` | | 页码范围（1-based），如 `1-10`、`1,3,5-7`；省略时只解析前 20 页并提示续读 |
+| `task_ref` | | 使用返回的 `standard:`、`batch:` 或 `agent:` 引用查询原任务；与 `path/pages` 互斥，默认只查一次 |
+| `wait_seconds` | | 0-1800，每个 MinerU 任务的等待上限；新解析默认 300，续查默认 0。等待结束保留状态与引用，不重新提交 |
 
 原件超页或 MinerU 拒绝源 URL 时自动本地裁切所选页再上传（可 `mineru_page_batch_size` 分批、`mineru_page_budget` 限单次额度），分批进度经 MCP progress notification 实时推送；单次显式页数受 `max_pages`（默认 20）约束
 

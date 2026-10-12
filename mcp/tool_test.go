@@ -636,7 +636,8 @@ func TestHeadCheckRedirectToPrivateRejected(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, target, http.StatusFound)
 		}))
-		err := headCheck(context.Background(), srv.URL)
+		usePDFTestProxy(t, srv.URL)
+		err := headCheck(context.Background(), "http://93.184.216.34/probe")
 		srv.Close()
 		if err == nil || !strings.Contains(err.Error(), "不安全") {
 			t.Errorf("redirect to %s should be rejected, got %v", target, err)
@@ -654,7 +655,8 @@ func TestHeadCheckRedirectToPublicAllowed(t *testing.T) {
 		http.Redirect(w, r, "http://192.0.2.1/x", http.StatusFound)
 	}))
 	defer srv.Close()
-	if err := headCheck(context.Background(), srv.URL); err != nil {
+	usePDFTestProxy(t, srv.URL)
+	if err := headCheck(context.Background(), "http://93.184.216.34/probe"); err != nil {
 		t.Fatalf("redirect to public IP should be allowed, got %v", err)
 	}
 }

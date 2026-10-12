@@ -125,6 +125,8 @@ dashboard:
 | `brand.icon` | path | empty | Custom .ico; lightweight per-boot check, rebuilt on change |
 | `brand.footer` | bool | `true` | Sidebar "about" intro (GitHub link); `false` hides the block |
 
+Recognized DBLP Anubis challenge pages are recorded as human-verification failures for both tool and provider, not ordinary empty searches. When no usable results remain and engines have failed, their individual reasons are retained. Historical parse-failure events are unchanged. Detection does not bypass upstream verification or automatically change source switches or actual cooldowns.
+
 ## Quota management (`quotas`)
 
 Shipped:

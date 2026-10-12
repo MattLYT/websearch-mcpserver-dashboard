@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 	"websearch/pkg/config"
+	fetchcontent "websearch/pkg/fetch"
 	"websearch/pkg/fetch/mineru"
 	"websearch/pkg/log"
 
@@ -48,6 +49,7 @@ type mineruParser interface {
 	ParseURL(ctx context.Context, fileURL string) (string, error)
 	ParseURLWithPages(ctx context.Context, fileURL string, pages []int, maxPages int) (string, error)
 	ParseStandardFile(ctx context.Context, filePath string) (string, error)
+	ResumeTask(ctx context.Context, taskRef string) (string, error)
 	ParseFileWithPages(ctx context.Context, filePath string, pages []int, maxPages int) (string, error)
 }
 
@@ -58,8 +60,10 @@ type Fetcher struct {
 	mineruOCR       bool // 本地 PDF 库读不到文本时是否回退 MinerU OCR
 	mineruRemotePDF bool // 远程 PDF URL 是否走 MinerU 精准 API（配置 pdf_parser.mineru_remote_pdf）
 
-	outputDir string        // 大文本落盘目录（清理范围仅限此目录）
-	fileTTL   time.Duration // 落盘文件保留时长
+	outputDir      string        // 大文本落盘目录（清理范围仅限此目录）
+	fileTTL        time.Duration // 落盘文件保留时长
+	maxInlineLines int
+	maxInlineChars int
 
 	cleanupStop  chan struct{} // 关闭以停止过期文件清理协程
 	inflight     atomic.Int64  // 进行中的抓取数（空闲判定用）
@@ -123,6 +127,8 @@ func NewFromConfig(cfg config.CleanFetchConfig, pdfCfg config.PDFParserConfig, p
 		mineruRemotePDF: pdfCfg.MinerURemotePDF,
 		outputDir:       outputDir,
 		fileTTL:         fileTTL,
+		maxInlineLines:  maxInlineLines,
+		maxInlineChars:  cfg.MaxInlineChars,
 	}
 	f.startFileJanitor(fileTTL)
 
@@ -174,7 +180,10 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (*Result, error) {
 
 	res, err := f.engine.Fetch(ctx, rawURL)
 	if err != nil {
-		return nil, fmt.Errorf("%s", classifyError(err))
+		return nil, fmt.Errorf("%s: %w", classifyError(err), err)
+	}
+	if res.Mode == "inline" && !fetchcontent.HasPageBody(res.Markdown, res.Title) {
+		return nil, fmt.Errorf("未获得页面正文(可能需要 JavaScript 渲染): %w", &webfetch.EmptyContentError{URL: rawURL, Title: res.Title, CharCount: res.TotalChars})
 	}
 	return &Result{
 		Title:       res.Title,
@@ -190,18 +199,40 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (*Result, error) {
 }
 
 // isPDFURL 判断远程 URL 是否指向 PDF 文件。
-// 仅按 URL path（忽略 query/fragment）的 .pdf 后缀判断，大小写不敏感。
+// Recognize .pdf paths and arXiv's canonical extensionless PDF endpoint.
+var arxivPDFPath = regexp.MustCompile(`^/pdf/(?:[0-9]{4}\.[0-9]{4,5}|[a-zA-Z][a-zA-Z0-9.-]*/[0-9]{7})(?:v[1-9][0-9]*)?$`)
+
 func isPDFURL(rawURL string) bool {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return false
 	}
-	return strings.HasSuffix(strings.ToLower(u.Path), ".pdf")
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return false
+	}
+	return strings.HasSuffix(strings.ToLower(u.Path), ".pdf") ||
+		(strings.EqualFold(u.Hostname(), "arxiv.org") && arxivPDFPath.MatchString(u.Path))
 }
 
 // CanUseMinerURemotePDF reports whether this URL takes the precise MinerU route.
 func (f *Fetcher) CanUseMinerURemotePDF(rawURL string) bool {
 	return f.mineru != nil && f.mineru.HasToken() && f.mineruRemotePDF && isPDFURL(rawURL)
+}
+
+// ParseMinerUPDFWithPages attempts only the precise API, so callers can choose a local fallback.
+func (f *Fetcher) ParseMinerUPDFWithPages(ctx context.Context, rawURL string, pages []int, maxPages int) (*Result, error) {
+	f.beginActivity()
+	defer f.endActivity()
+	if !f.CanUseMinerURemotePDF(rawURL) {
+		return nil, fmt.Errorf("MinerU precise PDF route is not enabled for this URL")
+	}
+	log.Infof("MinerU 精准 API 命中 PDF URL: %s", rawURL)
+	md, err := f.mineru.ParseURLWithPages(ctx, rawURL, pages, maxPages)
+	if err != nil {
+		return nil, err
+	}
+	return &Result{Mode: "inline", Markdown: md, ParseEngine: "mineru-remote",
+		Preamble: mineruPageNote(pages, maxPages, false, f.mineru.PageLimit())}, nil
 }
 
 // ParseCroppedPDF uploads a locally selected PDF through MinerU's precise API.
@@ -216,6 +247,29 @@ func (f *Fetcher) ParseCroppedPDF(ctx context.Context, path string) (*Result, er
 		return nil, err
 	}
 	return &Result{Mode: "inline", Markdown: md, ParseEngine: "mineru-remote"}, nil
+}
+
+// ResumeMinerUTask retrieves the original task's selected pages without resubmission.
+func (f *Fetcher) ResumeMinerUTask(ctx context.Context, taskRef string) (*Result, error) {
+	f.beginActivity()
+	defer f.endActivity()
+	if f.mineru == nil {
+		return nil, fmt.Errorf("MinerU 未启用，无法查询已有任务")
+	}
+	md, err := f.mineru.ResumeTask(ctx, taskRef)
+	if err != nil {
+		return nil, err
+	}
+	engine := "mineru-remote"
+	if strings.HasPrefix(taskRef, "agent:") {
+		engine = "mineru-ocr"
+	}
+	result := &Result{Mode: "inline", Markdown: md, ParseEngine: engine,
+		Preamble: "> 已取回原 MinerU 任务结果；页码范围沿用原任务，上传裁切任务的页码从 1 重新编号。"}
+	if err := f.StoreLargePDFResult(result, taskRef); err != nil {
+		return nil, fmt.Errorf("MinerU 结果保存失败: %w；task_ref=%q", err, taskRef)
+	}
+	return result, nil
 }
 
 // localPathFromFileURL 将 file:// URL 规范为本地文件路径（兼容 Windows 三斜杠格式）。
@@ -243,14 +297,13 @@ func (f *Fetcher) FetchPDFWithPages(ctx context.Context, rawURL string, pages []
 
 	// 远程 PDF：MinerU 精准 API 优先（与 Fetch 一致）
 	var mineruErr error
-	if f.mineru != nil && f.mineru.HasToken() && f.mineruRemotePDF && isPDFURL(rawURL) {
-		log.Infof("MinerU 精准 API 命中 PDF URL: %s", rawURL)
-		md, err := f.mineru.ParseURLWithPages(ctx, rawURL, pages, maxPages)
+	if f.CanUseMinerURemotePDF(rawURL) {
+		result, err := f.ParseMinerUPDFWithPages(ctx, rawURL, pages, maxPages)
 		if err == nil {
-			return &Result{
-				Mode: "inline", Markdown: md, ParseEngine: "mineru-remote",
-				Preamble: mineruPageNote(pages, maxPages, false, f.mineru.PageLimit()),
-			}, nil
+			return result, nil
+		}
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("MinerU 解析失败: %w；调用上下文已结束: %w", err, ctx.Err())
 		}
 		if errors.Is(err, mineru.ErrPageLimit) || errors.Is(err, mineru.ErrRemoteURLRejected) {
 			return nil, err
@@ -280,9 +333,9 @@ func (f *Fetcher) FetchPDFWithPages(ctx context.Context, rawURL string, pages []
 	}
 	if err != nil {
 		if mineruErr != nil {
-			return nil, fmt.Errorf("MinerU 解析失败: %v；PDF 文本回退失败: %s", mineruErr, classifyError(err))
+			return nil, fmt.Errorf("MinerU 解析失败: %w；PDF 文本回退失败: %s: %w", mineruErr, classifyError(err), err)
 		}
-		return nil, fmt.Errorf("%s", classifyError(err))
+		return nil, fmt.Errorf("%s: %w", classifyError(err), err)
 	}
 
 	out := &Result{
@@ -299,7 +352,7 @@ func (f *Fetcher) FetchPDFWithPages(ctx context.Context, rawURL string, pages []
 	out.ParsedPages = parsedPDFPageCount(pages, maxPages, out.PageCount)
 	out.Preamble = pdfPagesPreamble(out, pages, maxPages)
 	if mineruErr != nil {
-		out.Preamble = fmt.Sprintf("> MinerU 解析失败（%v），已改用 PDF 文本提取；图片未随文本返回。\n\n%s", mineruErr, out.Preamble)
+		out.Preamble = fmt.Sprintf("> MinerU 未取得精准结果（%v），本次返回 PDF 文本提取；图片未随文本返回。\n\n%s", mineruErr, out.Preamble)
 	}
 	return out, nil
 }
@@ -388,7 +441,7 @@ func (f *Fetcher) parseLocalPDFWithPages(ctx context.Context, localPath string, 
 	if errors.Is(mineruErr, mineru.ErrFileTooLarge) {
 		return nil, fmt.Errorf("%w；MinerU OCR 回退失败: 文件超过 Agent API 限制(10MB)", err)
 	}
-	return nil, fmt.Errorf("%w；MinerU OCR 回退失败: %v", err, mineruErr)
+	return nil, fmt.Errorf("%w；MinerU OCR 回退失败: %w", err, mineruErr)
 }
 
 // needsOCRFallback 判断本地解析失败是否因无文本层（扫描件等），适合 OCR 回退。
@@ -429,6 +482,7 @@ func (f *Fetcher) parsePDFFileOpts(ctx context.Context, filePath string, opts []
 		AgentHint:   cleanAgentHint(res.AgentHint),
 		PageCount:   res.PageCount,
 		ParseEngine: "pdf-lib",
+		ParsedPages: len(res.Pages),
 	}, nil
 }
 

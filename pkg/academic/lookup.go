@@ -20,8 +20,8 @@ var (
 	unpaywallGate = make(chan struct{}, 4)
 )
 
-// LookupDOI 并发打 OpenAlex + Crossref 单篇端点，不走 Engine.Search()。
-func LookupDOI(ctx context.Context, doi string) []antirobot.Result {
+// LookupDOI queries Crossref and optionally OpenAlex for a single DOI.
+func LookupDOI(ctx context.Context, doi string, openalex antirobot.OpenAlexOpts) []antirobot.Result {
 	doi = stringsTrimDOI(doi)
 	if doi == "" {
 		return nil
@@ -31,15 +31,18 @@ func LookupDOI(ctx context.Context, doi string) []antirobot.Result {
 		all  []antirobot.Result
 		wg   sync.WaitGroup
 	)
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		if rs := lookupOpenAlexDOI(ctx, doi); len(rs) > 0 {
-			mu.Lock()
-			all = append(all, rs...)
-			mu.Unlock()
-		}
-	}()
+	wg.Add(1)
+	if openalex.Enabled {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if rs := lookupOpenAlexDOI(ctx, doi, openalex.APIKey); len(rs) > 0 {
+				mu.Lock()
+				all = append(all, rs...)
+				mu.Unlock()
+			}
+		}()
+	}
 	go func() {
 		defer wg.Done()
 		if rs := lookupCrossrefDOI(ctx, doi); len(rs) > 0 {
@@ -82,11 +85,14 @@ func LookupArxivID(ctx context.Context, id string) []antirobot.Result {
 	return parsed.Results
 }
 
-func lookupOpenAlexDOI(ctx context.Context, doi string) []antirobot.Result {
+func lookupOpenAlexDOI(ctx context.Context, doi, apiKey string) []antirobot.Result {
 	u := openalexAPI + "/works/" + url.PathEscape("https://doi.org/"+doi)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil
+	}
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 	resp, err := lookupClient.Do(req)
 	if err != nil {

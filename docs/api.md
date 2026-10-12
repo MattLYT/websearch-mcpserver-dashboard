@@ -161,10 +161,16 @@ MCP 客户端通过此端点完成协议握手、工具列表获取和工具调�
 | `smartsearch` | 网络检索 | `query`（必填）、`intent`（可选，LLM 启用时可用）、`time_range`（可选，月；默认 3）、`fetch_top_n`（可选：不传与旧版一致只返回自带内容（服务端默认 0 可配），传 0 只要标题摘要和 URL，传 1-5 获取前 N 条页面原文——API 引擎走快速路径、网页引擎内部抓取，反爬拦截会显式标注） |
 | `academicsearch` | 学术论文检索（arXiv / Crossref / OpenAlex / PubMed / Europe PMC / DBLP / DOAJ 等） | `query`（必填；也可直接传 DOI 或 arXiv id 走单篇精确查询，忽略 `engines`/`time_range`/`page`）、`engines`（可选）、`time_range`（可选：`year`/`month`/`week`/`day`）、`page`（可选） |
 | `cleanfetch` | 网页内容抓取，返回 Markdown | `url`（与 `urls` 至少一者）、`urls`（可选批量，合并去重最多 5 个） — 需配置 `cleanfetch.enabled` |
-| `pdf_parser` | PDF 解析，支持 MinerU AI 增强（表格/公式/多栏识别） | `path`（必填，本地路径或远程 URL）、`pages`（可选页码范围，如 1-10；单个区间宽度上限 1000 页） — 需配置 `pdf_parser.enabled`，可选 `mineru_token`；省略 pages 时受 `max_pages`（默认 20）约束。请求页码超出单任务上限（默认 600，`mineru_page_limit` 可调）或 MinerU 拒绝原件页数／URL 时，本地裁切所选页再上传（`mineru_page_batch_size` 可开启自动分批，`mineru_page_budget` 控制单次页数预算；分批进度经 MCP progress notification 实时推送）；精准 API 返回含图片 ZIP 地址，轻量 API 单次上限 20 页 |
+| `pdf_parser` | PDF 解析，支持 MinerU AI 增强（表格/公式/多栏识别） | `path`（新解析必填，本地路径或远程 URL；与 `task_ref` 互斥）、`task_ref`（续查原 MinerU 任务）、`wait_seconds`（0-1800，每任务新解析默认 300，续查默认 0）、`pages`（可选页码范围，如 1-10；单个区间宽度上限 1000 页） — 需配置 `pdf_parser.enabled`，可选 `mineru_token`；省略 pages 时受 `max_pages`（默认 20）约束。请求页码超出单任务上限（默认 600，`mineru_page_limit` 可调）或 MinerU 拒绝原件页数／URL 时，本地裁切所选页再上传（`mineru_page_batch_size` 可开启自动分批，`mineru_page_budget` 控制单次页数预算；分批进度经 MCP progress notification 实时推送）；精准 API 返回含图片 ZIP 地址，轻量 API 单次上限 20 页 |
 | `file_search` | 本地文件快速检索（Everything 索引，只读，Windows 专属） | `query`（必填，Everything 语法）、`folder`（可选目录限定，接受 Git Bash `/d/code/ai` 风格）、`match_case`/`whole_word`/`match_regex`/`match_diacritics`（可选原生过滤）、`max_results`（默认 10，硬上限 20）、`page`（页码，默认 1）、`sort`/`descending`、`exclude`（可选 NOT 排除项）、`min_alignment`（可选，覆盖服务端对齐阈值）、`time_format`（`datetime`/`iso`/`filetime`） — 无 enabled 开关：首个 MCP 客户端接入时探测 `everything.url`，通过即注册，探测不过不暴露；仅 Windows，Linux 发行版不建议启用（除非 WSL 指向 Windows 宿主）；`everything.roots` 白名单强制限定检索范围，二次过滤（对齐重排/噪声降权/阈值）防止弱匹配打爆上下文 |
 
 #### 响应行为
+
+`pdf_parser.path` 的本地路径须对服务进程可见：Docker 只能读取容器内或已挂载路径，不能直接复用 `file_search` 返回的宿主盘符路径。响应标明实际 PDF 解析器；MinerU 远程开关与 Token 生效时，支持 `.pdf` 和严格的 `arxiv.org/pdf/<编号>` 入口。文本提取沿用上游 go-webfetch，结果可能有词粘连、乱码或排版缺失；按任务检查可读性，缺失内容影响结论时改用公开 HTML、其他提取工具或 MinerU。
+
+`pdf_parser` 还接受 `wait_seconds`（0-1800，每任务新解析默认 300 秒）和 `task_ref`（`standard:<task_id>` / `batch:<batch_id>` / `agent:<task_id>`）。续查必须省略 `path/pages`，默认只查询一次；仍处理中返回状态与引用，完成后下载原任务结果，不提交新任务。超时保留最后状态与页进度；轮询间隔从 2 秒退避到最多 30 秒。Token 仍由服务端配置提供，参数不接收凭据。
+
+`cleanfetch` 拒绝仅标题/标准 skip 导航的空壳；允许回退时使用 Jina 正文模式，404/410、安全拦截和取消不回退。动态页面仍可能无法恢复正文，此时返回明确失败，不表示浏览器不可访问。
 
 四个工具共用统一响应契约（完整说明见 [docs/search.md](search.md#响应行为与可靠性)）：
 

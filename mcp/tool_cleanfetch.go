@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -10,6 +11,8 @@ import (
 	"websearch/pkg/fetch/webfetch"
 	"websearch/pkg/log"
 	"websearch/pkg/telemetry"
+
+	fetchengine "github.com/daidaiJ/go-webfetch"
 )
 
 import (
@@ -125,6 +128,9 @@ func fetchCleanPage(ctx context.Context, rawURL string) (string, error) {
 			return formatWebFetchResult(result), nil
 		}
 		recordProvider(telemetry.Event{Provider: "webfetch", Success: false, Duration: time.Since(started), Error: err})
+		if !allowFetchFallback(err) {
+			return "", err
+		}
 		log.Infof("webfetch 抓取失败(%v)，尝试回退到 Jina Reader", err)
 
 		// ── 第二层：Jina Reader（需代理，jinaInst != nil 即表示代理已开启）──
@@ -152,6 +158,14 @@ func fetchCleanPage(ctx context.Context, rawURL string) (string, error) {
 	}
 
 	return "", fmt.Errorf("webfetch 和 jina reader 均未初始化")
+}
+
+func allowFetchFallback(err error) bool {
+	var missing *fetchengine.NotFoundError
+	var blocked *fetchengine.SSRFError
+	var challenge *fetchengine.WAFError
+	return err != nil && !errors.As(err, &missing) && !errors.As(err, &blocked) &&
+		!errors.As(err, &challenge) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)
 }
 
 func textResult(s string) *mcp.CallToolResult {

@@ -215,11 +215,17 @@ func TestNewFromConfigDefaults(t *testing.T) {
 
 // spyMineru 记录调用次数的 MinerU 客户端替身。
 type spyMineru struct {
-	hasToken      bool
-	parseURLCalls int
-	parseURLErr   error
-	pages         []int
-	maxPages      int
+	hasToken       bool
+	parseURLCalls  int
+	parseURLErr    error
+	pages          []int
+	maxPages       int
+	resumeResult   string
+	resumeErr      error
+	resumeRef      string
+	resumeCalls    int
+	parseFileErr   error
+	parseFileCalls int
 }
 
 func (s *spyMineru) HasToken() bool { return s.hasToken }
@@ -233,23 +239,48 @@ func (s *spyMineru) ParseURLWithPages(ctx context.Context, fileURL string, pages
 	s.pages, s.maxPages = pages, maxPages
 	return "# MinerU", s.parseURLErr
 }
+func (s *spyMineru) ResumeTask(ctx context.Context, taskRef string) (string, error) {
+	s.resumeCalls++
+	s.resumeRef = taskRef
+	if s.resumeResult != "" {
+		return s.resumeResult, s.resumeErr
+	}
+	return "resumed result", s.resumeErr
+}
 func (s *spyMineru) ParseStandardFile(ctx context.Context, filePath string) (string, error) {
 	return "# MinerU upload", nil
 }
 func (s *spyMineru) ParseFileWithPages(ctx context.Context, filePath string, pages []int, maxPages int) (string, error) {
-	return "", nil
+	s.parseFileCalls++
+	return "", s.parseFileErr
 }
 
 // stubEngine 返回固定结果的抓取引擎替身。
-type stubEngine struct{}
+type stubEngine struct {
+	fetchCalls         int
+	fetchWithOptsCalls int
+	fetchErr           error
+	pdfErr             error
+}
 
 func (e *stubEngine) Fetch(ctx context.Context, rawURL string) (*webfetch.FetchResult, error) {
+	e.fetchCalls++
+	if e.fetchErr != nil {
+		return nil, e.fetchErr
+	}
 	return &webfetch.FetchResult{Title: "stub", Mode: "inline", Markdown: "stub"}, nil
 }
 func (e *stubEngine) FetchWithOpts(ctx context.Context, rawURL string, opts webfetch.FetchOptions) (*webfetch.FetchResult, error) {
+	e.fetchWithOptsCalls++
+	if e.fetchErr != nil {
+		return nil, e.fetchErr
+	}
 	return &webfetch.FetchResult{Title: "stub", Mode: "inline", Markdown: "stub"}, nil
 }
 func (e *stubEngine) ParsePDFFile(ctx context.Context, filePath string, opts ...webfetch.PDFOption) (*webfetch.PDFResult, error) {
+	if e.pdfErr != nil {
+		return nil, e.pdfErr
+	}
 	return &webfetch.PDFResult{Title: "stub", Mode: "inline", Markdown: "stub"}, nil
 }
 func (e *stubEngine) Close() error { return nil }

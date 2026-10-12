@@ -52,7 +52,7 @@ func streamSummarize(ctx context.Context, req *mcp.CallToolRequest, query, inten
 // notifyProgress 向 MCP 客户端推送进度通知（StreamableHTTP 传输下实时到达）。
 // 推送失败仅记录日志，不影响主流程。
 func notifyProgress(ctx context.Context, req *mcp.CallToolRequest, progress, total float64, message string) {
-	if req == nil || req.Session == nil {
+	if req == nil || req.Session == nil || req.Params == nil || req.Params.GetProgressToken() == nil {
 		return
 	}
 	params := &mcp.ProgressNotificationParams{
