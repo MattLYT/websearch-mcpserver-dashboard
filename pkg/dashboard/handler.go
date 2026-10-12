@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -54,7 +55,7 @@ func IsLoopbackRemote(r *http.Request) bool {
 }
 
 // authorizeWrite 是所有写端点的统一闸门：
-//  1. 仅限 loopback —— allowed_networks 放行的远程查看者永远只读；
+//  1. loopback 或独立 write_allowed_networks；读白名单不会授予写权限；
 //  2. 管理员口令 —— 必须在 dashboard.yaml 显式配置 dashboard.admin_password
 //     （或 admin_password_sha256），经 X-Admin-Password 头随请求提交。
 //     该口令不在设置页白名单、不写入 secrets 覆盖文件，即 WebUI 无法读取
@@ -63,8 +64,8 @@ func IsLoopbackRemote(r *http.Request) bool {
 //     X-Admin-User 头匹配（常量时间比较）；未配置 = 与口令-only 行为一致，
 //     不做任何用户名检查。
 func (h *Handler) authorizeWrite(w http.ResponseWriter, r *http.Request) bool {
-	if !IsLoopbackRemote(r) {
-		writeJSON(w, http.StatusForbidden, map[string]any{"error": "写操作仅限本机 loopback 访问"})
+	if allowed, reason := h.writeAccess(r); !allowed {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": reason})
 		return false
 	}
 	if !h.conf.Dashboard.AdminPasswordConfigured() {
@@ -246,7 +247,13 @@ func (h *Handler) quotas(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) settings(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		writeJSON(w, http.StatusOK, settingsView(h.conf))
+		out := settingsFileView(h.conf, config.GetConfigFile())
+		allowed, reason := h.writeAccess(r)
+		if out["config_error"] != nil {
+			allowed, reason = false, "配置文件不可读取或解析"
+		}
+		out["write_access"] = map[string]any{"allowed": allowed, "reason": reason}
+		writeJSON(w, http.StatusOK, out)
 	case http.MethodPost:
 		if !h.authorizeWrite(w, r) {
 			return
@@ -256,15 +263,51 @@ func (h *Handler) settings(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
 		}
-		out, err := applySettings(h.conf, req)
+		out, err := applySettingsFile(h.conf, req, config.GetConfigFile(), func() error {
+			if h.cache == nil {
+				return nil
+			}
+			_, err := h.cache.Clear()
+			return err
+		})
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			status := http.StatusBadRequest
+			if errors.Is(err, errSettingsConflict) {
+				status = http.StatusConflict
+			}
+			writeJSON(w, status, map[string]any{"error": err.Error()})
 			return
 		}
 		writeJSON(w, http.StatusOK, out)
 	default:
 		methodNotAllowed(w)
 	}
+}
+
+func (h *Handler) writeAccess(r *http.Request) (bool, string) {
+	if !h.conf.Dashboard.AdminPasswordConfigured() {
+		return false, "管理员口令未配置，写操作已禁用"
+	}
+	if IsLoopbackRemote(r) {
+		return true, ""
+	}
+	networks, err := h.conf.Dashboard.ParseWriteAllowedNetworks()
+	if err != nil {
+		return false, "写访问白名单配置非法"
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(host)
+	if ip != nil {
+		for _, network := range networks {
+			if network.Contains(ip) {
+				return true, ""
+			}
+		}
+	}
+	return false, "当前连接仅有只读权限"
 }
 
 func (h *Handler) secrets(w http.ResponseWriter, r *http.Request) {

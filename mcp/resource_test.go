@@ -67,9 +67,12 @@ func TestRegisterResources_DisabledByConfig(t *testing.T) {
 }
 
 func TestRenderCapabilities_NoSecrets(t *testing.T) {
+	restoreGlobals(t)
+	searchapi = &mockSearch{name: "mock"}
 	conf := config.Config{}
 	conf.Bing.Enabled = true
 	conf.Tavily.SKList = []string{"sk-secret-1", "sk-secret-2"}
+	NewMCPServer(conf, nil)
 
 	text := renderCapabilities(conf)
 	if !strings.Contains(text, "smartsearch") {

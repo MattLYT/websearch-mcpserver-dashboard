@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 
 	"go.yaml.in/yaml/v3"
 
@@ -15,8 +14,10 @@ import (
 )
 
 type SettingsRequest struct {
-	Changes map[string]any `json:"changes"`
-	Confirm bool           `json:"confirm"`
+	Changes       map[string]any `json:"changes"`
+	Confirm       bool           `json:"confirm"`
+	Revision      string         `json:"revision"`
+	RestoreBackup string         `json:"restore_backup,omitempty"`
 }
 
 type SecretRequest struct {
@@ -30,10 +31,11 @@ type SettingsResult struct {
 	RestartRequired bool           `json:"restart_required"`
 	Backup          string         `json:"backup,omitempty"`
 	Changes         map[string]any `json:"changes"`
+	Revision        string         `json:"revision"`
 }
 
 func settingsView(c config.Config) map[string]any {
-	return map[string]any{
+	out := map[string]any{
 		"values": map[string]any{
 			"mode": c.Mode, "network": c.Network, "upstream_timeout_sec": c.UpstreamTimeoutSec,
 			"cache.enabled": c.CacheEnabled(), "cache.cleanup_interval": c.Cache.CleanupInterval,
@@ -44,7 +46,8 @@ func settingsView(c config.Config) map[string]any {
 			"smartsearch.relevance_threshold": c.SmartSearch.RelevanceThreshold,
 			"smartsearch.mmr.enabled":         c.SmartSearch.MMR.Enabled,
 			"smartsearch.mmr.lambda":          c.SmartSearch.MMR.Lambda,
-			"doubao.version":                  c.Doubao.GetVersion(), "apipool.engines": c.Apipool.GetEngines(),
+			"doubao.version":                  c.Doubao.GetVersion(), "doubao.icp_host_only": c.Doubao.ICPHostOnly,
+			"apipool.engines":                           c.Apipool.GetEngines(),
 			"dashboard.suspension.ban_time_on_fail":     c.Dashboard.Suspension.BanTimeOnFail,
 			"dashboard.suspension.max_ban_time_on_fail": c.Dashboard.Suspension.MaxBanTimeOnFail,
 			"dashboard.suspension.suspended_times":      c.Dashboard.Suspension.SuspendedTimes,
@@ -56,72 +59,27 @@ func settingsView(c config.Config) map[string]any {
 			"MINERU_TOKEN": c.PDFParser.MinerUToken != "",
 		},
 		// 管理员口令只暴露“是否已配置”，值本身永不离开服务端，
-		// 也不能通过本控制台修改（只能手改 config.yaml 后重启）。
+		// 也不能通过本控制台修改（只能手改 dashboard.yaml 后重启）。
 		"admin_password_configured": c.Dashboard.AdminPasswordConfigured(),
 		"admin_username_configured": c.Dashboard.AdminUsername != "",
 		"networks": map[string]any{
 			"allowed": c.Dashboard.AllowedNetworks,
 		},
 	}
-}
-
-func applySettings(c config.Config, req SettingsRequest) (SettingsResult, error) {
-	out := SettingsResult{Changes: req.Changes, RestartRequired: len(req.Changes) > 0}
-	if len(req.Changes) == 0 {
-		return out, fmt.Errorf("no changes supplied")
-	}
-	for path, value := range req.Changes {
-		if err := validateSetting(path, value); err != nil {
-			return out, err
+	values := out["values"].(map[string]any)
+	for _, source := range SourceCatalog(c) {
+		value := source.Enabled
+		if source.Inverted {
+			value = !value
 		}
+		values[source.ControlPath] = value
 	}
-	if !req.Confirm {
-		return out, nil
-	}
-	path := config.GetConfigFile()
-	if path == "" {
-		return out, fmt.Errorf("active config file is unknown")
-	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return out, fmt.Errorf("read active config: %w", err)
-	}
-	var doc yaml.Node
-	if err := yaml.Unmarshal(b, &doc); err != nil {
-		return out, fmt.Errorf("parse active config: %w", err)
-	}
-	for path, value := range req.Changes {
-		if err := setYAMLPath(&doc, strings.Split(path, "."), value); err != nil {
-			return out, err
-		}
-	}
-	next, err := yaml.Marshal(&doc)
-	if err != nil {
-		return out, fmt.Errorf("encode config: %w", err)
-	}
-	backupDir := filepath.Join(filepath.Dir(c.GetDashboardStoragePath()), "dashboard-backups")
-	if err := os.MkdirAll(backupDir, 0o755); err != nil {
-		return out, err
-	}
-	backup := filepath.Join(backupDir, "config-"+time.Now().Format("20060102-150405")+".yaml")
-	if err := os.WriteFile(backup, b, 0o600); err != nil {
-		return out, fmt.Errorf("write backup: %w", err)
-	}
-	if err := os.WriteFile(path, next, 0o644); err != nil {
-		return out, fmt.Errorf("write active config: %w", err)
-	}
-	// Parse again after writing so a broken YAML file is never reported as applied.
-	var verify yaml.Node
-	if err := yaml.Unmarshal(next, &verify); err != nil {
-		_ = os.WriteFile(path, b, 0o644)
-		return out, fmt.Errorf("verify written config: %w", err)
-	}
-	out.Applied, out.Backup = true, backup
-	return out, nil
+	return out
 }
 
 func validateSetting(path string, value any) error {
-	boolPaths := []string{"cache.enabled", "bing.enabled", "duckduckgo.enabled", "google.enabled", "academic.enabled", "cleanfetch.enabled", "pdf_parser.enabled", "smartsearch.mmr.enabled"}
+	boolPaths := []string{"cache.enabled", "bing.enabled", "duckduckgo.enabled", "google.enabled", "academic.enabled", "cleanfetch.enabled", "pdf_parser.enabled", "smartsearch.mmr.enabled", "doubao.icp_host_only"}
+	boolPaths = append(boolPaths, "baidu.enabled", "tavily.enabled", "exa.enabled", "anysearch.enabled", "doubao.enabled", "baidu.web_enabled", "so360.enabled", "wikipedia.enabled", "google_news.enabled", "academic.disable_arxiv", "academic.disable_crossref", "academic.disable_openalex", "academic.disable_pubmed", "academic.disable_europepmc", "academic.disable_dblp", "academic.disable_doaj", "academic.disable_semantic_scholar", "academic.disable_google_scholar")
 	if slices.Contains(boolPaths, path) {
 		if _, ok := value.(bool); !ok {
 			return fmt.Errorf("%s must be boolean", path)

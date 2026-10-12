@@ -111,9 +111,9 @@ mcp/tool.go AcademicSearchHandler ─► doAcademicSearch
       ├► 缓存查询（key = query|timeRange|engines）
       ├► academicSearcher.SearchAcademicRaw
       │     └► pkg/search/adapter AcademicAdapter
-      │          ├► query 识别 DOI/arXiv id（pkg/academic/paperid.go + lookup.go）
-      │          │    → 单篇 lookup（OpenAlex+Crossref 并发 / 仅 arXiv）
-      │          ├► 否则九源 Engine.Search 并行（pkg/academic/*）─► antirobot
+      │          ├► 按已注册源与请求 engines 过滤，再识别 DOI/arXiv id（paperid.go + lookup.go）
+      │          │    → 允许的单篇 lookup（DOI: Crossref/OpenAlex；arXiv id: arXiv）
+      │          ├► 无对应精确源时，仅在所选可用源 Engine.Search 并行（pkg/academic/*）─► antirobot
       │          ├► 合并去重 + OA 补全（pkg/academic/unpaywall.go，UNPAYWALL_EMAIL）
       │          └► enhance.EnhanceAcademicResults（RRF + 引用数/期刊/PDF/新鲜度）
       └► formatAcademicResults（AcademicAdapter.MergeContentWithErrors，逐引擎错误透传）

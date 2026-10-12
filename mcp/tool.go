@@ -51,22 +51,22 @@ type CleanFetchParams struct {
 const maxBatchFetchURLs = 5
 
 var (
-	searchapi           search.SearchInf
-	searchGroup         *search.SearchGroup
-	fallbackSearch      *search.BingSearchAdapter
-	summarizerInst      *llm.Summarizer
-	cacheInst           *cache.Cache
-	jinaInst            *jina.Reader
-	webfetchInst        *webfetch.Fetcher
-	academicSearcher    search.AcademicSearcher
+	searchapi            search.SearchInf
+	searchGroup          *search.SearchGroup
+	fallbackSearch       *search.BingSearchAdapter
+	summarizerInst       *llm.Summarizer
+	cacheInst            *cache.Cache
+	jinaInst             *jina.Reader
+	webfetchInst         *webfetch.Fetcher
+	academicSearcher     search.AcademicSearcher
 	everythingInst       *everything.Client
 	everythingRoots      []string
 	everythingMaxResults int
 	everythingNoise      map[string]struct{}
 	everythingMinAlign   float64
-	smartSearchConf     config.SmartSearchConfig
-	cleanFetchMaxSizeMB int
-	pdfMaxPages         int
+	smartSearchConf      config.SmartSearchConfig
+	cleanFetchMaxSizeMB  int
+	pdfMaxPages          int
 	// MinerU 本地裁切路径的分批与预算参数（0 值语义见 config.PDFParserConfig）。
 	pdfMineruPageLimit  int
 	pdfMineruPageBatch  int
@@ -86,6 +86,7 @@ var (
 
 // Init 初始化 MCP 服务组件，通过 Option 模式按需加载。
 func Init(conf config.Config, opts ...ServerOption) error {
+	publishTools(pendingTools())
 	for _, opt := range opts {
 		opt()
 	}

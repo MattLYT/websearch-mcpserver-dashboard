@@ -105,7 +105,7 @@ func TestFinishWebSearch_OversizeDumps(t *testing.T) {
 
 	resp, _, err := finishWebSearch(context.Background(), nil, "q", "", "q",
 		[]search.SearchResult{{Title: "t", Url: "https://e.com/x"}}, diag, time.Hour,
-		provenance{retrievedAt: time.Now()})
+		provenance{retrievedAt: time.Now()}, nil)
 	if err != nil {
 		t.Fatalf("finishWebSearch failed: %v", err)
 	}

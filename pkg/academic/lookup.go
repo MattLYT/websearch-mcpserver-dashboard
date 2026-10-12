@@ -20,34 +20,39 @@ var (
 	unpaywallGate = make(chan struct{}, 4)
 )
 
-// LookupDOI 并发打 OpenAlex + Crossref 单篇端点，不走 Engine.Search()。
-func LookupDOI(ctx context.Context, doi string) []antirobot.Result {
+// LookupDOI queries only the allowed exact-lookup sources for a single DOI.
+func LookupDOI(ctx context.Context, doi string, crossref antirobot.CrossrefOpts, openalex antirobot.OpenAlexOpts) []antirobot.Result {
 	doi = stringsTrimDOI(doi)
 	if doi == "" {
 		return nil
 	}
 	var (
-		mu   sync.Mutex
-		all  []antirobot.Result
-		wg   sync.WaitGroup
+		mu  sync.Mutex
+		all []antirobot.Result
+		wg  sync.WaitGroup
 	)
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		if rs := lookupOpenAlexDOI(ctx, doi); len(rs) > 0 {
-			mu.Lock()
-			all = append(all, rs...)
-			mu.Unlock()
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		if rs := lookupCrossrefDOI(ctx, doi); len(rs) > 0 {
-			mu.Lock()
-			all = append(all, rs...)
-			mu.Unlock()
-		}
-	}()
+	if openalex.Enabled {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if rs := lookupOpenAlexDOI(ctx, doi); len(rs) > 0 {
+				mu.Lock()
+				all = append(all, rs...)
+				mu.Unlock()
+			}
+		}()
+	}
+	if crossref.Enabled {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if rs := lookupCrossrefDOI(ctx, doi); len(rs) > 0 {
+				mu.Lock()
+				all = append(all, rs...)
+				mu.Unlock()
+			}
+		}()
+	}
 	wg.Wait()
 	return antirobot.DeduplicateResults(all)
 }

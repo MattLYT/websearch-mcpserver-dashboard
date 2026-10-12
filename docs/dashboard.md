@@ -2,7 +2,7 @@
 
 [English](dashboard.en.md) | 中文
 
-本文件是控制中心（dashboard.yaml / WebUI）的**唯一完整配置参考**，覆盖安装行为、访问边界、安全模型、快捷方式、额度管理、品牌呈现与数据生命周期。主配置（config.yaml）的其它项见 [configuration.md](configuration.md)。
+本文件是控制中心（dashboard.yaml / WebUI）的**唯一完整配置参考**，覆盖源管理、工具运行态、安装行为、访问边界、安全模型、快捷方式、额度管理、品牌呈现与数据生命周期。主配置（config.yaml）的其它项见 [configuration.md](configuration.md)。本文说明配置与操作机制，不代表某个部署已经上线或完成验收。
 
 ---
 
@@ -14,13 +14,14 @@
 |---|---|---|
 | 是否启用 | 「要开启本机控制中心 WebUI 吗？」 | 全新部署默认启用 |
 | 访问范围 | 「只在本机用，还是局域网内其它设备也要看？」「如果放行网段，是哪些 CIDR？」 | 仅本机 loopback |
+| 写入来源 | 「是否需要放行非 loopback 的写入来源？Docker 宿主请求在服务端实测是什么 IP？」 | `write_allowed_networks: []`；读白名单不授权写入 |
 | 管理员口令 | 「写操作（改设置/Key/重启/清缓存/额度）需要一个本机管理员口令，你想自己设置一个，还是让我生成随机的？」 | 预设文件随机生成 |
 | 管理员用户名 | 「要不要配置可选的 admin_username？配置后写操作需要同时提供用户名」 | 不配置（只验证口令） |
 | 快捷方式 | 「要在桌面 / 开始菜单创建快捷方式吗？」 | desktop（桌面） |
 | 遥测保留 | 「调用明细保留 30 天可以吗？想更短/更长吗？」 | 30 天 |
 | 额度管理 | 「需要按周期自动重置用量吗？各供应商上限设多少？」 | monthly，默认 1000 次 |
 
-红线（无需确认、直接遵守）：**admin_password 永不写进主 config.yaml 之外的任何会回显的地方；WebUI 永远无法读取或修改口令；放行非本机网段必须人类明确同意。**
+红线（无需确认、直接遵守）：**管理员口令只在 dashboard.yaml 管理，不写入任何回显内容；WebUI 永远无法读取或修改口令；放行非本机读/写来源必须人类明确同意。**
 
 ---
 
@@ -37,7 +38,7 @@ cp dashboard.example.yaml dashboard.yaml   # 放在 config.yaml 同目录，按�
 
 - 控制台地址：`http://127.0.0.1:8338/dashboard/`（主服务端口）
 - 关闭：`dashboard.yaml` 改 `enabled: false` 或直接删除该文件 → 重启，运行时零遥测开销
-- 回退：控制中心所有状态（数据库、私密覆盖文件、快捷方式）都独立于主配置，删除即回退
+- 关闭控制中心不会撤销 WebUI 已保存至主 config.yaml 的源开关与设置；这些设置须按备份恢复流程回退，不要删除数据来替代配置回滚
 
 ## 配置文件与加载顺序
 
@@ -61,10 +62,11 @@ dashboard:
   secrets_path: "./data/dashboard-secrets.json"  # API Key 私密覆盖文件（接口永不回显）
   config_path: ""               # dashboard.yaml 自身路径；空 = 主配置同目录
 
-  # —— 访问边界（只读）——
+  # —— 独立读/写访问边界 ——
   allowed_networks: []          # CIDR/裸 IP 白名单；空 = 仅本机 loopback
-  # allowed_networks: ["192.168.1.0/24", "172.16.0.0/12"]
-  # 非法条目 = 整体回退仅本机（fail-closed）。写操作永远仅限本机。
+  write_allowed_networks: []    # 独立写白名单；空 = 仅 loopback，仍需管理员口令
+  # 每份白名单任一条目非法 = 该份整体回退 loopback（fail-closed）。
+  # Docker 例外只放行服务端实测网关单地址 /32，参见安全模型。
 
   # —— 管理员口令（写操作闸门）——
   admin_password: ""            # 明文；或用下面 SHA-256 形态，二选一
@@ -110,6 +112,7 @@ dashboard:
 | `secrets_path` | path | `./data/dashboard-secrets.json` | WebUI 写入的 Key 存这里，接口只返回「已配置」状态 |
 | `config_path` | path | 空 | dashboard.yaml 的自定义位置（也可用环境变量） |
 | `allowed_networks` | []string | `[]` | 只读放行网段；fail-closed |
+| `write_allowed_networks` | []string | `[]` | 独立写白名单；空/非法 = 仅 loopback；口令校验不变，读白名单不授予写权限；overlay 显式 `[]` 可撤销主配置写白名单 |
 | `admin_password` | string | 空 | 写操作口令（明文形态） |
 | `admin_password_sha256` | string | 空 | 写操作口令（SHA-256 形态，更推荐） |
 | `admin_username` | string | 空 | 可选管理员用户名；配置后写请求必须携带匹配的 `X-Admin-User` 头（常量时间比较），未配置 = 不做用户名检查。与口令一样只住 dashboard.yaml，WebUI 无法读取或修改 |
@@ -120,7 +123,7 @@ dashboard:
 
 ## 额度管理（`quotas`）
 
-已落地：
+当前机制：
 
 - **本地真实调用计数**：用量 = 遥测中该供应商本周期内的真实成功调用数（非本地估算、非主动探测），设置页「额度管理」面板按供应商展示 已用 / 上限 / 剩余
 - **上限由用户自设，按 Key 数自动换算**：`quotas.limits` 按供应商配置**单 Key** 每周期上限（次），未配置的用默认 1000；实际展示上限 = 单 Key 上限 × 已配置 Key 数（与 apipool 按可用 Key 数累加的实际消耗容量对齐，无需手工换算）；上限只影响展示与剩余量计算，不阻断调用
@@ -140,6 +143,39 @@ dashboard:
 | `brand.accent` | color | 空 | `#RGB`/`#RRGGBB`；设置后覆盖主题主色 |
 | `brand.icon` | path | 空 | 自定义 .ico；每次启动轻量检查，变化即重建快捷方式 |
 | `brand.footer` | bool | `true` | 侧边栏底部「关于」项目介绍（GitHub 链接）；`false` 整块隐藏 |
+
+## 源管理与保存
+
+设置提供 `hybrid`、`engine`、`apipool` 和“单供应商”四个模式入口；单供应商下再选 `baidu`、`tavily`、`exa`、`anysearch` 或 `doubao`。保存仍使用原有八种 `mode` 值，旧配置无需迁移。“单供应商”表示优先使用所选供应商，不禁用既有回退。模式及所选供应商的信息标注支持悬停、键盘聚焦或点击；说明依据 [v3.7.0 搜索模式文档](https://github.com/daidaiJ/websearch-mcpserver/blob/v3.7.0/docs/search.md#搜索模式)，并明确本地来源开关约束。API 调度池受其调度策略与权重影响。高级“学术搜索网络环境”只对应独立学术适配区域，不是豆包或全局网页地域筛选。桌面设置页左右两栏各按内容高度排列，不强制等高：左栏常用设置、外观与维护，右栏 API Key 状态、额度管理；窄屏按单列排列。
+
+“搜索源 → API 供应商 → 豆包”的接口版本选择管理 `doubao.version`（Global / Custom），独立于检索模式。复用共享草稿、差异预览、保存重启和备份恢复；环境覆盖时锁定，变更清理搜索缓存，不变更 Key。页面不提供 ICP 过滤编辑，不重置已有 `doubao.icp_host_only` 配置。
+
+源列表分为网页/API 与学术源，显示启用开关和被动健康观测。开关采用本地嵌入的 [Bootstrap 5.3.8 Switch](https://getbootstrap.com/docs/5.3/forms/checks-radios/#switches) HTML/CSS 子集，无 CDN、脚本或整库依赖；适配桌面鼠标操作，不额外展示运行/条件列。已开启但缺 Key、未被当前模式选用或未满足运行条件的源不等于已参与；尚无调用也不等于异常。关闭源会保留其历史记录与 Key。五 API 独立开关和 AnySearch 匿名档约束、百度网页独立开关及精确查询规则见 [搜索源与模式路由](configuration.md#搜索源与模式路由)。
+
+1. 修改源开关或常用设置只生成浏览器内共享草稿；页面轮询和切换标签不会立即写配置。撤销只丢弃未保存草稿，不撤销已有运行配置。
+2. 「保存并重启」先向服务端预览/校验，再显示字段的前后差异供确认。当前模式必须保留至少一个可参与网页源；学术工具开启时也须至少保留一个可参与学术源。校验不会把必需代理无法解析的源计为最后一个可用源，但不探测代理或上游服务的健康。配置错误、只读环境或锁定字段不会通过确认写入。
+3. 确认后备份当前主配置、精确修改可编辑字段并读回验证；影响源路由的变更会清理旧搜索缓存，随后请求重启。缓存通过持久化代际与源配置指纹防止旧在途请求重新写回已失效结果，重启后同样有效。界面核对磁盘已保存值与重启后的运行值，二者一致才显示「运行配置已确认生效」。仅保存成功、API暂时恢复或未出现错误都不足以说明生效。
+4. 重启未确认时保留「未确认生效」状态并提供重试；备份列表非空时，正常成功状态也可使用「恢复备份并重启」，恢复前仍预览差异并确认。备份位于遥测数据库同目录的 `dashboard-backups/`。恢复只恢复可编辑设置，不覆盖当前其它字段、Key、管理员口令、dashboard.yaml 或遥测记录；备份文件可能含原配置凭证，须按私密文件保护。
+
+保存及恢复都携带配置内容版本 `revision`。配置在预览后被其他会话或外部编辑改动时，服务端返回 **HTTP 409**，不覆盖新内容；刷新后重新比较/编写草稿再保存。被环境变量覆盖的字段标为锁定；由独立 dashboard.yaml 管理的 dashboard 字段同样不可从主配置写路径覆盖。需在真正的环境/overlay 来源修改并重启，不通过 WebUI 绕过。
+
+## 五工具与观测边界
+
+工具清单固定展示五个公开工具，注册状态来自当前 MCP 运行快照，调用次数与健康来自真实工具事件。配置开启、已经注册、尚无观测是不同状态；未采集或无调用不是成功记录。
+
+| 工具 | 边界 |
+|---|---|
+| `smartsearch` | 当前模式的可用网页/API组合；Bing 是源与回退，不是工具总开关 |
+| `academicsearch` | 已注册学术源及请求指定子集；关闭源也约束 DOI/arXiv 精确查询 |
+| `cleanfetch` | 网页正文抓取；工具开关不限制 smartsearch 的 `fetch_top_n` 路径 |
+| `pdf_parser` | PDF 解析；展示 `max_pages`（省略 `pages` 时默认 20 页）、`mineru_page_limit`（`GetMinerUPageLimit()` 默认 600 页）、分批大小、单次页预算和 OCR 配置，不代表本次已执行 OCR |
+| `file_search` | Everything 只读文件名/路径索引检索，不读取文件正文；接入 MCP 时按既有机制延迟探测，dashboard 读取不触发探测 |
+
+`file_search` 的目录白名单 `everything.roots`、每页 `max_results`（默认 10、硬上限 20）和 `timeout_sec`（默认 5 秒）以实际配置为准。`everything.roots: []` 表示无目录白名单限制，界面显示「目录未限制」；非空列表才限制检索范围。控制中心不编辑 roots；页数多时用分页，不扩大目录权限。配置 URL 不等于工具已可调用，应区分尚未探测、等待注册、不可用与已注册；鉴权材料不回显。
+
+PDF 页进度当前为 `not_collected`，控制中心不能据此展示真实逐页进度、已处理页数或预算消耗。未采集的页级信息和上游覆盖不应被当成完整遥测；参数展示只说明运行配置，不说明某次调用的结果。
+
+源上的观测警示（`suspension.*` / `suspension_scope: observation`）根据真实事件展示，**不跳过调用、不改变路由**。实际限流/冷却独立来自 `antirobot` 运行快照 `actual_cooldown`，包含原因、到期时间、剩余时间与持久化状态；不能用观测警示倒计时冒充实际冷却，未报告快照也不证明上游健康。
 
 ## 快捷方式落位（`shortcut`）
 
@@ -162,18 +198,29 @@ dashboard:
 | 操作 | 边界 |
 |---|---|
 | 读取（页面 + 只读 API） | 本机 loopback 始终可用；`allowed_networks` 放行的网段只读 |
-| 写操作（设置/密钥/重启/清缓存/额度管理） | 仅限本机 loopback **且** 请求头带正确 `X-Admin-Password`（常量时间比较，支持明文/SHA-256）；若配置了 `admin_username`，还需匹配的 `X-Admin-User` 头 |
+| 写操作（设置/密钥/重启/清缓存/额度管理） | 默认仅 loopback；独立 `write_allowed_networks` 可放行明确来源；所有写入仍须正确 `X-Admin-Password`（常量时间比较，支持明文/SHA-256），配置用户名时还须匹配 `X-Admin-User` |
 | 管理员口令 | 只存在于 dashboard.yaml；WebUI 与 API 永不返回，也无法修改 |
 | 未配置口令 | 所有写端点整体禁用（安全的默认） |
 | 查询隐私 | 遥测只存脱敏元数据（哈希/主题/语言/关键词/耗时），完整查询与 URL 不落库 |
 
-> **Docker 部署**：桥接网络 + 端口发布时，请求来源是 bridge 网关而不是 loopback —— 写操作会被拒绝，控制台只读（页面与指标正常）。只读访问要从宿主机浏览器打开，需把网段加入 `allowed_networks`；要写操作请在 Linux 主机上用 `network_mode: host`，或直接在宿主机改配置文件。卷映射（`dashboard.yaml`、`data/`）见 [installation.md#docker](installation.md#docker)。
+读白名单不授权写入，写白名单不替代页面/API的读取访问门槛，也不替代口令；任一白名单条目非法时该白名单整体 fail-closed。白名单与管理员认证不在WebUI可编辑范围。
+
+**Docker 部署**：保持宿主端口固定发布到回环，例如 `-p 127.0.0.1:8338:8338`。宿主浏览器在容器内可能表现为 bridge 网关；以服务端实际看到的请求来源 IP 为准，不能只据 `docker inspect` 网关值认定来源。需要宿主写入时，将这个实测单地址 `/32` 同时加入读/写白名单，并配置管理员口令；不放行整个 bridge 子网。以下地址仅示意，未经实测不能照抄：
+
+```yaml
+dashboard:
+  allowed_networks: ["172.17.0.1/32"]
+  write_allowed_networks: ["172.17.0.1/32"]
+  admin_password: "replace-with-a-private-admin-password"
+```
+
+未确认来源前保持 `write_allowed_networks: []`。卷映射（`dashboard.yaml`、`data/`）见 [installation.md#docker](installation.md#docker)。
 
 ## 数据与生命周期
 
 - 遥测明细按 `retention_days` 每 6 小时滚动清理；每日聚合长期保留（体积极小）
 - `dashboard.db` 建表自动迁移（含 quota_state/client 列），老库升级零操作；回退旧版本时新表/新列被忽略
-- 完整回退：停服务 → 删 `dashboard.yaml`（可选：`data/dashboard.db`、`dashboard-secrets.json`、快捷方式）→ 完成；主 config.yaml 全程零改动
+- 移除控制中心配置不会撤销已保存的源设置。先按备份恢复流程确认主配置运行值，再按需要停服务并移除控制中心配置/快捷方式；数据库与私密覆盖文件应先备份，不为回滚源设置而删除它们
 
 ## 环境变量
 

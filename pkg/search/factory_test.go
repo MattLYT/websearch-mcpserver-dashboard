@@ -6,6 +6,33 @@ import (
 	"websearch/pkg/config"
 )
 
+func TestDisabledAPIsAllModes(t *testing.T) {
+	disabled := false
+	for _, modeName := range []string{config.ModeBaidu, config.ModeTavily, config.ModeExa, config.ModeAnysearch, config.ModeDoubao, config.ModeApipool, config.ModeHybrid} {
+		for _, bingEnabled := range []bool{false, true} {
+			conf := config.Config{
+				Mode: modeName, Bing: config.BingConfig{Enabled: bingEnabled},
+				Baidu:     config.BaiduConfig{Enabled: &disabled, APIKey: "stored-test-key"},
+				Tavily:    config.TavilyConfig{Enabled: &disabled, APIKey: "stored-test-key"},
+				Exa:       config.ExaConfig{Enabled: &disabled, APIKey: "stored-test-key"},
+				Anysearch: config.AnysearchConfig{Enabled: &disabled, APIKey: "stored-test-key"},
+				Doubao:    config.DoubaoConfig{Enabled: &disabled, APIKey: "stored-test-key"},
+			}
+			g, err := NewFromConfig(conf)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bingEnabled {
+				if g.Primary != nil || g.Fallback != nil {
+					t.Fatalf("%s installed a disabled source", modeName)
+				}
+			} else if g.Primary == nil || g.Fallback == nil {
+				t.Fatalf("%s must remain usable through enabled Bing", modeName)
+			}
+		}
+	}
+}
+
 func TestNewFromConfig_DoubaoMode_NoKey_Fallback(t *testing.T) {
 	g, err := NewFromConfig(config.Config{Mode: config.ModeDoubao, Bing: config.BingConfig{Enabled: true}})
 	if err != nil {
