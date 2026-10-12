@@ -288,6 +288,7 @@ type AcademicConfig struct {
 	// Semantic Scholar 可选 API key（环境变量 SEMANTIC_SCHOLAR_API_KEY 可覆盖）。
 	// 匿名配额限流严格，带 key 连续 429 时引擎自动降级为匿名模式。
 	SemanticScholarAPIKey string `mapstructure:"semantic_scholar_api_key"`
+	OpenAlexAPIKey        string `mapstructure:"openalex_api_key"` // Optional; OPENALEX_API_KEY overrides.
 
 	// 各引擎独立禁用（默认 false = 启用）
 	DisableArxiv           bool `mapstructure:"disable_arxiv"`
@@ -1046,6 +1047,7 @@ func Load(configPath string) (*Config, error) {
 	viper.BindEnv("llm.api_key", "LLM_API_KEY")
 	viper.BindEnv("pdf_parser.mineru_token", "MINERU_TOKEN")
 	viper.BindEnv("academic.unpaywall_email", "UNPAYWALL_EMAIL")
+	viper.BindEnv("academic.openalex_api_key", "OPENALEX_API_KEY")
 	var conf Config
 	if err := viper.Unmarshal(&conf); err != nil {
 		return nil, fmt.Errorf("配置解析失败,%w", err)
@@ -1299,6 +1301,9 @@ func applyKnownEnv(conf *Config) {
 	}
 	if v := os.Getenv("SEMANTIC_SCHOLAR_API_KEY"); v != "" {
 		conf.Academic.SemanticScholarAPIKey = v
+	}
+	if v := os.Getenv("OPENALEX_API_KEY"); v != "" {
+		conf.Academic.OpenAlexAPIKey = v
 	}
 	if v := os.Getenv("UNPAYWALL_EMAIL"); v != "" {
 		conf.Academic.UnpaywallEmail = v

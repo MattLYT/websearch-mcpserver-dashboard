@@ -147,6 +147,10 @@ func dblpAuthorNames(raw json.RawMessage) string {
 func (e *dblpEngine) parse(data []byte) (*antirobot.SearchResponse, error) {
 	var resp dblpResp
 	if err := json.Unmarshal(data, &resp); err != nil {
+		html := strings.ToLower(string(data))
+		if strings.Contains(html, "<html") && (strings.Contains(html, `id="anubis_challenge"`) || strings.Contains(html, "id='anubis_challenge'")) {
+			return nil, fmt.Errorf("Anubis challenge required (returned HTML instead of JSON)")
+		}
 		return nil, fmt.Errorf("dblp parse: %w", err)
 	}
 

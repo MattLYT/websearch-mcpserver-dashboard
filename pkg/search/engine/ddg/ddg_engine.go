@@ -89,7 +89,7 @@ func (e *ddgEngine) Search(query string, page int, timeRange antirobot.TimeRange
 	start := time.Now()
 
 	if !e.limiter.Allow() {
-		return &antirobot.SearchResponse{Engine: "duckduckgo", Results: []antirobot.Result{}}, nil
+		return nil, fmt.Errorf("duckduckgo: local rate limit exceeded")
 	}
 
 	// 服务端限流冷却期：避让不打上游，快速失败（窗口过后下一次搜索自动恢复）
@@ -152,6 +152,15 @@ func (e *ddgEngine) post(query string, page int, timeRange antirobot.TimeRange) 
 	if err != nil {
 		return resp, nil, err
 	}
+	if strings.Contains(string(body), "challenge-form") {
+		doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
+		if err == nil && doc.Find("form#challenge-form").Length() > 0 {
+			return resp, nil, fmt.Errorf("duckduckgo: CAPTCHA challenge")
+		}
+	}
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted && resp.StatusCode != http.StatusTooManyRequests {
+		return resp, nil, fmt.Errorf("duckduckgo: HTTP %d", resp.StatusCode)
+	}
 	return resp, body, nil
 }
 
@@ -164,7 +173,11 @@ func (e *ddgEngine) handleRateLimited(start time.Time, retryAfter time.Duration,
 	if time.Since(start)+wait+ddgRetryRequestEstimate <= e.searchBudget() {
 		time.Sleep(wait)
 		resp, body, err := e.post(query, page, timeRange)
-		if err == nil && resp.StatusCode == 200 {
+		if err != nil {
+			e.recordFail()
+			return nil, err
+		}
+		if resp.StatusCode == http.StatusOK {
 			return e.finishOK(body)
 		}
 		// 重试仍限流/失败 → 落入冷却放弃

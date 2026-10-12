@@ -1,6 +1,7 @@
 package academic
 
 import (
+	"strings"
 	"testing"
 
 	"websearch/pkg/antirobot"
@@ -45,6 +46,26 @@ func TestParseEuropePMC(t *testing.T) {
 }
 
 // ── DBLP ────────────────────────────────────────────────────────────────────
+
+func TestParseDBLPChallengeAndMalformedResponse(t *testing.T) {
+	engine := NewDBLP(antirobot.DBLPOpts{Enabled: true}, nil).(*dblpEngine)
+	for _, tc := range []struct{ name, body, want string }{
+		{"challenge", `<html><script id="anubis_challenge" type="application/json">{}</script></html>`, "Anubis challenge required"},
+		{"ordinary HTML", `<html><title>Service unavailable</title></html>`, "dblp parse:"},
+		{"malformed JSON", `{"result":`, "dblp parse:"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, err := engine.parse([]byte(tc.body))
+			if resp != nil || err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("response=%v error=%v, want %q", resp, err, tc.want)
+			}
+		})
+	}
+	resp, err := engine.parse([]byte(`{"result":{"hits":{"hit":[{"info":{"title":"anubis_challenge study","ee":"https://example.com/paper"}}]}}}`))
+	if err != nil || len(resp.Results) != 1 {
+		t.Fatalf("valid JSON mentioning the marker must remain usable: response=%v error=%v", resp, err)
+	}
+}
 
 func TestParseDBLP_AuthorsArray(t *testing.T) {
 	body := `{"result":{"hits":{"hit":[

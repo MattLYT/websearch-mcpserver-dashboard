@@ -269,6 +269,8 @@ With `time_range`, each academic engine uses its official syntax (aligned in v3.
 
 Results are ranked by the academic scoring enhancement (enabled by default): RRF fusion ranking + citation / journal authority / PDF availability / recency signals, with low-score papers auto-filtered (Top-1 + per-engine floor). Config: `academic.enhance` (default true), `academic.threshold` (default 0.02).
 
+When no usable results remain and engines have failed, the error retains each engine's reason rather than implying an ordinary empty search. Recognized DBLP Anubis HTML challenge pages report human verification; other malformed responses retain their parse errors. This does not bypass verification or change enabled sources.
+
 **Scope boundary**: papers, preprints and DOI-level academic lookup; for news, product docs and other general web information, use `smartsearch`.
 
 ### `cleanfetch` — Web Content Fetch

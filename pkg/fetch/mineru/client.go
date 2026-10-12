@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 	"websearch/pkg/log"
@@ -36,6 +37,9 @@ const (
 
 // ErrFileTooLarge 文件超过 Agent 轻量 API 限制（10MB）。
 var ErrFileTooLarge = errors.New("file exceeds MinerU Agent API size limit (10MB)")
+
+// shortcut: matches MinerU inline images; expand only if Agent adds other image syntax.
+var ocrNonText = regexp.MustCompile(`(?s)<!--.*?-->|!\[[^]]*\]\([^)]*\)`)
 
 // ErrPageLimit means MinerU rejected the original document's page count.
 var ErrPageLimit = errors.New("MinerU PDF 页数超过接口限制")
@@ -487,7 +491,11 @@ func (c *Client) downloadMarkdown(ctx context.Context, mdURL string) (string, er
 	if res.StatusCode() != http.StatusOK {
 		return "", fmt.Errorf("下载失败，HTTP %d", res.StatusCode())
 	}
-	return string(res.Bytes()), nil
+	md := string(res.Bytes())
+	if c.ocr && strings.TrimSpace(ocrNonText.ReplaceAllString(md, "")) == "" {
+		return "", fmt.Errorf("OCR未提取到可读文本")
+	}
+	return md, nil
 }
 
 func extractFullMD(data []byte) (string, error) {

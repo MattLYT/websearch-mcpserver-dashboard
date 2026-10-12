@@ -194,6 +194,7 @@ academic:
   disable_google_scholar: true      # Disabled by default (auto-proxied when enabled)
   # Optional Semantic Scholar API key (degrades to anonymous after consecutive 429s)
   # semantic_scholar_api_key: ""   # env: SEMANTIC_SCHOLAR_API_KEY
+  # openalex_api_key: ""          # env: OPENALEX_API_KEY
   # Unpaywall email: completes OA full-text links when a result has a DOI but no PDF; empty = skip silently
   # unpaywall_email: "you@example.com"   # env: UNPAYWALL_EMAIL
   disable_europepmc: false  # Europe PMC biomedical supplement (direct from China)
@@ -481,6 +482,7 @@ log:
 | `academic.disable_semantic_scholar` | true | Disabled by default, auto-proxied when enabled |
 | `academic.disable_google_scholar` | true | Disabled by default, auto-proxied when enabled |
 | `academic.semantic_scholar_api_key` | "" | Optional API key; auto-degrades to anonymous after consecutive 429s (env `SEMANTIC_SCHOLAR_API_KEY`) |
+| `academic.openalex_api_key` | "" | Optional OpenAlex key shared by keyword search and exact DOI lookup; empty uses the outgoing IP's shared anonymous daily budget (env `OPENALEX_API_KEY`) |
 | `academic.unpaywall_email` | "" | Unpaywall email for OA link completion (when a result has a DOI but no PDF); empty = skip silently (env `UNPAYWALL_EMAIL`) |
 | `academic.disable_europepmc` | false | Europe PMC biomedical supplement, reachable from China |
 | `academic.disable_dblp` | false | DBLP CS conference/journal index, reachable from China |
