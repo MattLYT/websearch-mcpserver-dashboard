@@ -59,7 +59,7 @@ func clientFromUserAgent(ua string) string {
 		{"claude", "claude-code"}, {"qwen", "qwen-code"}, {"cursor", "cursor"},
 		{"windsurf", "windsurf"}, {"cherry", "cherrystudio"}, {"cline", "cline"},
 		{"roo", "roo-code"}, {"trae", "trae"}, {"zed", "zed"}, {"vscode", "vscode"},
-		{"visual-studio", "vscode"}, {"gemini", "gemini-cli"}, {"codex", "codex"},
+		{"visual-studio", "vscode"}, {"gemini", "gemini-cli"}, {"codex", "codex"}, {"workbuddy", "workbuddy"},
 	}
 	for _, k := range known {
 		if strings.Contains(ua, k.match) {
@@ -165,6 +165,15 @@ func peekInitializeClient(r *http.Request) (string, *http.Request) {
 // tools/call 时按会话把客户端标识注入 ctx，工具层与 provider 层事件据此归组。
 func ClientAttributionMiddleware(next mcp.MethodHandler) mcp.MethodHandler {
 	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+		if method == "tools/call" {
+			// Per-request headers avoid leaking the initialize project's label into another workspace.
+			project := ""
+			if extra := req.GetExtra(); extra != nil {
+				project = extra.Header.Get("X-WebSearch-Project")
+				ctx = telemetry.WithClient(ctx, clientFromUserAgent(extra.Header.Get("User-Agent")))
+			}
+			ctx = telemetry.WithProject(ctx, project)
+		}
 		session, okS := req.GetSession().(*mcp.ServerSession)
 		if okS {
 			switch method {

@@ -553,10 +553,12 @@ type CacheConfig struct {
 // DashboardConfig controls the local-only observability dashboard. It does not
 // enable active provider probes; all health observations come from real calls.
 type DashboardConfig struct {
-	Enabled       bool             `mapstructure:"enabled"`
-	StoragePath   string           `mapstructure:"storage_path"`
-	RetentionDays int              `mapstructure:"retention_days"`
-	SecretsPath   string           `mapstructure:"secrets_path"`
+	Enabled       bool   `mapstructure:"enabled"`
+	StoragePath   string `mapstructure:"storage_path"`
+	RetentionDays int    `mapstructure:"retention_days"`
+	// ClientProjects supplies explicit project labels for clients without per-request headers.
+	ClientProjects map[string]string `mapstructure:"client_projects"`
+	SecretsPath    string            `mapstructure:"secrets_path"`
 	// ConfigPath 指定控制中心独立配置文件（dashboard.yaml）。空 = 主配置
 	// 同目录的 dashboard.yaml；也可用环境变量 WEBSEARCH_DASHBOARD_CONFIG 覆盖。
 	// 独立文件按字段覆盖主配置的 dashboard: 块，删除该文件即完整回退。
@@ -1441,6 +1443,9 @@ func applyDashboardOverlay(conf *Config) {
 	}
 	if dash.RetentionDays > 0 {
 		conf.Dashboard.RetentionDays = dash.RetentionDays
+	}
+	if v.IsSet("dashboard.client_projects") {
+		conf.Dashboard.ClientProjects = dash.ClientProjects
 	}
 	if dash.SecretsPath != "" {
 		conf.Dashboard.SecretsPath = dash.SecretsPath

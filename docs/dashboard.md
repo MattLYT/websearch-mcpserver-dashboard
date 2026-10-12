@@ -107,6 +107,7 @@ dashboard:
 | `shortcut` | string | `desktop` | 快捷方式落位，详见下节 |
 | `storage_path` | path | `./data/dashboard.db` | 遥测库；相对主配置目录 |
 | `retention_days` | int | `30` | 明细滚动清理周期（每 6 小时执行）；日聚合不受影响 |
+| `client_projects` | map<string,string> | `{}` | 精确客户端名到项目简称的显式映射；仅用于缺少项目头时的统计归属 |
 | `secrets_path` | path | `./data/dashboard-secrets.json` | WebUI 写入的 Key 存这里，接口只返回「已配置」状态 |
 | `config_path` | path | 空 | dashboard.yaml 的自定义位置（也可用环境变量） |
 | `allowed_networks` | []string | `[]` | 只读放行网段；fail-closed |
@@ -141,6 +142,15 @@ dashboard:
 | `brand.icon` | path | 空 | 自定义 .ico；每次启动轻量检查，变化即重建快捷方式 |
 | `brand.footer` | bool | `true` | 侧边栏底部「关于」项目介绍（GitHub 链接）；`false` 整块隐藏 |
 
+## 调用追踪
+
+侧栏仅保留调用记录，默认显示最近 100 次工具调用。每次调用一行，展开按钮显示请求编号、脱敏元数据及完整已保留的来源尝试；历史记录没有请求编号时不推测关联。原来的 #events 链接兼容转到调用记录。
+
+工具、来源、状态、错误类型可以组合筛选。状态表示工具最终结局；来源和错误类型按同一请求的来源证据筛选，局部来源失败不把成功的工具调用改为失败。CSV 导出当前工具列表和这些请求的完整来源明细，读取失败时中止而不输出不完整文件。
+
+GET /__admin/api/calls 缺省最多 100 条工具记录，接受 tool、provider、status、error_kind 和 limit；原 /events 契约保留兼容。GET /__admin/api/request-events?request_id= 按精确非空请求编号读取完整保留明细，不受列表条数或其它筛选限制。数据仍受实际保留期限制，接口沿用现有读取授权和脱敏字段，不返回查询全文或密钥。
+
+DBLP 返回已识别的 Anubis 挑战页时，工具和来源事件记为人机验证，不当作正常空检索。没有可用结果且存在引擎失败时，保留逐源原因；历史解析失败记录不会被重写。此识别不绕过上游验证，也不自动改变来源开关或实际冷却。
 ## 快捷方式落位（`shortcut`）
 
 | 值 | 行为 |
@@ -170,6 +180,30 @@ dashboard:
 > **Docker 部署**：桥接网络 + 端口发布时，请求来源是 bridge 网关而不是 loopback —— 写操作会被拒绝，控制台只读（页面与指标正常）。只读访问要从宿主机浏览器打开，需把网段加入 `allowed_networks`；要写操作请在 Linux 主机上用 `network_mode: host`，或直接在宿主机改配置文件。卷映射（`dashboard.yaml`、`data/`）见 [installation.md#docker](installation.md#docker)。
 
 ## 数据与生命周期
+
+### 搜索调用用量
+
+总览按应用或项目显示全部工具层调用、成功率、平均耗时和调用占比，可筛选最近 1 / 7 / 30 天及应用。Codex、WorkBuddy 等已知客户端别名合并展示；脚本调用也计入项目使用。MCP 握手客户端名优先，无会话时回退 User-Agent；无法识别宿主应用时显示「未识别应用」，不猜应用。
+
+项目归属优先取每次 HTTP 工具调用携带的 `X-WebSearch-Project` 标签。缺少项目头时，可以在独立 `dashboard.yaml` 的 `dashboard.client_projects` 中按精确客户端名配置已确认的项目归属；没有标签或映射的历史记录与客户端显示「未标注项目」。不使用名称前缀猜项目，不重写历史事件。标签仅允许最多 64 个字母、数字、空格及 `._-`，不接受路径、URL、控制字符；使用不含个人信息的项目简称，不发送凭证。
+
+```yaml
+dashboard:
+  client_projects:
+    example-project-check: Example
+```
+
+支持自定义 HTTP headers 的客户端可在**对应项目**的 MCP 配置中添加标签，例如 Codex 项目级配置：
+
+```toml
+[mcp_servers.websearch]
+url = "http://127.0.0.1:8338/mcp"
+http_headers = { "X-WebSearch-Project" = "PZXM" }
+```
+
+不要把一个项目标签配置到供所有项目共用的全局 MCP 条目。标签必须随每次调用传送，不能只在 initialize 时传送；它只用于统计，不参与认证、授权、源选择或配额限制。配置能力依据 [Codex 配置参考](https://developers.openai.com/codex/config-reference/)；WorkBuddy 的项目级 header 传输尚未实测。
+
+这不是模型 Token、金额或账户剩余额度。供应商额度仍在原额度面板按供应商展示，不按项目平分。应用 / 项目统计依赖保留明细，窗口以 `retention_days` 为上限，返回实际 `window_days`；不展示不完整的「全部历史」。`GET /__admin/api/clients?days=1|7|30` 保留原 `clients` 字段，新增按客户端、项目、MCP 工具聚合的 `usage`，不把 provider 并发计成额外客户端调用。
 
 - 遥测明细按 `retention_days` 每 6 小时滚动清理；每日聚合长期保留（体积极小）
 - `dashboard.db` 建表自动迁移（含 quota_state/client 列），老库升级零操作；回退旧版本时新表/新列被忽略

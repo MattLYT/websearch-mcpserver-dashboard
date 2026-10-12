@@ -108,6 +108,7 @@ dashboard:
 | `shortcut` | string | `desktop` | Shortcut placement, see below |
 | `storage_path` | path | `./data/dashboard.db` | Telemetry DB; relative to the config directory |
 | `retention_days` | int | `30` | Detail retention (cleanup runs every 6h); daily aggregates unaffected |
+| `client_projects` | map<string,string> | `{}` | Explicit exact-client-name to project-label mapping for calls without a project header |
 | `secrets_path` | path | `./data/dashboard-secrets.json` | Keys written via the WebUI live here; APIs only expose configured/not |
 | `config_path` | path | empty | Custom location of dashboard.yaml (env var also works) |
 | `allowed_networks` | []string | `[]` | Read-only allowlist; fail-closed |
@@ -141,6 +142,15 @@ Shipped:
 
 - **Limit enforcement/degrade**: `quotas.limits` is **display and remaining math only**; reaching the cap does not stop or switch calls. For hard caps use the provider console or an external mechanism until a future version.
 
+## Request tracing
+
+The sidebar has one call-history page, showing the latest 100 tool calls by default. Each call occupies one row; its disclosure button shows the request ID, redacted metadata and all retained provider attempts. Legacy records without a request ID are not linked by inference. Old #events links open call history.
+
+Tool, provider, status and error type can be combined. Status describes the tool outcome; provider and error filters match evidence within the same request. A local provider failure never rewrites a successful tool outcome. CSV includes the current tool rows and their complete retained provider details; a detail-read failure aborts export rather than producing an incomplete file.
+
+GET /__admin/api/calls defaults to at most 100 tool rows and accepts tool, provider, status, error_kind and limit; the existing /events contract remains compatible. GET /__admin/api/request-events?request_id= returns all retained events for an exact nonempty request ID, independent of list limits or filters. Actual retention still applies. Both APIs retain the existing read guard and redacted field contract, without query text or credentials.
+
+Recognized DBLP Anubis challenge pages are recorded as human-verification failures for both tool and provider, not ordinary empty searches. When no usable results remain and engines have failed, their individual reasons are retained. Historical parse-failure events are unchanged. Detection does not bypass upstream verification or automatically change source switches or actual cooldowns.
 ## Shortcut placement (`shortcut`)
 
 | Value | Behavior |
@@ -174,6 +184,30 @@ Details:
 - Details are cleaned on a rolling `retention_days` window every 6 hours; daily aggregates stay (tiny)
 - The DB migrates automatically (quota_state / client columns included); old databases upgrade with zero action, and downgrades ignore new tables/columns
 - Full rollback: stop the server → delete `dashboard.yaml` (optionally `data/dashboard.db`, `dashboard-secrets.json`, shortcuts) → done; config.yaml is never touched
+
+## Search-call usage
+
+The overview groups all retained tool calls by application or project, with application and rolling 1/7/30-day filters. Known Codex/WorkBuddy aliases are combined for display; script calls are included in project usage too. MCP initialize identity takes precedence over the User-Agent fallback. Unrecognized host applications remain unidentified.
+
+Project attribution prefers an opt-in `X-WebSearch-Project` header on **each HTTP tool call**, not just initialize. For calls without the header, `dashboard.client_projects` in the separate dashboard.yaml can explicitly map an exact client name to a verified project. Unmapped records remain untagged; name prefixes are not used to guess a project, and historical events are not rewritten. Labels accept at most 64 letters/digits/spaces/`._-`; paths, URLs and control characters are rejected. Use a non-sensitive project nickname, never credentials.
+
+```yaml
+dashboard:
+  client_projects:
+    example-project-check: Example
+```
+
+For clients supporting HTTP headers, configure the marker per project, for example in a [Codex project configuration](https://developers.openai.com/codex/config-reference/):
+
+```toml
+[mcp_servers.websearch]
+url = "http://127.0.0.1:8338/mcp"
+http_headers = { "X-WebSearch-Project" = "PZXM" }
+```
+
+Do not apply one project's label to a global server entry shared by all projects. Labels do not affect authentication, permissions, search routing or quota enforcement. WorkBuddy project-header transmission has not been verified.
+
+These are search-call counts, not model tokens, monetary spend or remaining account quota. Provider quotas remain in the separate provider quota panel. The requested window is capped by detail retention, reported as `window_days`; incomplete all-time totals are not presented. `GET /__admin/api/clients?days=1|7|30` preserves `clients` and adds `usage` grouped by raw client, project and MCP tool. Provider fan-out is not counted as extra client calls.
 
 ## Environment variables
 

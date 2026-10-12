@@ -410,6 +410,7 @@ log:
 #   enabled: false
 #   storage_path: "./data/dashboard.db"
 #   retention_days: 30
+#   client_projects: {}
 #   secrets_path: "./data/dashboard-secrets.json"
 
 # ── Everything 本地文件检索（file_search 工具） ──────────────────────────────

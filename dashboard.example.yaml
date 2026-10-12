@@ -19,6 +19,7 @@ dashboard:
   shortcut: desktop
   storage_path: "./data/dashboard.db"
   retention_days: 30                          # 明细保留天数，每日汇总长期保留
+  client_projects: {}                         # 无项目头时：精确客户端名 -> 项目简称；不猜归属
   secrets_path: "./data/dashboard-secrets.json" # 私密覆盖文件，接口不返回原值
 
   # 管理员口令：明文与 SHA-256 二选一（sha256sum 明文 → 小写十六进制）
