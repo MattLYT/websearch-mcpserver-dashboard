@@ -166,8 +166,7 @@ func RegisterRouter(mux *http.ServeMux, conf config.Config) {
 		// GET（SSE 长连）返回 405。对齐 MCP 2026-07-28 stateless-first 方向。
 		Stateless: conf.MCPStateless,
 	})
-	// 客户端识别：从 User-Agent 归一化宿主标识注入上下文，遥测按客户端分组
-	mux.Handle("/mcp", AuthMiddleware(conf, withClientContext(conf.MCPStateless, http.StripPrefix("/mcp", handler))))
+	mux.Handle("/mcp", AuthMiddleware(conf, http.StripPrefix("/mcp", handler)))
 }
 
 // AuthMiddleware 业务端点鉴权中间件。

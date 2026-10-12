@@ -48,8 +48,9 @@ type Event struct {
 	RequestID string
 	// AttemptChain summarizes which providers were attempted and who returned.
 	AttemptChain string
-	// Client 是发起调用的 MCP 宿主标识（按 User-Agent 归一化），仅工具层记录。
-	Client string
+	// Client is the MCP client name, with User-Agent as a fallback.
+	Client  string
+	Project string
 }
 
 type StoredEvent struct {
@@ -73,6 +74,8 @@ type StoredEvent struct {
 	QueryTopic    string `json:"query_topic,omitempty"`
 	QueryKeywords string `json:"query_keywords,omitempty"`
 	Client        string `json:"client,omitempty"`
+	Application   string `json:"application,omitempty"`
+	Project       string `json:"project,omitempty"`
 }
 
 type DailyUsage struct {
@@ -126,6 +129,15 @@ type EventFilter struct {
 	Source    string
 	ErrorKind string
 	RequestID string
+	Limit     int
+}
+
+// CallFilter selects tool outcomes and matches source/error evidence within the request.
+type CallFilter struct {
+	Tool      string
+	Provider  string
+	Status    string
+	ErrorKind string
 	Limit     int
 }
 
@@ -211,6 +223,14 @@ func Open(path string, retentionDays int) (*Store, error) {
 	_, _ = db.Exec(`ALTER TABLE usage_events ADD COLUMN request_id TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`ALTER TABLE usage_events ADD COLUMN attempt_chain TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`ALTER TABLE usage_events ADD COLUMN client TEXT NOT NULL DEFAULT ''`)
+	if _, err = db.Exec(`ALTER TABLE usage_events ADD COLUMN project TEXT NOT NULL DEFAULT ''`); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+		db.Close()
+		return nil, fmt.Errorf("add project attribution: %w", err)
+	}
+	if _, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_usage_events_request ON usage_events(request_id)`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("index request events: %w", err)
+	}
 	loc, err := time.LoadLocation("Asia/Shanghai")
 	if err != nil {
 		loc = time.FixedZone("CST", 8*60*60)
@@ -265,9 +285,9 @@ func (s *Store) Record(e Event) error {
 	cacheHit := boolInt(e.CacheHit)
 	day := now.In(s.location).Format("2006-01-02")
 	if _, err = tx.Exec(`INSERT INTO usage_events
-		(occurred_at,day,kind,tool,provider,success,duration_ms,cache_hit,result_count,error_summary,query_hash,query_chars,query_language,query_topic,query_keywords,detail,error_kind,request_id,attempt_chain,client)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, now.Unix(), day, e.Kind, e.Tool, e.Provider, success,
-		e.Duration.Milliseconds(), cacheHit, e.ResultCount, errSummary, hash, chars, lang, topic, keywords, e.Detail, errorKind, e.RequestID, e.AttemptChain, e.Client); err != nil {
+		(occurred_at,day,kind,tool,provider,success,duration_ms,cache_hit,result_count,error_summary,query_hash,query_chars,query_language,query_topic,query_keywords,detail,error_kind,request_id,attempt_chain,client,project)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, now.Unix(), day, e.Kind, e.Tool, e.Provider, success,
+		e.Duration.Milliseconds(), cacheHit, e.ResultCount, errSummary, hash, chars, lang, topic, keywords, e.Detail, errorKind, e.RequestID, e.AttemptChain, e.Client, NormalizeProject(e.Project)); err != nil {
 		return err
 	}
 	if _, err = tx.Exec(`INSERT INTO daily_usage(day,kind,tool,provider,requests,successes,failures,cache_hits,duration_ms,result_count)
@@ -352,21 +372,67 @@ func (s *Store) RecentFiltered(filter EventFilter) ([]StoredEvent, error) {
 		args = append(args, filter.RequestID)
 	}
 	args = append(args, limit)
-	query := `SELECT id,occurred_at,kind,tool,provider,success,duration_ms,cache_hit,result_count,
-		error_summary,query_hash,query_chars,query_language,query_topic,query_keywords,detail,error_kind,request_id,attempt_chain,client
-		FROM usage_events WHERE ` + strings.Join(where, " AND ") + ` ORDER BY occurred_at DESC,id DESC LIMIT ?`
+	query := `SELECT ` + storedEventColumns + ` FROM usage_events WHERE ` + strings.Join(where, " AND ") + ` ORDER BY occurred_at DESC,id DESC LIMIT ?`
+	return s.queryEvents(query, args...)
+}
+
+const storedEventColumns = `id,occurred_at,kind,tool,provider,success,duration_ms,cache_hit,result_count,
+	error_summary,query_hash,query_chars,query_language,query_topic,query_keywords,detail,error_kind,request_id,attempt_chain,client,project`
+
+// RecentCalls limits tool records after matching the entire retained request, not a recent event sample.
+func (s *Store) RecentCalls(filter CallFilter) ([]StoredEvent, error) {
+	limit := filter.Limit
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	where := []string{"e.kind='tool'"}
+	args := make([]any, 0, 5)
+	if filter.Tool != "" {
+		where = append(where, "e.tool=?")
+		args = append(args, filter.Tool)
+	}
+	if filter.Status == "success" {
+		where = append(where, "e.success=1")
+	} else if filter.Status == "failure" {
+		where = append(where, "e.success=0")
+	}
+	if filter.Provider != "" {
+		where = append(where, `e.request_id<>'' AND EXISTS (SELECT 1 FROM usage_events p
+			WHERE p.request_id=e.request_id AND p.kind='provider' AND p.provider=?)`)
+		args = append(args, filter.Provider)
+	}
+	if filter.ErrorKind != "" {
+		where = append(where, `(e.error_kind=? OR (e.request_id<>'' AND EXISTS (SELECT 1 FROM usage_events p
+			WHERE p.request_id=e.request_id AND p.kind='provider' AND p.error_kind=?)))`)
+		args = append(args, filter.ErrorKind, filter.ErrorKind)
+	}
+	args = append(args, limit)
+	return s.queryEvents(`SELECT `+storedEventColumns+` FROM usage_events e WHERE `+
+		strings.Join(where, " AND ")+` ORDER BY e.occurred_at DESC,e.id DESC LIMIT ?`, args...)
+}
+
+// RequestEvents returns all retained evidence for one exact request, without list limits.
+func (s *Store) RequestEvents(requestID string) ([]StoredEvent, error) {
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return nil, errors.New("request_id is required")
+	}
+	return s.queryEvents(`SELECT `+storedEventColumns+` FROM usage_events WHERE request_id=? ORDER BY occurred_at,id`, requestID)
+}
+
+func (s *Store) queryEvents(query string, args ...any) ([]StoredEvent, error) {
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := make([]StoredEvent, 0, limit)
+	out := make([]StoredEvent, 0)
 	for rows.Next() {
 		var e StoredEvent
 		var ts int64
 		var ok, hit int
 		if err := rows.Scan(&e.ID, &ts, &e.Kind, &e.Tool, &e.Provider, &ok, &e.DurationMS, &hit,
-			&e.ResultCount, &e.ErrorSummary, &e.QueryHash, &e.QueryChars, &e.QueryLanguage, &e.QueryTopic, &e.QueryKeywords, &e.Detail, &e.ErrorKind, &e.RequestID, &e.AttemptChain, &e.Client); err != nil {
+			&e.ResultCount, &e.ErrorSummary, &e.QueryHash, &e.QueryChars, &e.QueryLanguage, &e.QueryTopic, &e.QueryKeywords, &e.Detail, &e.ErrorKind, &e.RequestID, &e.AttemptChain, &e.Client, &e.Project); err != nil {
 			return nil, err
 		}
 		e.Success, e.CacheHit = ok == 1, hit == 1
@@ -795,7 +861,7 @@ func (s *Store) ClientUsageStats(windowDays int) ([]ClientUsage, error) {
 		windowDays = 7
 	}
 	cutoff := time.Now().AddDate(0, 0, -windowDays).Unix()
-	rows, err := s.db.Query(`SELECT client, COUNT(*), SUM(success), AVG(duration_ms), MAX(occurred_at)
+	rows, err := s.db.Query(`SELECT client, COUNT(*), SUM(success), CAST(AVG(duration_ms) AS INTEGER), MAX(occurred_at)
 		FROM usage_events WHERE kind='tool' AND client<>'' AND occurred_at>=?
 		GROUP BY client ORDER BY 2 DESC`, cutoff)
 	if err != nil {
@@ -821,7 +887,7 @@ func (s *Store) ClientUsageStats(windowDays int) ([]ClientUsage, error) {
 	if len(out) == 0 {
 		return out, nil
 	}
-	toolRows, err := s.db.Query(`SELECT client, tool, COUNT(*), SUM(success), AVG(duration_ms)
+	toolRows, err := s.db.Query(`SELECT client, tool, COUNT(*), SUM(success), CAST(AVG(duration_ms) AS INTEGER)
 		FROM usage_events WHERE kind='tool' AND client<>'' AND occurred_at>=?
 		GROUP BY client, tool ORDER BY 3 DESC`, cutoff)
 	if err != nil {

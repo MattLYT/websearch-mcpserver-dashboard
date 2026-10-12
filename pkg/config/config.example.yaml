@@ -420,6 +420,7 @@ log:
 #   enabled: false
 #   storage_path: "./data/dashboard.db"
 #   retention_days: 30
+#   client_projects: {}
 #   secrets_path: "./data/dashboard-secrets.json"
 #
 # 控制中心推荐使用独立配置文件 dashboard.yaml（主配置同目录，见

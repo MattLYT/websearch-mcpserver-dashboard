@@ -101,6 +101,7 @@ func TestDashboardOverlayMerge(t *testing.T) {
 	overlay := `dashboard:
   enabled: true
   admin_password: "pw-1"
+  client_projects: { example-check: Example }
   allowed_networks: ["192.168.1.0/24"]
   quotas:
     reset: weekly
@@ -118,6 +119,9 @@ func TestDashboardOverlayMerge(t *testing.T) {
 		t.Fatal(err)
 	}
 	d := conf.Dashboard
+	if d.ClientProjects["example-check"] != "Example" {
+		t.Fatal("client project overlay not applied")
+	}
 	if !d.Enabled || d.AdminPassword != "pw-1" || len(d.AllowedNetworks) != 1 {
 		t.Fatal("overlay 应覆盖主配置的 dashboard 块")
 	}

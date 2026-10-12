@@ -96,11 +96,11 @@ func doAcademicSearch(ctx context.Context, query string, engines []string, timeR
 				engineErrors[name] = "精确学术检索无结果"
 			}
 		}
-		recordAcademicProviderEvents(query, nil, engineErrors, attempted, attemptsKnown, started, requestID)
+		recordAcademicProviderEvents(ctx, query, nil, engineErrors, attempted, attemptsKnown, started, requestID)
 		return nil, nil, fmt.Errorf("学术搜索失败: %w", err)
 	}
 	resultCount = len(res.Results)
-	recordAcademicProviderEvents(query, res.Results, res.EngineErrors, attempted, attemptsKnown, started, requestID)
+	recordAcademicProviderEvents(ctx, query, res.Results, res.EngineErrors, attempted, attemptsKnown, started, requestID)
 
 	ret, err := formatAcademicResults(query, res)
 	if err != nil {
@@ -164,7 +164,7 @@ func academicEngineSelection(registered, requested []string) []string {
 // engine that returned it. Empty successes and per-engine failures still emit
 // one event so the dashboard shows coverage for every provider, not just the
 // engines that happened to contribute the final result set.
-func recordAcademicProviderEvents(query string, results []search.SearchResult, engineErrors map[string]string, engines []string, attemptsKnown bool, started time.Time, requestID string) {
+func recordAcademicProviderEvents(ctx context.Context, query string, results []search.SearchResult, engineErrors map[string]string, engines []string, attemptsKnown bool, started time.Time, requestID string) {
 	counts := make(map[string]int)
 	failed := make(map[string]bool)
 	engineTrace := make([]string, 0, len(engines))
@@ -219,7 +219,7 @@ func recordAcademicProviderEvents(query string, results []search.SearchResult, e
 		if failed[name] {
 			event.Error = fmt.Errorf("%s", engineErrors[name])
 		}
-		telemetry.Record(event)
+		telemetry.RecordEventContext(ctx, event)
 	}
 }
 
