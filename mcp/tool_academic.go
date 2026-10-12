@@ -80,7 +80,11 @@ func doAcademicSearch(ctx context.Context, query string, engines []string, timeR
 	if err != nil {
 		// Provider failures must still be visible in telemetry even though the
 		// aggregate tool call returned an error.
-		recordAcademicProviderEvents(query, nil, academicProviderErrorsFromError(err), academicEngineSelection(academicSearcher.AcademicEngines(), engines), started, requestID)
+		engineErrors := res.EngineErrors
+		if len(engineErrors) == 0 {
+			engineErrors = academicProviderErrorsFromError(err)
+		}
+		recordAcademicProviderEvents(query, nil, engineErrors, academicEngineSelection(academicSearcher.AcademicEngines(), engines), started, requestID)
 		return nil, nil, fmt.Errorf("学术搜索失败: %w", err)
 	}
 	resultCount = len(res.Results)

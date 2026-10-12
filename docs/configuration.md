@@ -185,6 +185,7 @@ academic:
   threshold: 0.02           # 学术结果阀值（比通用搜索更宽松），默认 0.02
   # Semantic Scholar 可选 API key（匿名限流严格，带 key 连续 429 自动降级匿名）
   # semantic_scholar_api_key: ""   # 环境变量: SEMANTIC_SCHOLAR_API_KEY
+  # openalex_api_key: ""          # 环境变量: OPENALEX_API_KEY
   # Unpaywall 邮箱：结果有 DOI 且无 PDF 时补 OA 全文链接；留空则跳过、不报错
   # unpaywall_email: "you@example.com"   # 环境变量: UNPAYWALL_EMAIL
   disable_arxiv: false
@@ -475,6 +476,7 @@ log:
 | `academic.disable_semantic_scholar` | true | 默认禁用，开启后自动走代理 |
 | `academic.disable_google_scholar` | true | 默认禁用，开启后自动走代理 |
 | `academic.semantic_scholar_api_key` | "" | 可选 API key，带 key 连续 429 自动降级匿名（环境变量 `SEMANTIC_SCHOLAR_API_KEY`） |
+| `academic.openalex_api_key` | "" | OpenAlex 可选 API Key，关键词检索与 DOI 精确查询共用；空值使用出口 IP 共享匿名日额度（环境变量 `OPENALEX_API_KEY`） |
 | `academic.unpaywall_email` | "" | Unpaywall OA 补链邮箱（结果有 DOI 且无 PDF 时补全）；空=跳过且不报错（环境变量 `UNPAYWALL_EMAIL`） |
 | `academic.disable_europepmc` | false | Europe PMC 生物医学增补源，国内可直连 |
 | `academic.disable_dblp` | false | DBLP CS 会议/期刊索引，国内可直连 |

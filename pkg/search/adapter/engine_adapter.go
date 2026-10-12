@@ -42,8 +42,10 @@ func (a *EngineSearchAdapter) SearchRaw(query string) ([]core.SearchResult, erro
 	responses := a.searcher.Search(ctx, query, 1)
 
 	var all []antirobot.Result
+	var failures []string
 	for _, resp := range responses {
 		if resp.Error != "" {
+			failures = append(failures, resp.Engine+": "+resp.Error)
 			continue
 		}
 		all = append(all, resp.Results...)
@@ -51,6 +53,9 @@ func (a *EngineSearchAdapter) SearchRaw(query string) ([]core.SearchResult, erro
 	all = antirobot.DeduplicateResults(all)
 
 	if len(all) == 0 {
+		if len(failures) > 0 {
+			return nil, fmt.Errorf("%s search failed: %s", a.name, strings.Join(failures, "; "))
+		}
 		return nil, fmt.Errorf("%s 搜索无结果", a.name)
 	}
 

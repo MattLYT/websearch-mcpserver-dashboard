@@ -17,7 +17,8 @@ type CrossrefOpts struct {
 // OpenAlexOpts OpenAlex 开放学术图谱配置。
 type OpenAlexOpts struct {
 	Enabled bool
-	MailTo  string // polite pool 邮箱（可选）
+	MailTo  string // Optional contact email.
+	APIKey  string // Optional bearer token; empty uses the shared anonymous budget.
 }
 
 // SemanticScholarOpts Semantic Scholar 配置。

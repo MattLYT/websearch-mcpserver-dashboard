@@ -32,6 +32,7 @@ type AcademicAdapter struct {
 	enhance        bool              // 是否启用学术评分增强（RRF 融合 + 学术信号）
 	threshold      float64           // 学术结果阀值（默认 0.02）
 	unpaywallEmail string
+	openalexOpts   antirobot.OpenAlexOpts
 }
 
 
@@ -90,7 +91,7 @@ func NewAcademicAdapter(conf AcademicConfig) *AcademicAdapter {
 	}
 
 	searcher := antirobot.NewSearcher(antirobot.StrategyParallel, engines)
-	return &AcademicAdapter{searcher: searcher, engines: engines, unpaywallEmail: conf.UnpaywallEmail}
+	return &AcademicAdapter{searcher: searcher, engines: engines, unpaywallEmail: conf.UnpaywallEmail, openalexOpts: conf.OpenAlex}
 }
 
 // SearchAcademicRaw 实现 core.AcademicSearcher 接口，返回学术论文搜索结果。
@@ -166,7 +167,7 @@ func (a *AcademicAdapter) SearchAcademicRaw(query string, opts ...core.AcademicS
 	if a.enhance {
 		results := enhance.EnhanceAcademicResults(query, buckets, a.threshold, 0)
 		if len(results) == 0 {
-			return core.AcademicSearchResult{}, noResultError(engineErrors)
+			return core.AcademicSearchResult{EngineErrors: engineErrors}, noResultError(engineErrors)
 		}
 		a.enrichOAPDF(ctx, results)
 		return core.AcademicSearchResult{Results: results, EngineErrors: engineErrors}, nil
@@ -176,7 +177,7 @@ func (a *AcademicAdapter) SearchAcademicRaw(query string, opts ...core.AcademicS
 	all = antirobot.NormalizeAndSortResults(all)
 
 	if len(all) == 0 {
-		return core.AcademicSearchResult{}, noResultError(engineErrors)
+		return core.AcademicSearchResult{EngineErrors: engineErrors}, noResultError(engineErrors)
 	}
 
 	results := toSearchResults(all)
@@ -188,7 +189,7 @@ func (a *AcademicAdapter) lookupPaper(ctx context.Context, kind, id string) (cor
 	var raw []antirobot.Result
 	switch kind {
 	case "doi":
-		raw = academic.LookupDOI(ctx, id)
+		raw = academic.LookupDOI(ctx, id, a.openalexOpts)
 	case "arxiv":
 		raw = academic.LookupArxivID(ctx, id)
 	}
@@ -225,12 +226,12 @@ func (a *AcademicAdapter) enrichOAPDF(ctx context.Context, results []core.Search
 	wg.Wait()
 }
 
-// noResultError 全部引擎无结果时返回错误；有引擎失败的把错误拼进 message。
+// noResultError 区分正常空结果与包含引擎失败的不可用结果。
 func noResultError(engineErrors map[string]string) error {
 	if len(engineErrors) == 0 {
 		return fmt.Errorf("学术引擎搜索无结果")
 	}
-	return fmt.Errorf("学术引擎搜索无结果（%s）", engineErrorSummary(engineErrors))
+	return fmt.Errorf("学术检索未返回可用结果，存在引擎失败（%s）", engineErrorSummary(engineErrors))
 }
 
 // engineErrorSummary 把逐引擎错误拼成单行摘要（引擎名稳定排序）。

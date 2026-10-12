@@ -18,6 +18,7 @@ import (
 type openalexEngine struct {
 	client *http.Client
 	mailTo string
+	apiKey string
 }
 
 // NewOpenAlex 创建 OpenAlex 引擎。client 为 nil 时使用默认客户端。
@@ -28,6 +29,7 @@ func NewOpenAlex(opts antirobot.OpenAlexOpts, client *http.Client) antirobot.Eng
 	return &openalexEngine{
 		client: client,
 		mailTo: opts.MailTo,
+		apiKey: opts.APIKey,
 	}
 }
 
@@ -48,9 +50,16 @@ func (e *openalexEngine) Search(query string, page int, timeRange antirobot.Time
 		params.Set("filter", "from_publication_date:"+since)
 	}
 
-	u := "https://api.openalex.org/works?" + params.Encode()
+	u := openalexAPI + "/works?" + params.Encode()
+	req, err := http.NewRequest(http.MethodGet, u, nil)
+	if err != nil {
+		return nil, fmt.Errorf("openalex request: %w", err)
+	}
+	if e.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+e.apiKey)
+	}
 
-	resp, err := e.client.Get(u)
+	resp, err := e.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("openalex request: %w", err)
 	}

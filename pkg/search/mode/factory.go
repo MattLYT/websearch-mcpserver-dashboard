@@ -445,7 +445,7 @@ func InitAcademicEngine(conf config.Config) core.AcademicSearcher {
 			PerMin:  conf.GetRateLimitPerMin(),
 		},
 		Crossref:        antirobot.CrossrefOpts{Enabled: !acad.DisableCrossref},
-		OpenAlex:        antirobot.OpenAlexOpts{Enabled: !acad.DisableOpenAlex},
+		OpenAlex:        antirobot.OpenAlexOpts{Enabled: !acad.DisableOpenAlex, APIKey: acad.OpenAlexAPIKey},
 		SemanticScholar: antirobot.SemanticScholarOpts{Enabled: !acad.DisableSemanticScholar, APIKey: acad.SemanticScholarAPIKey},
 		PubMed:          antirobot.PubMedOpts{Enabled: !acad.DisablePubMed},
 		GoogleScholar:   antirobot.GoogleScholarOpts{Enabled: !acad.DisableGoogleScholar},

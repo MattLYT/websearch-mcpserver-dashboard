@@ -100,16 +100,15 @@ func registerTools(server *mcp.Server, conf config.Config) {
 
 	// ── 注册 pdf_parser 工具（默认关闭） ──
 	if conf.PDFParser.Enabled && webfetchInst != nil {
-		pdfDesc := "PDF 解析工具，path 为本地文件路径、file:// 或远程 http(s) PDF URL（学术结果的 pdf_url 可直接传入）。优先用 PDF 库提取文本转为 Markdown；长文档可用 pages 指定页码（如 '1-10'），省略时默认只解析前 20 页（pdf_parser.max_pages）并提示截断；大文档自动存储到临时文件。"
+		pdfDesc := "PDF 解析工具，path 为服务进程可见的本地路径、file:// 或远程 http(s) PDF URL（学术结果的 pdf_url 可直接传入）。Docker 仅能读取容器内或已挂载路径，file_search 的宿主机路径不能直接通用。本地优先提取文本，响应标明实际解析器；长文档可用 pages 指定页码（如 '1-10'），省略时默认只解析前 20 页（pdf_parser.max_pages）并提示截断；大文档可存储到临时文件。"
 		if conf.PDFParser.MinerUOCREnabled() {
 			pdfDesc += "本地读不到文本时回退 MinerU OCR（扫描件/图片型 PDF）。"
-		} else if conf.PDFParser.MinerUToken != "" {
-			pdfDesc += "已配置 MinerU Token（远程 URL 可用精准解析）。"
 		}
-		if conf.PDFParser.MinerUEnabled() {
+		if conf.PDFParser.MinerUToken != "" && conf.PDFParser.MinerURemotePDF {
+			pdfDesc += "符合 PDF 地址规则的远程 URL 优先使用 MinerU 精准解析。"
 			pdfDesc += "原件超页或源 URL 被 MinerU 拒绝时自动本地裁切所选页分批上传，并实时推送分批进度。"
 		}
-		pdfDesc += "适用边界：仅解析 PDF；网页正文抓取请用 cleanfetch。"
+		pdfDesc += "MinerU 等待可用 wait_seconds 调整（0-1800秒，每任务默认300秒）；返回 task_ref 时可省略 path/pages 查询原任务，默认只查一次，不重新提交。适用边界：仅解析 PDF；网页正文抓取请用 cleanfetch。"
 		mcp.AddTool(server, &mcp.Tool{
 			Name:        "pdf_parser",
 			Description: pdfDesc,

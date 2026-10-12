@@ -9,7 +9,7 @@ const TZ = { hour12: false, timeZone: 'Asia/Shanghai' };
 const PAGES = { overview: '运行总览', sources: '搜索源', events: '事件', usage: '调用记录', settings: '设置' };
 const HEALTH = { healthy: '正常', degraded: '不稳定', down: '异常', unknown: '未知' };
 const ERROR_KINDS = {
-  rate_limit: '限流', captcha: '验证码', access_denied: '访问被拒', timeout: '超时',
+  rate_limit: '限流', captcha: '人机验证', access_denied: '访问被拒', timeout: '超时',
   parse: '解析失败', no_result: '无结果', network: '网络/服务端', unknown: '未知错误',
 };
 const SYSTEM = { healthy: '运行正常', degraded: '部分降级', down: '部分异常', waiting: '等待真实调用' };
