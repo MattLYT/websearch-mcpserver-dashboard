@@ -13,10 +13,10 @@ import (
 
 // SearchGroup 搜索引擎组，包含主引擎、兜底引擎和学术引擎。
 type SearchGroup struct {
-	Primary  core.SearchInf            // 主搜索引擎
+	Primary  core.SearchInf             // 主搜索引擎
 	Fallback *adapter.BingSearchAdapter // Bing 兜底引擎（可为 nil）
-	Academic core.AcademicSearcher     // 学术搜索引擎（可为 nil）
-	conf     config.Config             // 保存配置，用于代理变更时重建引擎
+	Academic core.AcademicSearcher      // 学术搜索引擎（可为 nil）
+	conf     config.Config              // 保存配置，用于代理变更时重建引擎
 }
 
 // NewFromConfig 根据配置初始化搜索引擎组（组合根：只做装配，模式构建在子包 mode）。
@@ -90,6 +90,9 @@ func NewFromConfig(conf config.Config) (*SearchGroup, error) {
 
 	default: // baidu → 百度千帆 web_search
 		g.Primary = mode.BuildBaiduMode(conf, baiduPool, baiduWebAdapter, g.Fallback)
+	}
+	if g.Primary == nil && g.Fallback != nil {
+		g.Primary = g.Fallback
 	}
 
 	log.Infof("搜索模式: %s", conf.GetMode())

@@ -40,14 +40,29 @@ func NewMCPServer(conf config.Config, opts *mcp.ServerOptions) *mcp.Server {
 }
 
 func registerTools(server *mcp.Server, conf config.Config) {
+	states := pendingTools()
+	for i := range states {
+		states[i].State = "disabled"
+	}
+	setState := func(name, state string) {
+		for i := range states {
+			if states[i].Name == name {
+				states[i].State = state
+				states[i].Registered = state == "registered"
+			}
+		}
+	}
 	// ── 注册 smartsearch 工具 ──
-	if conf.Bing.Enabled {
+	if smartsearchAvailable() {
 		searchDesc := "通用联网检索工具，获取实时信息（新闻/技术文档/产品/数据等）。查询词需精准凝练、聚焦核心意图，避免堆砌大量同义/次要词形成关键词列表（会稀释相关性）。"
 		if conf.LLMEnabled() {
 			searchDesc += "可用 intent 参数说明检索目的以获得更精准的结构化摘要。"
 		}
-		searchDesc += "可用 fetch_top_n 对评分最高的前 N 条抓取正文（默认 0 不抓，上限 5）。主引擎不可用时自动回退 Bing。"
-	searchDesc += "适用边界：时效性事实、网页线索与文档检索；系统性文献综述、需要引用数据的学术问题请改用 academicsearch。"
+		searchDesc += "可用 fetch_top_n 对评分最高的前 N 条抓取正文（默认 0 不抓，上限 5）。"
+		if fallbackSearch != nil {
+			searchDesc += "主引擎不可用时自动回退 Bing。"
+		}
+		searchDesc += "适用边界：时效性事实、网页线索与文档检索；系统性文献综述、需要引用数据的学术问题请改用 academicsearch。"
 
 		if conf.LLMEnabled() {
 			mcp.AddTool(server, &mcp.Tool{
@@ -62,6 +77,9 @@ func registerTools(server *mcp.Server, conf config.Config) {
 			}, WebSearchNoIntent)
 			log.Info("Available tool: smartsearch (no intent, LLM disabled)")
 		}
+		setState("smartsearch", "registered")
+	} else {
+		setState("smartsearch", "unavailable")
 	}
 
 	// ── 注册 academicsearch 工具 ──
@@ -72,6 +90,9 @@ func registerTools(server *mcp.Server, conf config.Config) {
 			Description: acadDesc,
 		}, AcademicSearchHandler)
 		log.Infof("Available tool: academicsearch (engines: %v)", academicSearcher.AcademicEngines())
+		setState("academicsearch", "registered")
+	} else if conf.Academic.Enabled {
+		setState("academicsearch", "unavailable")
 	}
 
 	// ── 注册 cleanfetch 工具（需显式启用） ──
@@ -81,6 +102,7 @@ func registerTools(server *mcp.Server, conf config.Config) {
 			Description: "网页内容抓取工具，获取指定 URL 的干净 Markdown 内容。可用 urls 批量抓取（与 url 合并去重，最多 5 个），单条失败不影响其它。适用边界：抓取已知 URL 的正文；发现新来源请先用 smartsearch（本工具不做检索）。",
 		}, CleanFetch)
 		log.Info("Available tool: cleanfetch")
+		setState("cleanfetch", "registered")
 	}
 
 	// ── 注册 file_search 工具（接入时探测通过才暴露，见 ensureEverything） ──
@@ -96,6 +118,9 @@ func registerTools(server *mcp.Server, conf config.Config) {
 			Description: fileDesc,
 		}, FileSearch)
 		log.Info("Available tool: file_search")
+		setState("file_search", "registered")
+	} else {
+		setState("file_search", "unavailable")
 	}
 
 	// ── 注册 pdf_parser 工具（默认关闭） ──
@@ -114,7 +139,11 @@ func registerTools(server *mcp.Server, conf config.Config) {
 			Description: pdfDesc,
 		}, PDFParserHandler)
 		log.Info("Available tool: pdf_parser")
+		setState("pdf_parser", "registered")
+	} else if conf.PDFParser.Enabled {
+		setState("pdf_parser", "unavailable")
 	}
+	publishTools(states)
 }
 
 func RegisterRouter(mux *http.ServeMux, conf config.Config) {
@@ -203,7 +232,7 @@ func buildAcademicToolDescription() string {
 		sb.WriteString(fmt.Sprintf("  - %s: %s\n", name, desc))
 	}
 	sb.WriteString("\n引擎选择建议：医学/生物 → pubmed, europepmc | CS/AI → arxiv, semantic_scholar, dblp | 全学科 → crossref, openalex, google_scholar | 开放获取 → doaj")
-	sb.WriteString("\n\n已持有 DOI 或 arXiv id 时，直接将其作为 query（如 '10.1038/s41586-020-2649-2'、'doi:10.1038/s41586-020-2649-2'、'https://doi.org/10.1038/s41586-020-2649-2' 或 '2401.04085'、'arXiv:2401.04085'、'https://arxiv.org/abs/2401.04085'），将走单篇精确查询（忽略 engines/time_range/page）；拿到结果中的 pdf_url 后，可将该 URL 作为 pdf_parser 工具的 path 参数解析全文。")
+	sb.WriteString("\n\n已持有 DOI 或 arXiv id 时，直接将其作为 query（如 '10.1038/s41586-020-2649-2'、'doi:10.1038/s41586-020-2649-2'、'https://doi.org/10.1038/s41586-020-2649-2' 或 '2401.04085'、'arXiv:2401.04085'、'https://arxiv.org/abs/2401.04085'），将走单篇精确查询（遵守已注册/指定 engines；time_range/page 不用于精确查询）；拿到结果中的 pdf_url 后，可将该 URL 作为 pdf_parser 工具的 path 参数解析全文。")
 	sb.WriteString("\n\n适用边界：论文、预印本与 DOI 级学术检索；新闻、产品文档等通用网页信息请改用 smartsearch。")
 	return sb.String()
 }

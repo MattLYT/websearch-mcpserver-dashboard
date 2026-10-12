@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"websearch/pkg/cache"
@@ -47,8 +48,9 @@ func doAcademicSearch(ctx context.Context, query string, engines []string, timeR
 	// ---- 缓存查询 ----
 	enginesKey := strings.Join(engines, ",")
 	cacheKey := query + "|" + timeRange + "|" + enginesKey
-	if cacheInst != nil {
-		rec, hitType, err := cacheInst.Lookup(cacheKey, "", true)
+	requestCache := requestSearchCache()
+	if requestCache != nil {
+		rec, hitType, err := requestCache.Lookup(cacheKey, "", true)
 		if err != nil {
 			log.Errf("缓存查询异常，跳过缓存: %v", err)
 		} else if rec != nil && rec.Academic && hitType == "query_only" {
@@ -56,7 +58,6 @@ func doAcademicSearch(ctx context.Context, query string, engines []string, timeR
 			if parseErr == nil {
 				cacheHit = true
 				resultCount = len(results)
-				recordAcademicProviderEvents(query, results, nil, nil, started, requestID)
 				log.Infof("学术缓存命中: query=%s", query)
 				ret, mergeErr := formatAcademicResults(query, search.AcademicSearchResult{Results: results})
 				if mergeErr == nil {
@@ -77,6 +78,11 @@ func doAcademicSearch(ctx context.Context, query string, engines []string, timeR
 
 	log.Infof("学术搜索: query=%s, engines=%v, timeRange=%s, page=%d", query, engines, timeRange, page)
 	res, err := academicSearcher.SearchAcademicRaw(query, opts)
+	attempted := res.AttemptedEngines
+	attemptsKnown := attempted != nil
+	if !attemptsKnown {
+		attempted = academicEngineSelection(academicSearcher.AcademicEngines(), engines)
+	}
 	if err != nil {
 		// Provider failures must still be visible in telemetry even though the
 		// aggregate tool call returned an error.
@@ -84,20 +90,26 @@ func doAcademicSearch(ctx context.Context, query string, engines []string, timeR
 		if len(engineErrors) == 0 {
 			engineErrors = academicProviderErrorsFromError(err)
 		}
-		recordAcademicProviderEvents(query, nil, engineErrors, academicEngineSelection(academicSearcher.AcademicEngines(), engines), started, requestID)
+		if attemptsKnown && len(engineErrors) == 0 {
+			engineErrors = make(map[string]string, len(attempted))
+			for _, name := range attempted {
+				engineErrors[name] = "精确学术检索无结果"
+			}
+		}
+		recordAcademicProviderEvents(query, nil, engineErrors, attempted, attemptsKnown, started, requestID)
 		return nil, nil, fmt.Errorf("学术搜索失败: %w", err)
 	}
 	resultCount = len(res.Results)
-	recordAcademicProviderEvents(query, res.Results, res.EngineErrors, academicEngineSelection(academicSearcher.AcademicEngines(), engines), started, requestID)
+	recordAcademicProviderEvents(query, res.Results, res.EngineErrors, attempted, attemptsKnown, started, requestID)
 
 	ret, err := formatAcademicResults(query, res)
 	if err != nil {
 		return nil, nil, err
 	}
-	if cacheInst != nil {
+	if requestCache != nil {
 		// 逐引擎错误不写入缓存（Store 仍只存干净结果），命中路径展示的是上次结果；
 		// TTL 按 freshness 分桶：day → 1h、week → 6h、month 及其它 → 24h/默认
-		_ = cacheInst.Store(cacheKey, "", true, res.Results, "", cache.TTLForFreshness(timeRange))
+		_ = requestCache.Store(cacheKey, "", true, res.Results, "", cache.TTLForFreshness(timeRange))
 	}
 	ret = searchcore.ProvenanceHeader(time.Now(), 0) + ret
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: ret}}}, nil, nil
@@ -127,8 +139,8 @@ func academicProviderErrorsFromError(err error) map[string]string {
 	return out
 }
 
-// academicEngineSelection returns only the engines that actually ran. An empty
-// requested list means the adapter searched every registered engine.
+// academicEngineSelection infers selection for implementations without an
+// authoritative attempt set; exact lookup supplies its narrower set directly.
 func academicEngineSelection(registered, requested []string) []string {
 	if len(registered) == 0 {
 		return requested
@@ -152,14 +164,14 @@ func academicEngineSelection(registered, requested []string) []string {
 // engine that returned it. Empty successes and per-engine failures still emit
 // one event so the dashboard shows coverage for every provider, not just the
 // engines that happened to contribute the final result set.
-func recordAcademicProviderEvents(query string, results []search.SearchResult, engineErrors map[string]string, engines []string, started time.Time, requestID string) {
+func recordAcademicProviderEvents(query string, results []search.SearchResult, engineErrors map[string]string, engines []string, attemptsKnown bool, started time.Time, requestID string) {
 	counts := make(map[string]int)
 	failed := make(map[string]bool)
 	engineTrace := make([]string, 0, len(engines))
 	seenEngine := make(map[string]bool)
 
 	mark := func(name string) {
-		if name == "" || seenEngine[name] {
+		if name == "" || seenEngine[name] || attemptsKnown && !slices.Contains(engines, name) {
 			return
 		}
 		seenEngine[name] = true

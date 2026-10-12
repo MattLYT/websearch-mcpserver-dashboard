@@ -6,6 +6,7 @@
   <title>WebSearch 控制中心</title>
   <link id="favicon" rel="icon" type="image/png" href="logo-green.png">
   <link rel="stylesheet" href="app.css">
+  <link rel="stylesheet" href="bootstrap-switch.css">
 </head>
 <body>
   <div class="shell">
@@ -56,11 +57,11 @@
             <p class="sys-value" id="system-status">—</p>
             <p class="panel-note" id="system-note"></p>
             <dl class="kv">
-              <div><dt>启用来源</dt><dd id="system-enabled">—</dd></div>
+              <div><dt>参与运行</dt><dd id="system-enabled">—</dd></div>
               <div><dt>已观测 Web 来源</dt><dd id="system-observed">—</dd></div>
               <div><dt>不稳定</dt><dd id="system-degraded">—</dd></div>
               <div><dt>异常</dt><dd id="system-down">—</dd></div>
-              <div><dt>熔断中</dt><dd id="system-suspended">—</dd></div>
+              <div><dt>观测告警</dt><dd id="system-suspended">—</dd></div>
             </dl>
           </article>
 
@@ -72,7 +73,7 @@
           </article>
 
           <article class="panel">
-            <div class="panel-head"><div><p class="eyebrow">MCP TOOLS</p><h2>工具模块</h2></div><span class="muted" id="mcp-tools-note">4 个公开工具</span></div>
+            <div class="panel-head"><div><p class="eyebrow">MCP TOOLS</p><h2>工具模块</h2></div><span class="muted" id="mcp-tools-note">5 个工具</span></div>
             <p class="panel-note" id="mcp-tools-help"></p>
             <div class="tool-list" id="mcp-tools-list"></div>
           </article>
@@ -101,10 +102,13 @@
       </section>
 
       <section id="page-sources" class="page">
+        <div class="draft-actions source-actions">
+          <span id="source-draft-count" class="muted"></span>
+          <button type="button" id="undo-sources" title="撤销全部未保存更改" aria-label="撤销全部未保存更改" disabled>↶</button>
+          <button type="button" id="save-sources" class="primary-btn" disabled>保存并重启</button>
+        </div>
+        <p id="source-write-note" class="panel-note"></p>
         <div class="status-key">
-          <span><i class="tag-dot active"></i>当前启用</span>
-          <span><i class="tag-dot inactive"></i>已配置未使用</span>
-          <span><i class="tag-dot not_configured"></i>未配置</span>
           <span><i class="dot healthy"></i>正常</span>
           <span><i class="dot degraded"></i>不稳定</span>
           <span><i class="dot down"></i>异常</span>
@@ -112,12 +116,23 @@
         </div>
 
         <article class="panel">
-          <div class="panel-head"><div><p class="eyebrow">WEB GROUP</p><h2>Web 搜索源</h2></div><span class="muted" id="sources-web-counts">—</span></div>
+          <div class="panel-head"><div><p class="eyebrow">WEB ENGINES</p><h2>网页引擎</h2></div><span class="muted" id="sources-web-counts">—</span></div>
           <p class="panel-note" id="sources-web-note"></p>
           <div class="table-scroll">
             <table class="data-table">
-              <thead><tr><th>来源</th><th>启用状态</th><th>健康</th><th>最近 20 次</th><th class="num">今日尝试</th><th>失败构成</th><th class="num">成功 / 失败</th><th class="num">成功率</th><th class="num">平均 / P95</th><th>最近观测</th><th>额度</th><th>最近错误</th></tr></thead>
+              <thead><tr><th>来源</th><th>启用</th><th>历史健康</th><th>最近 20 次</th><th class="num">今日尝试</th><th class="num">成功率</th><th class="num">平均耗时</th><th>最近错误</th></tr></thead>
               <tbody id="sources-web-body"></tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head"><div><p class="eyebrow">API PROVIDERS</p><h2>API 供应商</h2></div><span class="muted" id="sources-api-counts">—</span></div>
+          <p class="panel-note" id="sources-api-note"></p>
+          <div class="table-scroll">
+            <table class="data-table">
+              <thead><tr><th>来源</th><th>启用</th><th>历史健康</th><th>最近 20 次</th><th class="num">今日尝试</th><th class="num">成功率</th><th class="num">平均耗时</th><th>最近错误</th></tr></thead>
+              <tbody id="sources-api-body"></tbody>
             </table>
           </div>
         </article>
@@ -127,7 +142,7 @@
           <p class="panel-note" id="sources-academic-note"></p>
           <div class="table-scroll">
             <table class="data-table">
-              <thead><tr><th>来源</th><th>启用状态</th><th>健康</th><th>最近 20 次</th><th class="num">今日尝试</th><th>失败构成</th><th class="num">成功 / 失败</th><th class="num">成功率</th><th class="num">平均 / P95</th><th>最近观测</th><th>额度</th><th>最近错误</th></tr></thead>
+              <thead><tr><th>来源</th><th>启用</th><th>历史健康</th><th>最近 20 次</th><th class="num">今日尝试</th><th class="num">成功率</th><th class="num">平均耗时</th><th>最近错误</th></tr></thead>
               <tbody id="sources-academic-body"></tbody>
             </table>
           </div>
@@ -185,27 +200,53 @@
 
       <section id="page-settings" class="page">
         <div class="settings-grid">
+          <div class="settings-column">
           <article class="panel">
             <div class="panel-head"><div><p class="eyebrow">SAFE SETTINGS</p><h2>常用设置</h2></div><span id="settings-dirty" class="pill hidden">有未保存更改</span></div>
+            <p id="settings-write-note" class="panel-note"></p>
             <form id="settings-form" class="form-grid">
-              <label>搜索模式<select name="mode" data-key="mode"><option>hybrid</option><option>engine</option><option>apipool</option><option>baidu</option><option>tavily</option><option>exa</option><option>anysearch</option><option>doubao</option></select></label>
-              <label>网络区域<select name="network" data-key="network"><option value="china">中国</option><option value="international">国际</option></select></label>
+              <fieldset class="mode-settings settings-wide">
+                <legend>搜索模式</legend>
+                <div class="mode-grid">
+                  <div class="mode-choice"><label><input type="radio" name="mode" value="hybrid" data-key="mode"><span>hybrid</span></label><div class="mode-help"><button type="button" class="mode-info" aria-label="hybrid 模式说明" aria-describedby="mode-note-hybrid" aria-expanded="false">i</button><span class="mode-tip" id="mode-note-hybrid" role="tooltip">已启用且条件满足的 API 与网页引擎混合并发。</span></div></div>
+                  <div class="mode-choice"><label><input type="radio" name="mode" value="engine" data-key="mode"><span>engine</span></label><div class="mode-help"><button type="button" class="mode-info" aria-label="engine 模式说明" aria-describedby="mode-note-engine" aria-expanded="false">i</button><span class="mode-tip" id="mode-note-engine" role="tooltip">已启用的网页引擎并发，无需 Key；代理依赖引擎仅在条件满足时参与。</span></div></div>
+                  <div class="mode-choice"><label><input type="radio" name="mode" value="apipool" data-key="mode"><span>apipool</span></label><div class="mode-help"><button type="button" class="mode-info" aria-label="apipool 模式说明" aria-describedby="mode-note-apipool" aria-expanded="false">i</button><span class="mode-tip" id="mode-note-apipool" role="tooltip">每次调用一个供应商，失败切换；支持 round-robin、priority、weighted 策略，百度网页启用时兜底。</span></div></div>
+                  <div class="mode-choice"><label><input type="radio" name="mode" value="provider" id="mode-single"><span>单供应商</span></label><div class="mode-help"><button type="button" class="mode-info" aria-label="单供应商模式说明" aria-describedby="mode-note-provider" aria-expanded="false">i</button><span class="mode-tip" id="mode-note-provider" role="tooltip">优先使用所选供应商，保留其原有回退路径；所有来源仍受启用开关约束。</span></div></div>
+                </div>
+                <div id="mode-provider-options" class="provider-mode-row hidden">
+                  <label>服务商<select id="mode-provider"><option value="baidu">baidu · 百度千帆</option><option value="tavily">tavily</option><option value="exa">exa</option><option value="anysearch">anysearch</option><option value="doubao">doubao · 豆包</option></select></label>
+                  <div class="mode-choice provider-help"><div class="mode-help"><button type="button" class="mode-info" id="mode-provider-info" aria-label="baidu 模式说明" aria-describedby="mode-note-baidu" aria-expanded="false">i</button>
+                    <span class="mode-tip" id="mode-note-baidu" role="tooltip">百度千帆搜索，失败回退已启用的百度网页；无 SK 时使用已启用的百度网页。</span>
+                    <span class="mode-tip hidden" id="mode-note-tavily" role="tooltip">Tavily Search API，需要 TAVILY_SK；无 Key 时回退已启用的 Bing。</span>
+                    <span class="mode-tip hidden" id="mode-note-exa" role="tooltip">Exa Web Search API，需要 EXA_API_KEY；无 Key 时回退已启用的 Bing。</span>
+                    <span class="mode-tip hidden" id="mode-note-anysearch" role="tooltip">AnySearch API；有 Key 时轮询 Key 池，无 Key 时走按出口 IP 限流的匿名档。</span>
+                    <span class="mode-tip hidden" id="mode-note-doubao" role="tooltip">豆包联网搜索 Global / Custom，需要 DOUBAO_SEARCH_API_KEY；无 Key 时回退已启用的 Bing。</span>
+                  </div></div>
+                </div>
+              </fieldset>
               <label>上游超时（秒）<input type="number" min="0" max="120" name="upstream_timeout_sec" data-key="upstream_timeout_sec"></label>
               <label>最大结果数<input type="number" min="1" max="50" name="smartsearch.max_size" data-key="smartsearch.max_size"></label>
               <label>相关性阈值<input type="number" min="0" max="1" step="0.01" name="smartsearch.relevance_threshold" data-key="smartsearch.relevance_threshold"></label>
               <label>MMR λ<input type="number" min="0" max="1" step="0.05" name="smartsearch.mmr.lambda" data-key="smartsearch.mmr.lambda"></label>
-              <label>熔断首次暂停<input type="text" placeholder="5s" name="dashboard.suspension.ban_time_on_fail" data-key="dashboard.suspension.ban_time_on_fail"></label>
-              <label>熔断暂停上限<input type="text" placeholder="24h" name="dashboard.suspension.max_ban_time_on_fail" data-key="dashboard.suspension.max_ban_time_on_fail"></label>
               <label class="toggle"><input type="checkbox" name="cache.enabled" data-key="cache.enabled"><span></span>启用缓存</label>
               <label class="toggle"><input type="checkbox" name="academic.enabled" data-key="academic.enabled"><span></span>学术检索</label>
               <label class="toggle"><input type="checkbox" name="cleanfetch.enabled" data-key="cleanfetch.enabled"><span></span>网页抓取</label>
               <label class="toggle"><input type="checkbox" name="pdf_parser.enabled" data-key="pdf_parser.enabled"><span></span>PDF 解析</label>
-              <div class="form-actions"><button type="button" id="save-settings" class="primary-btn">预览并保存</button></div>
+              <details class="settings-advanced settings-wide">
+                <summary>高级连接与学术设置</summary>
+                <div class="form-grid">
+                  <label class="settings-wide">学术搜索网络环境<select name="network" data-key="network"><option value="china">国内网络</option><option value="international">国际网络</option></select></label>
+                </div>
+              </details>
+              <details class="settings-advanced settings-wide">
+                <summary>观测告警暂停窗口</summary>
+                <div class="form-grid">
+                  <label>首次暂停<input type="text" placeholder="5s" name="dashboard.suspension.ban_time_on_fail" data-key="dashboard.suspension.ban_time_on_fail"></label>
+                  <label>暂停上限<input type="text" placeholder="24h" name="dashboard.suspension.max_ban_time_on_fail" data-key="dashboard.suspension.max_ban_time_on_fail"></label>
+                </div>
+              </details>
+              <div class="form-actions draft-actions"><button type="button" id="undo-settings" title="撤销全部未保存更改" aria-label="撤销全部未保存更改" disabled>↶</button><button type="button" id="save-settings" class="primary-btn" disabled>保存并重启</button></div>
             </form>
-          </article>
-          <article class="panel">
-            <div class="panel-head"><div><p class="eyebrow">CREDENTIALS</p><h2>API Key 状态</h2></div><span class="muted">永不回显原值</span></div>
-            <div id="secret-list" class="secret-list"></div>
           </article>
           <article class="panel">
             <div class="panel-head"><div><p class="eyebrow">APPEARANCE &amp; MAINTENANCE</p><h2>外观与维护</h2></div></div>
@@ -222,6 +263,21 @@
               <div><b>重启服务</b><small>应用已保存的设置或新密钥</small><button id="restart-service" type="button">确认并重启</button></div>
               <div><b>清空搜索缓存</b><small>监控历史不会被删除</small><button id="clear-cache" type="button" class="danger">确认并清空</button></div>
             </div>
+            <div class="apply-status" aria-live="polite">
+              <h3 class="sub-head">配置恢复</h3>
+              <p id="apply-note" class="panel-note"></p>
+              <div id="apply-recovery" class="hidden draft-actions backup-actions">
+                <button type="button" id="retry-apply">重试重启</button>
+                <select id="backup-select" aria-label="恢复配置备份"><option value="">选择备份</option></select>
+                <button type="button" id="restore-backup">恢复备份并重启</button>
+              </div>
+            </div>
+          </article>
+          </div>
+          <div class="settings-column">
+          <article class="panel">
+            <div class="panel-head"><div><p class="eyebrow">CREDENTIALS</p><h2>API Key 状态</h2></div><span class="muted">永不回显原值</span></div>
+            <div id="secret-list" class="secret-list"></div>
           </article>
           <article class="panel">
             <div class="panel-head"><div><p class="eyebrow">QUOTAS</p><h2>额度管理</h2></div><span class="muted">本地真实调用统计 · 可重置 / 修正</span></div>
@@ -233,6 +289,7 @@
               </table>
             </div>
           </article>
+          </div>
         </div>
       </section>
     </main>

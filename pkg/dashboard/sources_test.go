@@ -3,8 +3,11 @@ package dashboard
 import (
 	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
+	"time"
 
+	"websearch/pkg/antirobot"
 	"websearch/pkg/config"
 	"websearch/pkg/telemetry"
 )
@@ -69,7 +72,7 @@ func TestWebSourceCatalogConfiguredAndActivePerMode(t *testing.T) {
 		{
 			name:       "baidu 千帆加网页回退",
 			configure:  func(c *config.Config) { c.Mode = config.ModeBaidu },
-			wantActive: []string{"baidu", "baidu_web"},
+			wantActive: []string{"baidu", "baidu_web", "bing"},
 		},
 		{
 			name: "baidu 无 Key 时只剩网页引擎",
@@ -77,7 +80,7 @@ func TestWebSourceCatalogConfiguredAndActivePerMode(t *testing.T) {
 				c.Mode = config.ModeBaidu
 				c.Baidu = config.BaiduConfig{WebEnabled: true}
 			},
-			wantActive:       []string{"baidu_web"},
+			wantActive:       []string{"baidu_web", "bing"},
 			wantUnconfigured: []string{"baidu"},
 		},
 		{
@@ -87,7 +90,7 @@ func TestWebSourceCatalogConfiguredAndActivePerMode(t *testing.T) {
 				c.Baidu = config.BaiduConfig{}
 			},
 			wantActive:       []string{"bing"},
-			wantUnconfigured: []string{"baidu", "baidu_web"},
+			wantUnconfigured: []string{"baidu"},
 		},
 		{
 			name: "apipool 只激活池内供应商加网页兜底",
@@ -95,14 +98,14 @@ func TestWebSourceCatalogConfiguredAndActivePerMode(t *testing.T) {
 				c.Mode = config.ModeApipool
 				c.Apipool = config.ApipoolConfig{Engines: []string{"tavily", "doubao"}}
 			},
-			wantActive: []string{"baidu_web", "doubao", "tavily"},
+			wantActive: []string{"baidu_web", "bing", "doubao", "tavily"},
 		},
 		{
 			name: "tavily 单引擎模式",
 			configure: func(c *config.Config) {
 				c.Mode = config.ModeTavily
 			},
-			wantActive: []string{"tavily"},
+			wantActive: []string{"bing", "tavily"},
 		},
 	}
 
@@ -204,8 +207,8 @@ func TestJoinSourcesStatusRules(t *testing.T) {
 	if got := sourceByID(t, out, "no_history"); got.Status != "unknown" || got.SampleSize != 0 {
 		t.Errorf("已启用但无历史应为 unknown: %+v", got)
 	}
-	if got := sourceByID(t, out, "inactive"); got.Status != "inactive" || got.SampleSize != 0 {
-		t.Errorf("未启用的来源不应采用历史状态: %+v", got)
+	if got := sourceByID(t, out, "inactive"); got.Status != "inactive" || got.SampleSize != 5 || got.ObservationStatus != "down" {
+		t.Errorf("未启用来源保留历史但不参与路由: %+v", got)
 	}
 	if got := sourceByID(t, out, "unconfigured"); got.Status != "not_configured" {
 		t.Errorf("未配置的来源状态 = %q, want not_configured", got.Status)
@@ -276,7 +279,7 @@ func TestBuildDashboardOverviewSortsSourcesByState(t *testing.T) {
 		got = append(got, s.ID)
 	}
 	// 已启用在前（保持目录顺序），已配置未启用居中，未配置最后。
-	want := []string{"baidu_web", "bing", "google", "duckduckgo", "anysearch", "baidu", "tavily", "exa", "doubao"}
+	want := []string{"baidu_web", "bing", "google", "duckduckgo", "anysearch", "baidu", "tavily", "exa", "doubao", "so360", "wikipedia", "googlenews"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("sources 顺序 = %v, want %v", got, want)
 	}
@@ -340,6 +343,77 @@ func TestBuildDashboardOverviewKeepsAcademicSourcesSeparate(t *testing.T) {
 	for _, key := range []string{"system", "sources", "academic_sources", "providers", "trend"} {
 		if _, ok := payload[key]; !ok {
 			t.Errorf("overview JSON 缺少字段 %q", key)
+		}
+	}
+}
+
+func TestSourceCatalogSeparatesSwitchConfigurationAndRouting(t *testing.T) {
+	off := false
+	conf := fullWebConfig()
+	conf.Mode = config.ModeHybrid
+	conf.Tavily.Enabled = &off
+	conf.Anysearch.APIKey = ""
+	conf.So360.Enabled, conf.Wikipedia.Enabled, conf.GoogleNews.Enabled = true, true, true
+	conf.Proxy = config.ProxyConfig{Enabled: true, Endpoint: "http://127.0.0.1:1"}
+	conf.Academic = config.AcademicConfig{Enabled: true, DisableArxiv: true}
+	catalog := SourceCatalog(conf)
+	if len(catalog) != 21 {
+		t.Fatalf("catalog must include 12 web and 9 academic sources: %d", len(catalog))
+	}
+	if s := sourceByID(t, catalog, "tavily"); s.Enabled || !s.Configured || s.Active || s.Category != "api" || s.ControlPath != "tavily.enabled" {
+		t.Fatalf("stored key must not override disabled source: %+v", s)
+	}
+	if s := sourceByID(t, catalog, "anysearch"); !s.Configured || !s.Enabled || !s.Active || !strings.Contains(s.Condition, "匿名") {
+		t.Fatalf("anonymous AnySearch must remain available without a key: %+v", s)
+	}
+	for _, id := range []string{"so360", "wikipedia", "googlenews"} {
+		if s := sourceByID(t, catalog, id); !s.Enabled || !s.Active || s.Category != "engine" || s.Group != "web" {
+			t.Fatalf("new engine missing from route: %+v", s)
+		}
+	}
+	if s := sourceByID(t, catalog, "arxiv"); s.Enabled || s.Active || !s.Configured || !s.Inverted || s.ControlPath != "academic.disable_arxiv" {
+		t.Fatalf("academic inverse switch must be separate from configuration: %+v", s)
+	}
+	conf.Mode = config.ModeEngine
+	if s := sourceByID(t, SourceCatalog(conf), "anysearch"); s.Active || !s.Enabled || !s.Configured {
+		t.Fatalf("mode exclusion must not erase configuration: %+v", s)
+	}
+}
+
+func TestJoinSourcesSeparatesActualCooldownFromObservation(t *testing.T) {
+	antirobot.SetHealthStore("")
+	t.Cleanup(func() { antirobot.SetHealthStore("") })
+	antirobot.EnterCooldown("duckduckgo", "rate_limit", "HTTP 429", time.Now().Add(time.Minute), time.Minute)
+	defs := []SourceView{{ID: "duckduckgo", Configured: true, Active: false, aliases: []string{"duckduckgo"}}}
+	observed := []telemetry.Health{{Name: "duckduckgo", Status: "down", State: "suspended", SampleSize: 4,
+		SuspendedUntil: time.Now().Add(2 * time.Minute).Format(time.RFC3339), SuspendReason: "passive warning"}}
+	s := joinSources(defs, observed)[0]
+	if s.Active || s.Status != "inactive" || s.ObservationStatus != "down" || s.SampleSize != 4 || s.SuspensionScope != "observation" {
+		t.Fatalf("disabled history/observation warning incorrectly changes routing: %+v", s)
+	}
+	if s.ActualCooldown == nil || s.ActualCooldown.Engine != "duckduckgo" || s.ActualCooldown.Reason != "HTTP 429" || s.ActualCooldown.RemainingSeconds < 1 || s.ActualCooldown.PersistEnabled {
+		t.Fatalf("actual cooldown must come from antirobot: %+v", s.ActualCooldown)
+	}
+	antirobot.ClearCooldown("duckduckgo")
+	if after := joinSources(defs, observed)[0]; after.ActualCooldown != nil || !after.Suspended {
+		t.Fatalf("telemetry warning must not become an actual cooldown: %+v", after)
+	}
+}
+
+func TestDoubaoSourceConditionSeparatesVersionAndSiteScope(t *testing.T) {
+	conf := fullWebConfig()
+	for _, tc := range []struct {
+		version string
+		icp     bool
+		want    string
+	}{
+		{"global", false, "不限制 ICP 备案"},
+		{"global", true, "仅国内 ICP 备案站点"},
+		{"custom", true, "ICP 限制不适用"},
+	} {
+		conf.Doubao.Version, conf.Doubao.ICPHostOnly = tc.version, tc.icp
+		if s := sourceByID(t, SourceCatalog(conf), "doubao"); !strings.Contains(s.Condition, tc.want) {
+			t.Fatalf("version %s filter %v: %s", tc.version, tc.icp, s.Condition)
 		}
 	}
 }

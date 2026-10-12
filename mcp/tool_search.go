@@ -1,9 +1,9 @@
 package mcpserver
 
 import (
-	"fmt"
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -67,14 +67,15 @@ func doWebSearch(ctx context.Context, req *mcp.CallToolRequest, query, intent st
 	}
 	lookbackDays := timeRangeMonths * 30
 	cacheQuery := webSearchCacheQuery(query, n)
+	requestCache := requestSearchCache()
 
 	// ---- 缓存查询 ----
-	if cacheInst != nil {
-		rec, hitType, err := cacheInst.Lookup(cacheQuery, intent, false)
+	if requestCache != nil {
+		rec, hitType, err := requestCache.Lookup(cacheQuery, intent, false)
 		if err != nil {
 			log.Errf("缓存查询异常，跳过缓存: %v", err)
 		} else if rec != nil && !rec.Academic {
-			if result, ok := finishCachedWebSearch(ctx, rec, hitType, query, intent, n); ok {
+			if result, ok := finishCachedWebSearch(ctx, rec, hitType, query, intent, n, requestCache); ok {
 				cacheHit = true
 				if parsed, parseErr := rec.GetRawResults(); parseErr == nil {
 					resultCount = len(parsed)
@@ -84,15 +85,15 @@ func doWebSearch(ctx context.Context, req *mcp.CallToolRequest, query, intent st
 		}
 		if n > 0 {
 			// n 专用 key 未命中时，用未抽取的缓存补抽，避免把无正文结果当成完整命中
-			rec, hitType, err := cacheInst.Lookup(query, intent, false)
+			rec, hitType, err := requestCache.Lookup(query, intent, false)
 			if err == nil && rec != nil && !rec.Academic && hitType == "query_only" {
 				results, parseErr := rec.GetRawResults()
 				if parseErr == nil {
-		cacheHit = true
+					cacheHit = true
 					resultCount = len(results)
 					results = enrichFetchedTopN(ctx, results, n)
 					// 缓存命中不带诊断：失败清单不写入缓存（与学术搜索同策略）
-					return finishWebSearch(ctx, req, query, intent, cacheQuery, results, nil, 0, cacheProvenance(rec.CreatedAt))
+					return finishWebSearch(ctx, req, query, intent, cacheQuery, results, nil, 0, cacheProvenance(rec.CreatedAt), requestCache)
 				}
 			}
 		}
@@ -139,7 +140,7 @@ func doWebSearch(ctx context.Context, req *mcp.CallToolRequest, query, intent st
 
 	results = enrichFetchedTopN(ctx, results, n)
 	resultCount = len(results)
-	return finishWebSearch(ctx, req, query, intent, cacheQuery, results, searchDiagnostics(), cacheTTLForMonths(timeRangeMonths), provenance{retrievedAt: time.Now()})
+	return finishWebSearch(ctx, req, query, intent, cacheQuery, results, searchDiagnostics(), cacheTTLForMonths(timeRangeMonths), provenance{retrievedAt: time.Now()}, requestCache)
 }
 
 // provenance 响应溯源头数据（P1-4 结果来源注记）：retrievedAt 为结果检索时间，
@@ -196,7 +197,7 @@ func webSearchCacheQuery(query string, n int) string {
 	return query + "|fetch_top_n=" + strconv.Itoa(n)
 }
 
-func finishCachedWebSearch(_ context.Context, rec *cache.CacheRecord, hitType, query, intent string, fetchTopN int) (*mcp.CallToolResult, bool) {
+func finishCachedWebSearch(_ context.Context, rec *cache.CacheRecord, hitType, query, intent string, fetchTopN int, requestCache *cache.Cache) (*mcp.CallToolResult, bool) {
 	switch hitType {
 	case "exact_intent":
 		if rec.Summary != "" {
@@ -220,22 +221,22 @@ func finishCachedWebSearch(_ context.Context, rec *cache.CacheRecord, hitType, q
 		}
 		if intent != "" && summarizerInst != nil && rec.Summary == "" {
 			cacheQuery := webSearchCacheQuery(query, fetchTopN)
-			go asyncSummarize(query, cacheQuery, intent, results)
+			go asyncSummarize(query, cacheQuery, intent, results, requestCache)
 		}
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: searchcore.ProvenanceHeader(rec.CreatedAt, time.Since(rec.CreatedAt)) + ret}}}, true
 	}
 	return nil, false
 }
 
-func asyncSummarize(query, cacheQuery, intent string, results []search.SearchResult) {
+func asyncSummarize(query, cacheQuery, intent string, results []search.SearchResult, requestCache *cache.Cache) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Errf("异步摘要 panic: %v", r)
 		}
 	}()
 	output, sumErr := summarizerInst.Summarize(query, intent, results)
-	if sumErr == nil && cacheInst != nil {
-		_ = cacheInst.UpdateSummary(cacheQuery, intent, output)
+	if sumErr == nil && requestCache != nil {
+		_ = requestCache.UpdateSummary(cacheQuery, intent, output)
 		log.Infof("后台异步摘要完成: query=%s, intent=%s", query, intent)
 	}
 }
@@ -245,7 +246,7 @@ func asyncSummarize(query, cacheQuery, intent string, results []search.SearchRes
 // 后续证据预算裁剪，过滤诊断仅在结果稀疏（≤3 条）时透出。
 // ttl 为本次缓存写入的存活时长（按查询时间范围分桶，见 cacheTTLForMonths）；
 // prov 为响应头溯源头（retrieved_at / cache_age_seconds / usage_note）。
-func finishWebSearch(ctx context.Context, req *mcp.CallToolRequest, query, intent, cacheQuery string, results []search.SearchResult, diag *searchcore.SearchDiagnostics, ttl time.Duration, prov provenance) (*mcp.CallToolResult, any, error) {
+func finishWebSearch(ctx context.Context, req *mcp.CallToolRequest, query, intent, cacheQuery string, results []search.SearchResult, diag *searchcore.SearchDiagnostics, ttl time.Duration, prov provenance, requestCache *cache.Cache) (*mcp.CallToolResult, any, error) {
 	if intent != "" && summarizerInst != nil {
 		var output string
 		var sumErr error
@@ -259,9 +260,9 @@ func finishWebSearch(ctx context.Context, req *mcp.CallToolRequest, query, inten
 			output, sumErr = summarizerInst.Summarize(query, intent, results)
 		}
 		if sumErr == nil {
-			if cacheInst != nil {
+			if requestCache != nil {
 				// 缓存只存干净摘要，失败诊断不落缓存
-				_ = cacheInst.Store(cacheQuery, intent, false, results, output, ttl)
+				_ = requestCache.Store(cacheQuery, intent, false, results, output, ttl)
 			}
 			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: searchcore.ProvenanceHeader(prov.retrievedAt, prov.cacheAge) + appendDiagnostics(output, diag, len(results))}}}, nil, nil
 		}
@@ -277,8 +278,8 @@ func finishWebSearch(ctx context.Context, req *mcp.CallToolRequest, query, inten
 	if notice, dumped := dumpSearchResultsIfOversize(len(results), ret); dumped {
 		ret = notice
 	}
-	if cacheInst != nil {
-		_ = cacheInst.Store(cacheQuery, intent, false, results, "", ttl)
+	if requestCache != nil {
+		_ = requestCache.Store(cacheQuery, intent, false, results, "", ttl)
 	}
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: searchcore.ProvenanceHeader(prov.retrievedAt, prov.cacheAge) + appendDiagnostics(ret, diag, len(results))}}}, nil, nil
 }

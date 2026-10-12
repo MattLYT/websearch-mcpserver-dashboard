@@ -11,8 +11,8 @@ import (
 	"time"
 	"websearch/pkg/config"
 	"websearch/pkg/fetch/jina"
-	"websearch/pkg/search"
 	"websearch/pkg/fetch/webfetch"
+	"websearch/pkg/search"
 )
 
 import (
@@ -560,7 +560,7 @@ func TestSearchToolSchema_FetchTopNEmbedded(t *testing.T) {
 	initTestLogger()
 	restoreGlobals(t)
 	academicSearcher = nil
-	searchapi = nil
+	searchapi = &mockSearch{name: "mock"}
 	webfetchInst = nil
 
 	conf := config.Config{Bing: config.BingConfig{Enabled: true}}
@@ -593,7 +593,6 @@ func TestSearchToolSchema_FetchTopNEmbedded(t *testing.T) {
 		t.Errorf("fetch_top_n description should reference server config, got: %s", desc)
 	}
 }
-
 
 func TestEnsureWebFetchLazyInit(t *testing.T) {
 	oldWF := webfetchInst
