@@ -2,6 +2,8 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -11,7 +13,127 @@ import (
 	"websearch/pkg/cache"
 	"websearch/pkg/config"
 	"websearch/pkg/search"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+type timeRangeWebSearch struct {
+	mockSearch
+	days []int
+}
+
+func (s *timeRangeWebSearch) SearchRawWithTimeRange(query string, days int) ([]search.SearchResult, error) {
+	s.days = append(s.days, days)
+	return []search.SearchResult{{Title: fmt.Sprintf("window-%d-days", days), Url: "https://example.com", Content: strings.Repeat("synthetic content ", 100)}}, nil
+}
+
+func TestWebSearchCacheSeparatesTimeRanges(t *testing.T) {
+	initTestLogger()
+	restoreGlobals(t)
+	c, err := cache.New(filepath.Join(t.TempDir(), "cache.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	cacheInst, cacheNamespace = c, "time-range-test"
+	summarizerInst, fallbackSearch = nil, nil
+	smartSearchConf = config.SmartSearchConfig{}
+	s := &timeRangeWebSearch{mockSearch: mockSearch{name: "mock"}}
+	searchapi = s
+	for _, tc := range []struct {
+		months, fetch, wantDays, wantCalls int
+	}{
+		{3, 0, 90, 1}, {6, 0, 180, 2}, {3, 0, 90, 2},
+		{6, 1, 180, 2}, {3, 1, 90, 2}, {6, 1, 180, 2},
+		{0, 0, 0, 3}, {3, 0, 90, 3}, {0, 1, 0, 3},
+	} {
+		var params SearchParamsNoIntent
+		if err := json.Unmarshal([]byte(fmt.Sprintf(`{"query":"same query","time_range":%d,"fetch_top_n":%d}`, tc.months, tc.fetch)), &params); err != nil {
+			t.Fatal(err)
+		}
+		result, _, err := WebSearchNoIntent(context.Background(), nil, &params)
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := result.Content[0].(*mcp.TextContent).Text
+		if !strings.Contains(text, fmt.Sprintf("window-%d-days", tc.wantDays)) || len(s.days) != tc.wantCalls {
+			t.Fatalf("months=%d fetch=%d: calls=%v, response=%s", tc.months, tc.fetch, s.days, text)
+		}
+	}
+}
+
+func TestWebSearchDistinguishesOmittedAndUnlimitedTimeRange(t *testing.T) {
+	initTestLogger()
+	restoreGlobals(t)
+	cacheInst, summarizerInst, fallbackSearch = nil, nil, nil
+	smartSearchConf = config.SmartSearchConfig{}
+	s := &timeRangeWebSearch{mockSearch: mockSearch{name: "mock"}}
+	searchapi = s
+	for _, tc := range []struct {
+		args string
+		want int
+	}{
+		{`{"query":"q","fetch_top_n":0}`, 90},
+		{`{"query":"q","time_range":0,"fetch_top_n":0}`, 0},
+		{`{"query":"q","time_range":null,"fetch_top_n":0}`, 90},
+	} {
+		var params SearchParamsNoIntent
+		if err := json.Unmarshal([]byte(tc.args), &params); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := WebSearchNoIntent(context.Background(), nil, &params); err != nil {
+			t.Fatal(err)
+		}
+		if got := s.days[len(s.days)-1]; got != tc.want {
+			t.Fatalf("args=%s: lookback days=%d, want %d", tc.args, got, tc.want)
+		}
+	}
+}
+
+func TestWebSearchRejectsInvalidTimeRanges(t *testing.T) {
+	initTestLogger()
+	restoreGlobals(t)
+	s := &timeRangeWebSearch{mockSearch: mockSearch{name: "mock"}}
+	searchapi = s
+	for _, months := range []int{-1, int(^uint(0) >> 1)} {
+		params := &SearchParamsNoIntent{searchBaseParams: searchBaseParams{Query: "q", TimeRange: &months}}
+		if _, _, err := WebSearchNoIntent(context.Background(), nil, params); err == nil || len(s.days) != 0 {
+			t.Fatalf("invalid months=%d reached search: calls=%v, err=%v", months, s.days, err)
+		}
+	}
+}
+
+func TestWebSearchDoesNotReuseLegacyCache(t *testing.T) {
+	initTestLogger()
+	restoreGlobals(t)
+	c, err := cache.New(filepath.Join(t.TempDir(), "cache.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	cacheInst, cacheNamespace = c, "legacy-test"
+	summarizerInst, fallbackSearch = nil, nil
+	smartSearchConf = config.SmartSearchConfig{}
+	view, err := c.ForRequest(cacheNamespace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"same query", "same query|fetch_top_n=1"} {
+		if err := view.Store(key, "", false, []search.SearchResult{{Title: "legacy wrong window", Url: "https://example.com"}}, "", time.Hour); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := &timeRangeWebSearch{mockSearch: mockSearch{name: "mock"}}
+	searchapi = s
+	for _, fetch := range []int{1, 0} {
+		if _, _, err := doWebSearch(context.Background(), nil, "same query", "", 6, &fetch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(s.days) != 2 || s.days[0] != 180 || s.days[1] != 180 {
+		t.Fatalf("legacy results reused: calls=%v", s.days)
+	}
+}
 
 type blockedWebSearch struct {
 	mockSearch
@@ -80,7 +202,7 @@ func TestSearchCachesCannotRepopulateAfterClear(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			key := "q"
+			key := webSearchCacheQuery("q", 3, 0)
 			if academic {
 				key = "q||"
 			}

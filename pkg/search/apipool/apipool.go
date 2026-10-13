@@ -76,6 +76,11 @@ func (a *ApipoolSearchImpl) Search(query string) (string, error) {
 }
 
 func (a *ApipoolSearchImpl) SearchRawWithTimeRange(query string, lookbackDays int) ([]core.SearchResult, error) {
+	return a.searchRaw(query, lookbackDays)
+}
+
+// lookbackDays = -1 is internal-only: preserve the provider's SearchRaw defaults.
+func (a *ApipoolSearchImpl) searchRaw(query string, lookbackDays int) ([]core.SearchResult, error) {
 	n := len(a.providers)
 	if n == 0 {
 		return nil, fmt.Errorf("apipool: 无可用供应商")
@@ -158,7 +163,7 @@ func (a *ApipoolSearchImpl) effectiveWeight(p ApipoolProvider) int {
 }
 
 func (a *ApipoolSearchImpl) SearchRaw(query string) ([]core.SearchResult, error) {
-	return a.SearchRawWithTimeRange(query, 0)
+	return a.searchRaw(query, -1)
 }
 
 // callProviderWithRetry 调用单个供应商，自动重试同 pool 内的其他 SK。
@@ -196,7 +201,7 @@ func (a *ApipoolSearchImpl) callSingle(p ApipoolProvider, query string, lookback
 	started := time.Now()
 	var results []core.SearchResult
 	var err error
-	if lookbackDays > 0 {
+	if lookbackDays >= 0 {
 		if tr, ok := p.engine.(core.SearchTimeRanger); ok {
 			results, err = tr.SearchRawWithTimeRange(query, lookbackDays)
 		} else {

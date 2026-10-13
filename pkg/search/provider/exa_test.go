@@ -173,11 +173,11 @@ func TestExaSearchImpl_SearchRawWithTimeRange_Integration(t *testing.T) {
 	}
 	t.Logf("7天范围结果数: %d", len(results))
 
-	// 测试默认时间范围
+	// 测试不限时间范围
 	results, err = exa.SearchRawWithTimeRange("AI news", 0)
 	if err != nil {
-		t.Fatalf("SearchRawWithTimeRange with default failed: %v", err)
+		t.Fatalf("SearchRawWithTimeRange with no filter failed: %v", err)
 	}
-	t.Logf("默认范围结果数: %d", len(results))
+	t.Logf("不限时间范围结果数: %d", len(results))
 }
 

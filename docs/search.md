@@ -146,6 +146,8 @@ smartsearch:
 
 **freshness 感知缓存 TTL**：smartsearch `time_range` ≤1 月 → 24h，其余默认 6h；学术 `time_range` 分桶 day → 1h / week → 6h（默认）/ month → 24h。时效敏感查询不再命中陈旧缓存。
 
+**网页缓存隔离**：smartsearch 按 query、生效的 `time_range` 和 `fetch_top_n` 分开缓存；正文补抓仅复用相同时间范围的结果，摘要也保留对应缓存键。省略或 null 为 3 个月，显式 `0` 不发送时间筛选；各请求的时间参数互不修改，普通供应商 SearchRaw 保留构造默认。升级后不复用缺少时间范围的旧网页缓存，旧记录保留并按原策略清理。时间筛选的实际精度仍取决于上游来源：部分供应商用离散枚举，部分网页引擎及 Bing 回退无此参数；不保证上游没有隐藏默认或每条结果具有准确日期。
+
 **熔断状态落盘**：引擎冷却/限流统一注册表并落盘 `engine_health.json`（缓存库同目录，24h 记忆窗，advisory 语义），进程重启后自动采纳未过期冷却，避免反复撞死引擎。当前覆盖 DuckDuckGo / arXiv。
 
 **运行状态 Resource**：`search://capabilities`（版本 / 引擎清单 / 能力）与 `search://health`（引擎健康 / 熔断 / 缓存命中）以只读 MCP Resource 暴露，不占工具槽位、响应不带任何密钥；`mcp_resources: false` 整体关闭（默认开启）。
