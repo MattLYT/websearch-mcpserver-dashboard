@@ -146,6 +146,8 @@ Response behaviors introduced in phases 1-3, shared by `smartsearch` and `academ
 
 **Freshness-aware cache TTL**: smartsearch `time_range` ≤1 month → 24h, otherwise the default 6h; academic `time_range` buckets day → 1h / week → 6h (default) / month → 24h. Time-sensitive queries no longer hit stale cache.
 
+**Web cache isolation**: smartsearch partitions cached results by query, effective `time_range`, and `fetch_top_n`. Page enrichment and summaries retain the same time window. Omitted or null means 3 months; explicit `0` omits the time filter. Request-specific time settings do not mutate shared providers; ordinary SearchRaw retains constructor defaults. Legacy web entries without a time window are not reused and remain subject to existing cleanup. Precision depends on each source: some providers use discrete ranges, while some web engines and Bing fallback have no time parameter. Omitting filters does not guarantee the absence of upstream defaults or accurate dates on every result.
+
 **Persisted circuit-breaker state**: engine cooldown/rate-limit state lives in a unified registry persisted to `engine_health.json` (next to the cache DB, 24h memory window, advisory semantics); after a restart, unexpired cooldowns are adopted automatically so dead engines are not re-hit. Currently covers DuckDuckGo / arXiv.
 
 **Status Resources**: `search://capabilities` (version / engine list / capabilities) and `search://health` (engine health / circuit breaking / cache hits) are exposed as read-only MCP Resources — no tool slots consumed, no secrets in responses; `mcp_resources: false` disables them entirely (enabled by default).

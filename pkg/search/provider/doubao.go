@@ -1,11 +1,11 @@
 package provider
 
 import (
-	"websearch/pkg/search/core"
 	"fmt"
 	"strconv"
 	"strings"
 	"unicode/utf8"
+	"websearch/pkg/search/core"
 
 	"websearch/pkg/client"
 )
@@ -192,12 +192,9 @@ func (d *DoubaoSearchImpl) SearchRawWithTimeRange(query string, lookbackDays int
 	if d.version != doubaoVersionCustom {
 		return d.SearchRaw(query)
 	}
-	saved := d.timeRange
-	if mapped := lookbackDaysToDoubaoRange(lookbackDays); mapped != "" {
-		d.timeRange = mapped
-	}
-	defer func() { d.timeRange = saved }()
-	return d.SearchRaw(query)
+	request := *d
+	request.timeRange = lookbackDaysToDoubaoRange(lookbackDays)
+	return request.SearchRaw(query)
 }
 
 func (d *DoubaoSearchImpl) SearchRaw(query string) ([]core.SearchResult, error) {

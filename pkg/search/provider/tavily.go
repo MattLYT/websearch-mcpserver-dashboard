@@ -1,10 +1,10 @@
 package provider
 
 import (
-	"websearch/pkg/search/core"
 	"fmt"
 	"strings"
 	"websearch/pkg/client"
+	"websearch/pkg/search/core"
 )
 
 // TavilySearchImpl 实现 core.SearchInf 接口，通过 Tavily Search API 搜索。
@@ -83,11 +83,9 @@ func (t *TavilySearchImpl) Search(query string) (string, error) {
 
 // SearchRawWithTimeRange 实现 core.SearchTimeRanger 接口，支持动态时间范围。
 func (t *TavilySearchImpl) SearchRawWithTimeRange(query string, lookbackDays int) ([]core.SearchResult, error) {
-	timeRange := lookbackDaysToTavilyRange(lookbackDays)
-	saved := t.timeRange
-	t.timeRange = timeRange
-	defer func() { t.timeRange = saved }()
-	return t.SearchRaw(query)
+	request := *t
+	request.timeRange = lookbackDaysToTavilyRange(lookbackDays)
+	return request.SearchRaw(query)
 }
 
 // lookbackDaysToTavilyRange 将天数转换为 Tavily API 的 time_range 值。

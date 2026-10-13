@@ -2,9 +2,9 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -27,12 +27,19 @@ import (
 
 // WebSearchWithIntent LLM 启用时的 tool handler。
 func WebSearchWithIntent(ctx context.Context, req *mcp.CallToolRequest, params *SearchParamsWithIntent) (*mcp.CallToolResult, any, error) {
-	return doWebSearch(ctx, req, params.Query, params.Intent, params.TimeRange, params.FetchTopN)
+	return doWebSearch(ctx, req, params.Query, params.Intent, effectiveTimeRangeMonths(params.TimeRange), params.FetchTopN)
 }
 
 // WebSearchNoIntent LLM 未启用时的 tool handler。
 func WebSearchNoIntent(ctx context.Context, req *mcp.CallToolRequest, params *SearchParamsNoIntent) (*mcp.CallToolResult, any, error) {
-	return doWebSearch(ctx, req, params.Query, "", params.TimeRange, params.FetchTopN)
+	return doWebSearch(ctx, req, params.Query, "", effectiveTimeRangeMonths(params.TimeRange), params.FetchTopN)
+}
+
+func effectiveTimeRangeMonths(months *int) int {
+	if months == nil {
+		return 3
+	}
+	return *months
 }
 
 // doWebSearch 通用网页搜索逻辑。
@@ -61,12 +68,11 @@ func doWebSearch(ctx context.Context, req *mcp.CallToolRequest, query, intent st
 
 	n := effectiveFetchTopN(fetchTopN)
 
-	// 默认3个月
-	if timeRangeMonths == 0 {
-		timeRangeMonths = 3
+	if timeRangeMonths < 0 || timeRangeMonths > int(^uint(0)>>1)/30 {
+		return nil, nil, fmt.Errorf("time_range 超出有效范围")
 	}
 	lookbackDays := timeRangeMonths * 30
-	cacheQuery := webSearchCacheQuery(query, n)
+	cacheQuery := webSearchCacheQuery(query, timeRangeMonths, n)
 	requestCache := requestSearchCache()
 
 	// ---- 缓存查询 ----
@@ -75,7 +81,7 @@ func doWebSearch(ctx context.Context, req *mcp.CallToolRequest, query, intent st
 		if err != nil {
 			log.Errf("缓存查询异常，跳过缓存: %v", err)
 		} else if rec != nil && !rec.Academic {
-			if result, ok := finishCachedWebSearch(ctx, rec, hitType, query, intent, n, requestCache); ok {
+			if result, ok := finishCachedWebSearch(ctx, rec, hitType, query, intent, cacheQuery, requestCache); ok {
 				cacheHit = true
 				if parsed, parseErr := rec.GetRawResults(); parseErr == nil {
 					resultCount = len(parsed)
@@ -85,7 +91,7 @@ func doWebSearch(ctx context.Context, req *mcp.CallToolRequest, query, intent st
 		}
 		if n > 0 {
 			// n 专用 key 未命中时，用未抽取的缓存补抽，避免把无正文结果当成完整命中
-			rec, hitType, err := requestCache.Lookup(query, intent, false)
+			rec, hitType, err := requestCache.Lookup(webSearchCacheQuery(query, timeRangeMonths, 0), intent, false)
 			if err == nil && rec != nil && !rec.Academic && hitType == "query_only" {
 				results, parseErr := rec.GetRawResults()
 				if parseErr == nil {
@@ -190,14 +196,16 @@ func effectiveFetchTopN(param *int) int {
 	return clampFetchTopN(smartSearchConf.FetchTopN)
 }
 
-func webSearchCacheQuery(query string, n int) string {
-	if n <= 0 {
-		return query
-	}
-	return query + "|fetch_top_n=" + strconv.Itoa(n)
+func webSearchCacheQuery(query string, months, n int) string {
+	// Legacy keys have no reliable time window and must not be reused.
+	key, _ := json.Marshal(struct {
+		Query             string
+		Months, FetchTopN int
+	}{query, months, n})
+	return "web:v2:" + string(key)
 }
 
-func finishCachedWebSearch(_ context.Context, rec *cache.CacheRecord, hitType, query, intent string, fetchTopN int, requestCache *cache.Cache) (*mcp.CallToolResult, bool) {
+func finishCachedWebSearch(_ context.Context, rec *cache.CacheRecord, hitType, query, intent, cacheQuery string, requestCache *cache.Cache) (*mcp.CallToolResult, bool) {
 	switch hitType {
 	case "exact_intent":
 		if rec.Summary != "" {
@@ -220,7 +228,6 @@ func finishCachedWebSearch(_ context.Context, rec *cache.CacheRecord, hitType, q
 			ret = notice
 		}
 		if intent != "" && summarizerInst != nil && rec.Summary == "" {
-			cacheQuery := webSearchCacheQuery(query, fetchTopN)
 			go asyncSummarize(query, cacheQuery, intent, results, requestCache)
 		}
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: searchcore.ProvenanceHeader(rec.CreatedAt, time.Since(rec.CreatedAt)) + ret}}}, true

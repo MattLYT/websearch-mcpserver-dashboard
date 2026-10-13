@@ -24,7 +24,7 @@ type projectParams struct {
 type searchBaseParams struct {
 	projectParams
 	Query     string `json:"query" jsonschema:"description,搜索关键词：需精准凝练地表达核心检索意图（建议 2-6 个关键词或一个短句），只保留最能定位目标的词；不要把同义词、过程词、修饰词一股脑堆砌成关键词列表，否则会稀释相关性。例如用 'Go 泛型 性能' 而非 'Go 泛型 类型参数 编译 运行时 性能 基准 对比 优化 使用方法'"`
-	TimeRange int    `json:"time_range,omitempty" jsonschema:"description,搜索时间范围（月），限制搜索最近N个月的内容。例如 1=近1个月，3=近3个月，6=近半年，12=近一年。默认3，0表示不限"`
+	TimeRange *int   `json:"time_range,omitempty" jsonschema:"description,搜索时间范围（月），限制搜索最近N个月的内容。例如 1=近1个月，3=近3个月，6=近半年，12=近一年。默认3，0表示不限"`
 	FetchTopN *int   `json:"fetch_top_n,omitempty" jsonschema:"description,正文抓取模式：不传时与旧版一致，只返回引擎/供应商自带的内容（服务端 smartsearch.fetch_top_n 可改默认，默认 0 不抓）；传 0 表示只要标题摘要和 URL；传 1-5 表示为前 N 条获取页面原文——支持原文传参的 API 引擎直接走快速路径，其余引擎内部抓取页面。抓取被反爬防护（JS 挑战/WAF）拦截时会在该条结果上标注"`
 }
 

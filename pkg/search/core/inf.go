@@ -46,7 +46,9 @@ type SearchInf interface {
 }
 
 // SearchTimeRanger 支持按时间范围搜索的引擎可实现此可选接口。
-// lookbackDays 控制搜索最近多少天的结果，0 表示使用引擎默认值。
+// lookbackDays 控制搜索最近多少天的结果，0 表示不发送时间筛选。
+// SearchRaw 保留引擎的构造默认值；时间范围仅作用于当前请求。
+// 正天数的筛选精度取决于引擎支持的时间枚举或日期字段。
 type SearchTimeRanger interface {
 	SearchRawWithTimeRange(query string, lookbackDays int) ([]SearchResult, error)
 }
