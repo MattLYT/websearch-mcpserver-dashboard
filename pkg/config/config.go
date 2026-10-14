@@ -892,7 +892,11 @@ func (c ApipoolConfig) GetStrategy() string {
 // GetEngines 返回供应商顺序，默认 anysearch → baidu → tavily → exa。
 func (c ApipoolConfig) GetEngines() []string {
 	if len(c.Engines) > 0 {
-		return c.Engines
+		engines := make([]string, len(c.Engines))
+		for i, name := range c.Engines {
+			engines[i] = strings.ToLower(strings.TrimSpace(name))
+		}
+		return engines
 	}
 	return []string{"anysearch", "baidu", "tavily", "exa"}
 }

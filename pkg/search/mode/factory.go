@@ -3,8 +3,6 @@
 package mode
 
 import (
-	"strings"
-
 	"websearch/pkg/antirobot"
 	"websearch/pkg/config"
 	"websearch/pkg/log"
@@ -184,7 +182,7 @@ func BuildApipoolMode(conf config.Config, anysearchPool, baiduPool, tavilyPool, 
 		if !conf.APISourceEnabled(name) {
 			continue
 		}
-		switch strings.ToLower(strings.TrimSpace(name)) {
+		switch name {
 		case "anysearch":
 			if anysearchPool != nil {
 				providers = append(providers, apipool.NewApipoolProvider("anysearch", provider.NewAnysearchSearch(anysearchPool, conf.Anysearch.NumResults, conf.BlackListHost), anysearchPool))

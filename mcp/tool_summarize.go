@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"websearch/pkg/llm"
 	"websearch/pkg/log"
 	"websearch/pkg/search"
-	"websearch/pkg/llm"
 )
 
 import (
@@ -42,7 +42,10 @@ func streamSummarize(ctx context.Context, req *mcp.CallToolRequest, query, inten
 			sb.WriteString(token)
 			notifyProgress(ctx, req, 2, 2, token)
 		case err := <-errCh:
-			return "", err
+			if err != nil {
+				return "", err
+			}
+			// Successful completion can precede consumption of queued tokens.
 		case <-ctx.Done():
 			return "", ctx.Err()
 		}

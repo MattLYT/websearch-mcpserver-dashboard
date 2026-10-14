@@ -22,20 +22,21 @@ const (
 )
 
 type SearchResult struct {
-	Title       string   `json:"title"`
-	Url         string   `json:"url"`
-	Content     string   `json:"content"`
-	PublishDate string   `json:"publishedDate"`
-	DateSource  string   `json:"date_source,omitempty"` // PublishDate 来源注记（DateSource*，旧缓存行可能缺失）
-	Score       float64  `json:"score,omitempty"`       // 搜索相关性分数（Tavily 等引擎回传，0 表示无分数）
-	Engine      string   `json:"engine,omitempty"`      // 结果来源引擎名（首个返回该 URL 的引擎）
-	Engines     []string `json:"engines,omitempty"`     // 返回该 URL 的全部引擎（Wigolo 评分增强的共识 Boost 使用）
-	Type        string   `json:"type,omitempty"`        // "paper" 或 "web"，学术搜索时为 "paper"
-	Authors     string   `json:"authors,omitempty"`     // 论文作者
-	DOI         string   `json:"doi,omitempty"`         // 论文 DOI
-	Journal     string   `json:"journal,omitempty"`     // 期刊/会议名
-	CitedBy     int      `json:"cited_by,omitempty"`    // 被引次数
-	PDFURL      string   `json:"pdf_url,omitempty"`     // PDF 链接
+	Title        string   `json:"title"`
+	Url          string   `json:"url"`
+	Content      string   `json:"content"`
+	ContentSaved bool     `json:"content_saved,omitempty"` // Content is a transient file notice, not the document body.
+	PublishDate  string   `json:"publishedDate"`
+	DateSource   string   `json:"date_source,omitempty"` // PublishDate 来源注记（DateSource*，旧缓存行可能缺失）
+	Score        float64  `json:"score,omitempty"`       // 搜索相关性分数（Tavily 等引擎回传，0 表示无分数）
+	Engine       string   `json:"engine,omitempty"`      // 结果来源引擎名（首个返回该 URL 的引擎）
+	Engines      []string `json:"engines,omitempty"`     // 返回该 URL 的全部引擎（Wigolo 评分增强的共识 Boost 使用）
+	Type         string   `json:"type,omitempty"`        // "paper" 或 "web"，学术搜索时为 "paper"
+	Authors      string   `json:"authors,omitempty"`     // 论文作者
+	DOI          string   `json:"doi,omitempty"`         // 论文 DOI
+	Journal      string   `json:"journal,omitempty"`     // 期刊/会议名
+	CitedBy      int      `json:"cited_by,omitempty"`    // 被引次数
+	PDFURL       string   `json:"pdf_url,omitempty"`     // PDF 链接
 }
 
 type SearchInf interface {
