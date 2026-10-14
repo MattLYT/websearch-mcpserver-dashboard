@@ -12,10 +12,10 @@ import (
 	"websearch/pkg/config"
 	"websearch/pkg/fetch/everything"
 	"websearch/pkg/fetch/jina"
+	"websearch/pkg/fetch/webfetch"
+	"websearch/pkg/llm"
 	"websearch/pkg/log"
 	"websearch/pkg/search"
-	"websearch/pkg/llm"
-	"websearch/pkg/fetch/webfetch"
 )
 
 // ServerOption 服务器组件初始化选项。
@@ -86,11 +86,16 @@ func applyCache(conf config.Config) {
 	if !conf.CacheEnabled() {
 		return
 	}
+	namespace, err := searchCacheNamespace(conf)
+	if err != nil {
+		panic(fmt.Sprintf("缓存命名空间初始化失败: %v", err))
+	}
 	c, err := cache.New(conf.GetCacheStoragePath())
 	if err != nil {
 		panic(fmt.Sprintf("缓存初始化失败: %v", err))
 	}
 	cacheInst = c
+	cacheNamespace = namespace
 }
 
 func applyJinaReader(conf config.Config) {

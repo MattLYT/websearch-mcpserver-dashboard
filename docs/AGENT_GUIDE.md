@@ -2,7 +2,7 @@
 
 [English](AGENT_GUIDE.en.md) | [中文](AGENT_GUIDE.md)
 
-Go 编写的 MCP 搜索服务：5 个工具（`smartsearch` / `academicsearch` / `cleanfetch` / `pdf_parser` / `file_search`），零 API Key 可用（`engine` 模式），HTTP daemon 或 stdio 两种接入。给人类看的完整版见 [HUMAN_GUIDE.md](HUMAN_GUIDE.md)。
+Go 编写的 MCP 搜索服务：最多 5 个工具（`smartsearch` / `academicsearch` / `cleanfetch` / `pdf_parser` / `file_search`），零 API Key 可用（`engine` 模式），HTTP daemon 或 stdio 两种接入。给人类看的完整版见 [HUMAN_GUIDE.md](HUMAN_GUIDE.md)。
 
 > **反模式警告**：① 不要用 `cleanfetch` 抓搜索结果页来"搜索"——那是 `smartsearch` 的事；② 已持有 DOI / arXiv id 时不要拿标题再搜——直接把 id 作为 `academicsearch` 的 `query` 走精确查询；③ 不要给 `pdf_parser` 传网页 URL——网页用 `cleanfetch`。
 
@@ -36,7 +36,7 @@ curl -s http://127.0.0.1:8338/__admin/health   # 期望 {"ref_count":N,"message"
 
 ## 工具速查
 
-注册条件：`smartsearch` 需 `bing.enabled=true`；`academicsearch` 需 `academic.enabled=true`；`cleanfetch` / `pdf_parser` 各需同名 `enabled=true`。工具缺失先查这个。
+注册条件：`smartsearch` 需 `bing.enabled=true`；`academicsearch` 需 `academic.enabled=true`；`cleanfetch` 始终注册（同名 enabled 仅控制 URL 抓取）；`pdf_parser` 需 `enabled=true`。工具缺失先查这个。
 
 ### smartsearch
 
@@ -58,7 +58,7 @@ curl -s http://127.0.0.1:8338/__admin/health   # 期望 {"ref_count":N,"message"
 
 拿到结果里的 `pdf_url` 后直接传给 `pdf_parser` 读全文，不要用标题重搜。
 
-### cleanfetch
+### cleanfetch - URL 抓取
 
 | 参数 | 必填 | 说明 |
 |------|------|------|
@@ -69,10 +69,16 @@ curl -s http://127.0.0.1:8338/__admin/health   # 期望 {"ref_count":N,"message"
 
 | 参数 | 必填 | 说明 |
 |------|------|------|
-| `path` | ✅ | 本地 PDF 路径或 http(s) URL（学术结果的 `pdf_url` 可直接传入） |
+| `path` | 新解析必填 | 本地 PDF 路径或 http(s) URL（学术结果的 `pdf_url` 可直接传入）；续查 `task_ref` 时省略 |
 | `pages` | | 页码范围（1-based），如 `1-10`、`1,3,5-7`；省略时只解析前 20 页并提示续读 |
+| `task_ref` | | 使用返回的 `standard:`、`batch:` 或 `agent:` 引用查询原任务；与 `path/pages` 互斥，默认只查一次 |
+| `wait_seconds` | | 0-1800，每个 MinerU 任务的等待上限；新解析默认 300，续查默认 0。等待结束保留状态与引用，不重新提交 |
 
 原件超页或 MinerU 拒绝源 URL 时自动本地裁切所选页再上传（可 `mineru_page_batch_size` 分批、`mineru_page_budget` 限单次额度），分批进度经 MCP progress notification 实时推送；单次显式页数受 `max_pages`（默认 20）约束
+
+### cleanfetch - 引用读取
+
+已保存正文返回 `result_ref` 时，调用 `cleanfetch(result_ref, offset=0)`；取 `content`，按 `next_offset` 续读到 `eof=true`。默认/0 页长 4096，上限 8192 Unicode 字符。无需宿主访问容器文件；引用失效后重新调用原工具。有效期与文件校验边界见 [API](api.md#长结果读取)。
 
 ### file_search
 

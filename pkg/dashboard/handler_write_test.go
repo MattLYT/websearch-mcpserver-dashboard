@@ -2,8 +2,8 @@ package dashboard
 
 import (
 	"net/http"
-	"strings"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"websearch/pkg/config"
@@ -40,7 +40,10 @@ func doWrite(t *testing.T, mux *http.ServeMux, method, path, body, remoteAddr, p
 }
 
 func TestWriteGateMatrix(t *testing.T) {
-	conf := config.Config{}
+	conf, path, _ := settingsFixture(t)
+	if _, err := config.Load(path); err != nil {
+		t.Fatal(err)
+	}
 	conf.Dashboard.AdminPassword = "pw"
 	_, mux := newWriteTestHandler(t, conf)
 

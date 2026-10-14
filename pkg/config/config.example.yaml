@@ -36,15 +36,19 @@ log_level: info
 # 搜索模式:
 #   - baidu      : 百度千帆搜索（失败自动回退百度网页搜索），enable_ai_search 控制端点
 #   - apipool    : API Key 池轮转：每次只调一个供应商，失败自动切换，支持 round-robin / priority / weighted 策略
-#   - tavily     : 仅使用 Tavily Search API
-#   - exa        : 仅使用 Exa Web Search API
-#   - anysearch  : 仅使用 AnySearch API（https://www.anysearch.com/docs）
-#   - doubao     : 仅使用豆包联网搜索 Global/Custom（https://docs.volcengine.com/docs/87772/2272949）
-#   - hybrid     : 全引擎混合（Anysearch + 百度智能搜索 + 百度网页搜索 + Tavily + Exa + 豆包(有 Key 时) + Bing + DuckDuckGo）
-#   - engine     : 百度网页搜索 + Bing + DuckDuckGo（代理启用时加入 DuckDuckGo），无需 API Key
+#   - tavily     : 优先 Tavily API；失败可回退已启用 Bing
+#   - exa        : 优先 Exa API；失败可回退已启用 Bing
+#   - anysearch  : 优先 AnySearch API/匿名档；失败可回退已启用 Bing
+#   - doubao     : 优先豆包 Global/Custom；失败可回退已启用 Bing
+#   - hybrid     : 已开启且满足凭证/代理条件的 API 与网页源并发混合
+#   - engine     : 已开启且满足代理条件的网页源并行，无需 API Key
 mode: engine
 
-# 网络环境: china（默认，自动跳过海外引擎） / international（启用全部引擎）
+# API 源开关独立于模式与密钥：省略 enabled = true；false 只停止使用该源，不删除 Key。
+# 仅当前模式选用的已开启源参与搜索；AnySearch 无 Key 匿名档也受 enabled 控制。
+
+# 学术适配区域: china（默认） / international（仍需源开关及代理条件）
+# 不控制网页来源或豆包地域；豆包仅ICP备案站点限制由 doubao.icp_host_only 单独控制。
 network: china
 
 # 屏蔽站点列表（对所有搜索引擎生效）
@@ -71,6 +75,7 @@ rate_limit:
 # 环境变量: BAIDU_SK
 # ==============================================
 # baidu:
+#   enabled: true         # 千帆 API 源开关；不影响独立的 web_enabled 网页源
 #   web_enabled: false    # 百度网页搜索引擎（tn=json 直抓）默认禁用：被百度 CAPTCHA 识别
 #                         # （详见 pkg/config/config.go BaiduConfig 注释），出口 IP 干净时可显式开启
 #   api_key: ""           # 单 Key（sk_list 为空时自动作为单元素列表）
@@ -91,6 +96,7 @@ rate_limit:
 # 环境变量: TAVILY_SK
 # ==============================================
 # tavily:
+#   enabled: true         # API 源开关；false 保留 api_key/sk_list
 #   api_key: ""           # 单 Key（sk_list 为空时自动作为单元素列表）
 #   sk_list:              # 多 Key 轮询列表（优先级高于 api_key）
 #     - "tvly-xxxx"
@@ -103,6 +109,7 @@ rate_limit:
 # 环境变量: EXA_API_KEY
 # ==============================================
 # exa:
+#   enabled: true         # API 源开关；false 保留 api_key/sk_list
 #   api_key: ""           # 单 Key（sk_list 为空时自动作为单元素列表）
 #   sk_list:              # 多 Key 轮询列表（优先级高于 api_key）
 #     - "exa-xxxx"
@@ -119,6 +126,7 @@ rate_limit:
 # 环境变量: ANYSEARCH_API_KEY
 # ==============================================
 # anysearch:
+#   enabled: true         # API 源开关，同时控制有 Key 与无 Key 匿名档
 #   api_key: ""           # 单 Key（sk_list 为空时自动作为单元素列表）
 #   sk_list:              # 多 Key 轮询列表（优先级高于 api_key）
 #     - "as-xxxx"
@@ -135,6 +143,7 @@ rate_limit:
 # 免费档每月默认 500 积分；显式加入 apipool.engines 时 weighted 默认权重 500
 # ==============================================
 # doubao:
+#   enabled: true         # API 源开关；false 保留 api_key/sk_list
 #   api_key: ""           # 单 Key（sk_list 为空时自动作为单元素列表）
 #   sk_list:              # 多 Key 轮询列表（优先级高于 api_key）
 #     - "your-search-api-key"
@@ -151,6 +160,7 @@ rate_limit:
 # ==============================================
 # Bing 通用搜索引擎（兜底引擎 + engine 模式主力引擎）
 # 无需 API Key，默认开启
+# bing.enabled 只控制 Bing 源，不是 smartsearch 工具总开关；其他可用路由仍可搜索。
 # ==============================================
 bing:
   enabled: true
@@ -211,7 +221,7 @@ google:
 # ==============================================
 academic:
   enabled: true # 学术引擎总开关（默认 true）
-  bing_fallback: false # 学术搜索时用 Bing 兜底（默认 true）
+  bing_fallback: false # 兼容保留键（默认 true）；当前 academicsearch 仅使用学术源，不调用 Bing
   enhance: true # 学术搜索评分增强（RRF 融合 + 引用数/期刊权威/PDF/新鲜度信号），默认 true
   threshold: 0.02 # 学术结果阀值（比通用搜索更宽松），默认 0.02
   # 各引擎独立禁用（默认 false = 启用）
@@ -229,6 +239,8 @@ academic:
   # Semantic Scholar 可选 API key（环境变量 SEMANTIC_SCHOLAR_API_KEY 可覆盖）。
   # 匿名配额限流严格，带 key 连续 429 时引擎自动降级为匿名模式
   # semantic_scholar_api_key: ""
+  # OpenAlex optional key (env: OPENALEX_API_KEY); empty uses the shared IP budget.
+  # openalex_api_key: ""
 
 # ==============================================
 # 代理配置
@@ -275,11 +287,11 @@ cache:
 
 # ==============================================
 # 增强型网页抓取（基于 go-webfetch）
-# 默认关闭，需显式 enabled: true 才会启用
+# URL 抓取默认关闭；cleanfetch 始终注册，result_ref 正文读取不受此开关限制
 # 启用后无需代理即可抓取网页，失败时回退到 Jina Reader（需代理）
 # ==============================================
 cleanfetch:
-  enabled: false            # 总开关（默认 false，旧配置不启用）；smartsearch 的 fetch_top_n 不受此开关约束，会按当前配置惰性初始化 webfetch
+  enabled: false            # 仅控制 URL 抓取；result_ref 读取始终可用，smartsearch.fetch_top_n 不受约束
   file_output_dir: ""       # 大文本文件输出目录（默认 exe 同目录 fetchdata/）
   file_ttl_hours: 24        # 临时文件保留时长（小时），默认 24
   max_inline_lines: 100     # 内联返回最大行数，超过则存文件（默认 100）
@@ -408,6 +420,7 @@ log:
 #   enabled: false
 #   storage_path: "./data/dashboard.db"
 #   retention_days: 30
+#   client_projects: {}
 #   secrets_path: "./data/dashboard-secrets.json"
 #
 # 控制中心推荐使用独立配置文件 dashboard.yaml（主配置同目录，见

@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -72,6 +73,21 @@ func cropDialContext(ctx context.Context, network, address string) (net.Conn, er
 	if err != nil {
 		return nil, err
 	}
+	addrs, err := publicDownloadIPs(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	var dialer net.Dialer
+	for _, addr := range addrs {
+		conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(addr.IP.String(), port))
+		if err == nil {
+			return conn, nil
+		}
+	}
+	return nil, fmt.Errorf("无法连接下载地址: %s", host)
+}
+
+func publicDownloadIPs(ctx context.Context, host string) ([]net.IPAddr, error) {
 	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
 	if err != nil {
 		return nil, err
@@ -84,14 +100,115 @@ func cropDialContext(ctx context.Context, network, address string) (net.Conn, er
 			return nil, fmt.Errorf("不允许连接内网地址: %s → %s", host, addr.IP)
 		}
 	}
-	var dialer net.Dialer
-	for _, addr := range addrs {
-		conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(addr.IP.String(), port))
-		if err == nil {
-			return conn, nil
+	return addrs, nil
+}
+
+type pdfDownloadTransport struct {
+	proxy func(*http.Request) (*url.URL, error)
+}
+
+func (t pdfDownloadTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	transport := &http.Transport{DialContext: cropDialContext, DisableKeepAlives: true}
+	defer transport.CloseIdleConnections()
+	if t.proxy != nil {
+		proxyURL, err := t.proxy(req)
+		if err != nil {
+			return nil, err
+		}
+		if proxyURL != nil {
+			switch proxyURL.Scheme {
+			case "http", "https", "socks5", "socks5h":
+			default:
+				return nil, fmt.Errorf("不支持的 PDF 代理协议")
+			}
+			if proxyURL.Hostname() == "" {
+				return nil, fmt.Errorf("PDF 代理地址缺少主机名")
+			}
+			addrs, err := publicDownloadIPs(req.Context(), req.URL.Hostname())
+			if err != nil {
+				return nil, err
+			}
+			port := req.URL.Port()
+			if port == "" {
+				port = "80"
+				if req.URL.Scheme == "https" {
+					port = "443"
+				}
+			}
+			// Pin the target even through a trusted proxy; retain the origin Host and TLS identity.
+			pinned := req.Clone(req.Context())
+			if pinned.Host == "" {
+				pinned.Host = req.URL.Host
+			}
+			pinned.URL.Host = net.JoinHostPort(addrs[0].IP.String(), port)
+			if req.URL.Scheme == "http" && (proxyURL.Scheme == "http" || proxyURL.Scheme == "https") {
+				path := req.URL.EscapedPath()
+				if path == "" {
+					path = "/"
+				}
+				// Opaque keeps Request.WriteProxy from replacing the pinned URI authority with Host.
+				pinned.URL.Opaque = "//" + pinned.URL.Host + path
+			}
+			transport.Proxy = http.ProxyURL(proxyURL)
+			transport.DialContext = (&net.Dialer{Timeout: 30 * time.Second}).DialContext
+			transport.TLSClientConfig = &tls.Config{ServerName: req.URL.Hostname()}
+			if proxyURL.Scheme == "https" {
+				transport.DialTLSContext = (&tls.Dialer{
+					NetDialer: &net.Dialer{Timeout: 30 * time.Second},
+					Config:    &tls.Config{ServerName: proxyURL.Hostname()},
+				}).DialContext
+			}
+			return transport.RoundTrip(pinned)
 		}
 	}
-	return nil, fmt.Errorf("无法连接下载地址: %s", host)
+	return transport.RoundTrip(req)
+}
+
+func pdfHTTPClient(timeout time.Duration) *http.Client {
+	transport := pdfDownloadTransport{}
+	if webfetchLazyCfg != nil {
+		endpoint := webfetchLazyCfg.Proxy.GetProxyEndpoint()
+		if endpoint != "" {
+			transport.proxy = func(*http.Request) (*url.URL, error) {
+				u, err := url.Parse(endpoint)
+				if err != nil {
+					return nil, fmt.Errorf("PDF 代理地址格式错误")
+				}
+				return u, nil
+			}
+		} else if webfetchLazyCfg.CleanFetch.UseSystemProxy {
+			transport.proxy = http.ProxyFromEnvironment
+		}
+	}
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: transport,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= maxRedirectHops {
+				return fmt.Errorf("重定向跳数超过 %d", maxRedirectHops)
+			}
+			if err := validateURLSecurity(req.URL.String()); err != nil {
+				return fmt.Errorf("%w: %v", errUnsafeRedirect, err)
+			}
+			return nil
+		},
+	}
+}
+
+func normalizePDFDownloadURL(rawURL string) string {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || !strings.EqualFold(u.Host, "github.com") || u.User != nil {
+		return rawURL
+	}
+	parts := strings.Split(u.EscapedPath(), "/")
+	if len(parts) < 6 || parts[1] == "" || parts[2] == "" || parts[3] != "blob" || parts[4] == "" || parts[5] == "" {
+		return rawURL
+	}
+	u.Host = "raw.githubusercontent.com"
+	parts = append(parts[:3], parts[4:]...)
+	u.RawPath = strings.Join(parts, "/")
+	u.Path, _ = url.PathUnescape(u.RawPath)
+	return u.String()
 }
 
 // isPrivateHostFast 快速检查主机名是否为已知内网地址（无需 DNS 解析）。
@@ -146,18 +263,7 @@ func headCheckWithLimit(ctx context.Context, rawURL string, maxSizeMB int) error
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
 
-	client := &http.Client{
-		Timeout: 5 * time.Second,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= maxRedirectHops {
-				return fmt.Errorf("重定向跳数超过 %d", maxRedirectHops)
-			}
-			if err := validateURLSecurity(req.URL.String()); err != nil {
-				return fmt.Errorf("%w: %v", errUnsafeRedirect, err)
-			}
-			return nil
-		},
-	}
+	client := pdfHTTPClient(5 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		if errors.Is(err, errUnsafeRedirect) {
@@ -184,22 +290,15 @@ func headCheckWithLimit(ctx context.Context, rawURL string, maxSizeMB int) error
 
 // downloadPDFForCrop keeps the original file local only until qpdf selects pages.
 func downloadPDFForCrop(ctx context.Context, rawURL string) (string, func(), error) {
-	const maxBytes = 200 * 1024 * 1024
+	return downloadPDFWithLimit(ctx, rawURL, 200*1024*1024)
+}
+
+func downloadPDFWithLimit(ctx context.Context, rawURL string, maxBytes int64) (string, func(), error) {
+	rawURL = normalizePDFDownloadURL(rawURL)
 	if err := validateURLSecurity(rawURL); err != nil {
 		return "", nil, err
 	}
-	transport := &http.Transport{DialContext: cropDialContext}
-	defer transport.CloseIdleConnections()
-	client := &http.Client{
-		Timeout:   2 * time.Minute,
-		Transport: transport,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= maxRedirectHops {
-				return fmt.Errorf("重定向跳数超过 %d", maxRedirectHops)
-			}
-			return validateURLSecurity(req.URL.String())
-		},
-	}
+	client := pdfHTTPClient(2 * time.Minute)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return "", nil, err
@@ -207,28 +306,32 @@ func downloadPDFForCrop(ctx context.Context, rawURL string) (string, func(), err
 	req.Header.Set("Accept-Encoding", "identity")
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", nil, fmt.Errorf("下载待裁切 PDF 失败: %w", err)
+		return "", nil, fmt.Errorf("下载 PDF 失败: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", nil, fmt.Errorf("下载待裁切 PDF 失败: HTTP %d", resp.StatusCode)
+		return "", nil, fmt.Errorf("下载 PDF 失败: HTTP %d", resp.StatusCode)
 	}
 	if resp.ContentLength > maxBytes {
-		return "", nil, fmt.Errorf("原 PDF 超过本地裁切下载上限 200MB")
+		return "", nil, fmt.Errorf("PDF 超过下载上限 %dMB", maxBytes/(1024*1024))
 	}
-	file, err := os.CreateTemp("", "mineru-source-*.pdf")
+	return saveLimitedPDF(resp.Body, maxBytes)
+}
+
+func saveLimitedPDF(body io.Reader, maxBytes int64) (string, func(), error) {
+	file, err := os.CreateTemp("", "websearch-pdf-*.pdf")
 	if err != nil {
 		return "", nil, err
 	}
 	cleanup := func() { _ = os.Remove(file.Name()) }
-	n, copyErr := io.Copy(file, io.LimitReader(resp.Body, maxBytes+1))
+	n, copyErr := io.Copy(file, io.LimitReader(body, maxBytes+1))
 	closeErr := file.Close()
 	if copyErr != nil || closeErr != nil || n > maxBytes {
 		cleanup()
 		if n > maxBytes {
-			return "", nil, fmt.Errorf("原 PDF 超过本地裁切下载上限 200MB")
+			return "", nil, fmt.Errorf("PDF 超过下载上限 %dMB", maxBytes/(1024*1024))
 		}
-		return "", nil, fmt.Errorf("保存待裁切 PDF 失败: %v %v", copyErr, closeErr)
+		return "", nil, fmt.Errorf("保存 PDF 失败: %v %v", copyErr, closeErr)
 	}
 	return file.Name(), cleanup, nil
 }

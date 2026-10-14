@@ -1,10 +1,10 @@
 package provider
 
 import (
-	"websearch/pkg/search/core"
 	"fmt"
 	"strings"
 	"websearch/pkg/client"
+	"websearch/pkg/search/core"
 )
 
 // BaiduAISearchImpl 百度智能搜索（chat/completions），返回 LLM 生成的回答 + 参考来源。
@@ -100,14 +100,12 @@ func (b *BaiduAISearchImpl) Search(query string) (string, error) {
 
 // SearchRawWithTimeRange 实现 core.SearchTimeRanger 接口。
 func (b *BaiduAISearchImpl) SearchRawWithTimeRange(query string, lookbackDays int) ([]core.SearchResult, error) {
-	recency := b.recency
+	request := *b
+	request.recency = ""
 	if lookbackDays > 0 {
-		recency = lookbackDaysToRecency(lookbackDays)
+		request.recency = lookbackDaysToRecency(lookbackDays)
 	}
-	saved := b.recency
-	b.recency = recency
-	defer func() { b.recency = saved }()
-	return b.SearchRaw(query)
+	return request.SearchRaw(query)
 }
 
 func (b *BaiduAISearchImpl) SearchRaw(query string) ([]core.SearchResult, error) {

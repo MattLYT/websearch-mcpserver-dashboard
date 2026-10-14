@@ -1,10 +1,10 @@
 package provider
 
 import (
-	"websearch/pkg/search/core"
 	"fmt"
 	"strings"
 	"time"
+	"websearch/pkg/search/core"
 
 	"websearch/pkg/client"
 )
@@ -33,8 +33,8 @@ type exaSearchReq struct {
 }
 
 type exaContents struct {
-	Highlights bool      `json:"highlights"`
-	Text       *exaText  `json:"text,omitempty"`
+	Highlights bool     `json:"highlights"`
+	Text       *exaText `json:"text,omitempty"`
 }
 
 type exaText struct {
@@ -122,27 +122,23 @@ func (e *ExaSearchImpl) Search(query string) (string, error) {
 
 // SearchRawWithTimeRange 实现 core.SearchTimeRanger 接口，支持动态时间范围。
 func (e *ExaSearchImpl) SearchRawWithTimeRange(query string, lookbackDays int) ([]core.SearchResult, error) {
-	if lookbackDays <= 0 {
-		return e.SearchRaw(query)
-	}
-	saved := e.lookbackDays
-	e.lookbackDays = lookbackDays
-	defer func() { e.lookbackDays = saved }()
-	return e.SearchRaw(query)
+	request := *e
+	request.lookbackDays = lookbackDays
+	return request.SearchRaw(query)
 }
 
 func (e *ExaSearchImpl) SearchRaw(query string) ([]core.SearchResult, error) {
-	now := time.Now().UTC()
-	startDate := now.AddDate(0, 0, -e.lookbackDays)
-
 	req := exaSearchReq{
-		Query:              query,
-		NumResults:         e.numResults,
-		StartPublishedDate: startDate.Format(time.RFC3339),
-		EndPublishedDate:   now.Format(time.RFC3339),
-		ExcludeDomains:     e.excludeDomains,
-		Type:               "auto",
-		Contents:           exaContents{Highlights: true, Text: e.textContent()},
+		Query:          query,
+		NumResults:     e.numResults,
+		ExcludeDomains: e.excludeDomains,
+		Type:           "auto",
+		Contents:       exaContents{Highlights: true, Text: e.textContent()},
+	}
+	if e.lookbackDays > 0 {
+		now := time.Now().UTC()
+		req.StartPublishedDate = now.AddDate(0, 0, -e.lookbackDays).Format(time.RFC3339)
+		req.EndPublishedDate = now.Format(time.RFC3339)
 	}
 
 	var resp exaSearchResp

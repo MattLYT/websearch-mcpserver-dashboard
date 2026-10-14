@@ -7,6 +7,7 @@
 - [Config File Path](#config-file-path)
 - [stdio CLI Configuration Notes](#stdio-cli-configuration-notes)
 - [Full Configuration](#full-configuration)
+- [Search Sources and Mode Routing](#search-sources-and-mode-routing)
 - [Environment Variable Overrides](#environment-variable-overrides)
 - [Default Values Quick Reference](#default-values-quick-reference)
 
@@ -75,7 +76,7 @@ mcp_resources: true         # MCP Resource observability (default true): search:
                             # search://health — read-only, secret-free, no tool slot; false to disable
 log_level: info             # debug / info / warn / error
 mode: engine                # baidu / apipool / tavily / exa / anysearch / doubao / hybrid / engine
-network: china              # china (skip overseas engines) / international
+network: china              # Academic adapter region; not web-source selection or Doubao site scope
 
 # Global rate limit (applies to all search engines)
 rate_limit:
@@ -89,6 +90,7 @@ black_list_host:
 
 # Baidu Qianfan (required for mode=baidu/apipool/hybrid)
 baidu:
+  enabled: true             # Qianfan API source; false keeps keys and does not affect web_enabled
   web_enabled: false        # Baidu web search engine (tn=json scraping) disabled by default: CAPTCHA-blocked
                             # in testing; deployments with clean egress IPs may enable it explicitly
   api_key: ""               # Env: BAIDU_SK (falls back to single-element sk_list when empty)
@@ -103,12 +105,14 @@ baidu:
 # Tavily (required for mode=tavily/apipool/hybrid)
 # Get API key: https://app.tavily.com/home
 tavily:
+  enabled: true             # API source switch; false keeps api_key/sk_list
   api_key: ""               # Env: TAVILY_SK (falls back to single-element sk_list when empty)
   sk_list: []               # Multi-key rotation list (priority over api_key)
 
 # Exa (required for mode=exa/apipool/hybrid)
 # Get API key: https://dashboard.exa.ai/api-keys
 exa:
+  enabled: true             # API source switch; false keeps api_key/sk_list
   api_key: ""               # Env: EXA_API_KEY (falls back to single-element sk_list when empty)
   sk_list: []               # Multi-key rotation list (priority over api_key)
   num_results: 5            # Results per search (default 5)
@@ -117,6 +121,7 @@ exa:
 # AnySearch (required for mode=anysearch/apipool/hybrid; also usable keyless via the anonymous tier)
 # Get API key: https://www.anysearch.com/console/api-keys
 anysearch:
+  enabled: true             # API source switch; false keeps api_key/sk_list and disables the anonymous tier
   api_key: ""               # Env: ANYSEARCH_API_KEY (falls back to single-element sk_list when empty)
   sk_list: []               # Multi-key rotation list (priority over api_key; duplicate keys are deduplicated)
   num_results: 10           # Results per search (default 10)
@@ -129,6 +134,7 @@ anysearch:
 # Get API key: https://console.volcengine.com/search-infinity/api-key
 # Free tier: 500 credits/month; apipool.weights.doubao defaults to 500
 doubao:
+  enabled: true             # API source switch; false keeps api_key/sk_list
   api_key: ""               # Env: DOUBAO_SEARCH_API_KEY (also ASK_ECHO_SEARCH_INFINITY_API_KEY)
   sk_list: []               # Multi-key rotation list (priority over api_key; duplicates are deduplicated)
   version: global           # global (default) / custom
@@ -183,7 +189,7 @@ google:
 # Academic engines (no key needed)
 academic:
   enabled: true             # Master switch, registers academicsearch tool
-  bing_fallback: true       # Use Bing as fallback for academic search
+  bing_fallback: true       # Compatibility key; academicsearch currently does not call Bing
   enhance: true             # Academic scoring enhancement (RRF fusion + citation/journal/PDF/recency), default true
   threshold: 0.02           # Academic result threshold (more lenient than general search), default 0.02
   disable_arxiv: false
@@ -194,6 +200,7 @@ academic:
   disable_google_scholar: true      # Disabled by default (auto-proxied when enabled)
   # Optional Semantic Scholar API key (degrades to anonymous after consecutive 429s)
   # semantic_scholar_api_key: ""   # env: SEMANTIC_SCHOLAR_API_KEY
+  # openalex_api_key: ""          # env: OPENALEX_API_KEY
   # Unpaywall email: completes OA full-text links when a result has a DOI but no PDF; empty = skip silently
   # unpaywall_email: "you@example.com"   # env: UNPAYWALL_EMAIL
   disable_europepmc: false  # Europe PMC biomedical supplement (direct from China)
@@ -259,7 +266,7 @@ jina:
 
 # Enhanced web fetch (disabled by default)
 cleanfetch:
-  enabled: false            # Must be explicitly true for the cleanfetch tool; smartsearch's fetch_top_n is not gated by this switch (webfetch lazily initializes from current config)
+  enabled: false            # Only enables URL fetching; cleanfetch is always registered, saved-result reads and fetch_top_n are not gated
   file_output_dir: ""       # Default: exe sibling dir fetchdata/
   file_ttl_hours: 24        # Temp file retention (hours)
   max_inline_lines: 100     # Lines above this threshold stored to file
@@ -383,6 +390,33 @@ log:
 
 ---
 
+## Search Sources and Mode Routing
+
+`baidu.enabled`, `tavily.enabled`, `exa.enabled`, `anysearch.enabled`, and `doubao.enabled` independently control the five API sources. Omitted switches mean `true`, preserving existing configurations. Disabling a source removes it from routing without deleting `api_key`, `sk_list`, or secret-overlay keys. AnySearch uses the same switch for keyed and anonymous access; the other four APIs still require usable keys. `baidu.web_enabled` independently controls the Baidu web source.
+
+Source switches permit or deny a source; `mode` selects among permitted sources:
+
+| Mode | Routing |
+|------|---------|
+| `engine` | Enabled web sources only; enabling an API does not add it to this mode |
+| `baidu` | Enabled, keyed Qianfan API, optionally falling back to independently enabled Baidu web; enabled Bing if no primary source is usable |
+| `tavily` / `exa` / `doubao` | The enabled, keyed API; enabled Bing when that source is unavailable |
+| `anysearch` | Enabled AnySearch with key rotation or the anonymous tier; disabled AnySearch can only fall back to enabled Bing |
+| `apipool` | Filter disabled/unusable APIs from `apipool.engines`, then rotate and fail over; independently enabled Baidu web is last; enabled Bing can be used if the pool is empty |
+| `hybrid` | Combine enabled, usable APIs and web sources concurrently; disabled sources, including anonymous AnySearch, are excluded |
+
+`bing.enabled` controls only the Bing source and its fallback, not the `smartsearch` tool itself. With Bing disabled, another usable route in the configured mode keeps `smartsearch` available. The tool is not registered only when that mode has no usable primary or fallback.
+
+The console offers `hybrid`, `engine`, `apipool` and a single-provider entry; the latter selects the five existing providers while preserving the eight persisted `mode` values. Mode and selected-provider descriptions support hover, focus or click. The pool's first provider also depends on `apipool.strategy` and weights, so list-order dispatch is not guaranteed. Provider preference can still use an enabled Bing fallback; it is not an exclusive-provider promise.
+
+`network` currently feeds only the independent academic adapter: China region excludes Semantic Scholar / Google Scholar, while international region still requires each source switch and proxy prerequisites. It is not a global domestic/international web toggle or an automatic proxy switch. The console places it under advanced academic connection settings. Doubao scope is separate: Global `doubao.icp_host_only: true` restricts results to China ICP-filed sites; `false` means unrestricted, not foreign-only. Custom does not consume this field. Version and scope live under provider startup parameters, take effect after save/restart, and invalidate previous search caches. [Official Global API](https://docs.volcengine.com/docs/Networkedsearch/doubao-search-global-edition?lang=zh)
+
+Academic search filters registered sources using request-level `engines` before exact lookup. A DOI lookup uses only Crossref/OpenAlex in that selected set; an arXiv ID lookup uses only selected arXiv. When no selected source supports that exact lookup, ordinary search uses only the selected usable sources. An entirely unavailable selection returns an error; exact lookup never bypasses disabled sources.
+
+`academic.bing_fallback` is retained for configuration compatibility but is not consumed by the current academic path, which never calls Bing. Web sources do not keep `academicsearch` registered when all academic sources are unavailable.
+
+---
+
 ## Control Center Security & Branding (dashboard)
 
 ### Access and write model
@@ -390,11 +424,21 @@ log:
 | Scenario | Rule |
 |----------|------|
 | Reads (pages + read-only APIs) | Loopback only by default; networks explicitly listed in `dashboard.allowed_networks` get read-only access |
-| Writes (settings / keys / restart / cache clear / quota reset & adjust) | **Loopback only + `X-Admin-Password` header**, both required |
+| Writes (settings / keys / restart / cache clear / quota reset & adjust) | **Loopback only by default**; explicit `dashboard.write_allowed_networks` permits specified sources; every write still requires `X-Admin-Password`, plus matching `X-Admin-User` when a username is configured |
 | Admin password | Configured only in `dashboard.yaml` (`admin_password` plaintext or `admin_password_sha256` hex); **the WebUI can never read or modify it**; unset password = all write endpoints disabled (secure default) |
 
-- Allowlist syntax: `allowed_networks: ["192.168.1.0/24", "10.0.0.3"]` (CIDR or bare IP); any invalid entry **falls the whole allowlist back to loopback-only** (fail-closed).
-- Docker: when the port is published to host loopback, the connection source inside the container is the bridge gateway (e.g. `172.17.0.1`); add that network to `allowed_networks` to open the console from the host browser.
+- Both allowlists accept CIDRs or bare IPs. Any invalid entry **falls that entire allowlist back to loopback-only** (fail-closed). `allowed_networks` does not grant writes; `write_allowed_networks` does not replace the page/API read-access gate or the admin password.
+- Docker: keep the host publication fixed to loopback, for example `-p 127.0.0.1:8338:8338`. Host-browser connections may appear as a bridge gateway inside the container. Use the request source IP actually observed by the server; the gateway from `docker inspect` is only a cross-check, not proof of the request source. For host writes, put only that observed address as a `/32` in both allowlists, never the whole bridge subnet.
+
+```yaml
+# dashboard.yaml; illustrative address only, replace with the observed host-request source
+dashboard:
+  allowed_networks: ["172.17.0.1/32"]
+  write_allowed_networks: ["172.17.0.1/32"]
+  admin_password: "replace-with-a-private-admin-password"
+```
+
+- Keep `write_allowed_networks: []` until the source is verified; do not copy the illustrative IP unchanged. An explicit `[]` in the independent overlay clears a write allowlist inherited from the main config.
 - The remote link is plain HTTP; only allow trusted LANs. Use an SSH tunnel or a TLS reverse proxy for anything else.
 - Password comparison is constant-time; prefer `admin_password_sha256` (lowercase hex of `sha256sum`) so no plaintext stays on disk.
 
@@ -402,7 +446,7 @@ log:
 
 - Local usage = real successful calls from telemetry (per provider, per period); providers are never probed. Tavily official usage takes priority when the official endpoint is available.
 - Providers without a configured `quotas.limits` entry default to **1000 calls/period**; `reset` supports monthly / weekly / daily / none (manual only).
-- WebUI "Settings → Quota management" offers manual reset (recount from now) and usage adjustment (real records untouched); both require the admin password and loopback.
+- WebUI "Settings → Quota management" offers manual reset (recount from now) and usage adjustment (real records untouched); both use the same source-allowlist and admin-password rules.
 
 ### Branding & themes
 
@@ -453,11 +497,14 @@ log:
 | Field | Default | Notes |
 |-------|---------|-------|
 | `port` | 8338 | stop/kill/status also use this port when no config |
-| `mode` | engine | Auto-degrades to engine when no keys; `apipool` = API Key pool rotation, supports round-robin / priority / weighted strategies |
+| `mode` | engine | Selects permitted sources; only enabled fallbacks can be used, while keyless AnySearch can use its anonymous tier |
+| `baidu.enabled` / `tavily.enabled` / `exa.enabled` / `anysearch.enabled` / `doubao.enabled` | true (omitted) | Independent API source switches; false keeps keys and applies to every mode, including anonymous AnySearch |
+| `dashboard.write_allowed_networks` | [] | Independent write allowlist; loopback-only by default; invalid entries fail closed; admin password still required |
 | `mcp_resources` | true | MCP Resource observability toggle: `search://capabilities` and `search://health`, read-only, secret-free, no tool slot |
 | `mcp_stateless` | false | Stateless MCP HTTP mode: each POST handled independently, no session handshake, easier horizontal scaling; GET SSE returns 405 |
 | `baidu.web_enabled` | false | Baidu web search engine disabled by default (CAPTCHA-blocked in testing); may be enabled explicitly with clean egress IPs |
-| `network` | china | |
+| `network` | china | Academic adapter region, not web-source selection, proxy control or Doubao site filtering |
+| `doubao.icp_host_only` | false | Global only: true restricts to China ICP-filed sites; false is unrestricted; unused by Custom |
 | `rate_limit.per_sec` | 3 | Global rate limit |
 | `rate_limit.per_min` | 60 | Global rate limit |
 | `apipool.strategy` | round-robin | `round-robin` rotates provider across requests / `priority` fixed order / `weighted` weighted-random |
@@ -471,16 +518,17 @@ log:
 | `exa.include_text` | true | Exa requests page body text (contents.text) |
 | `exa.text_max_characters` | 3000 | Max characters of Exa body text |
 | `baidu.enable_ai_search` | true | true=AI search chat/completions, false=web search web_search; no LLM cost when model is empty |
-| `bing.enabled` | true | |
+| `bing.enabled` | true | Controls only the Bing source and fallback, not the smartsearch tool |
 | `duckduckgo.enabled` | true | Needs proxy; auto-joins when proxy is available |
 | `google.enabled` | false | Anti-bot blocked, must be explicitly enabled |
 | `academic.enabled` | true | |
-| `academic.bing_fallback` | true | |
+| `academic.bing_fallback` | true | Compatibility key; academicsearch currently does not use Bing |
 | `academic.enhance` | true | Academic scoring enhancement |
 | `academic.threshold` | 0.02 | Academic result threshold |
 | `academic.disable_semantic_scholar` | true | Disabled by default, auto-proxied when enabled |
 | `academic.disable_google_scholar` | true | Disabled by default, auto-proxied when enabled |
 | `academic.semantic_scholar_api_key` | "" | Optional API key; auto-degrades to anonymous after consecutive 429s (env `SEMANTIC_SCHOLAR_API_KEY`) |
+| `academic.openalex_api_key` | "" | Optional OpenAlex key shared by keyword search and exact DOI lookup; empty uses the outgoing IP's shared anonymous daily budget (env `OPENALEX_API_KEY`) |
 | `academic.unpaywall_email` | "" | Unpaywall email for OA link completion (when a result has a DOI but no PDF); empty = skip silently (env `UNPAYWALL_EMAIL`) |
 | `academic.disable_europepmc` | false | Europe PMC biomedical supplement, reachable from China |
 | `academic.disable_dblp` | false | DBLP CS conference/journal index, reachable from China |
@@ -488,7 +536,7 @@ log:
 | `proxy.enabled` | unset | Auto-detects system proxy when not set; explicit false disables; explicit true uses endpoint |
 | `proxy.endpoint` | `http://127.0.0.1:7897` | Only effective when `enabled: true` |
 | `proxy.api_providers` | false | Whether upstream API-provider requests (Qianfan/Tavily/Exa/AnySearch/Doubao/LLM) use the proxy; false forces direct connections immune to proxy env vars |
-| `cleanfetch.enabled` | false | Old configs don't enable; must be explicit. Only gates the cleanfetch tool — `fetch_top_n` is not gated (webfetch lazily initializes) |
+| `cleanfetch.enabled` | false | Only gates URL fetching; cleanfetch is always registered, result_ref reads and `fetch_top_n` are not gated |
 | `cleanfetch.file_ttl_hours` | 24 | |
 | `cleanfetch.max_inline_lines` | 100 | |
 | `cleanfetch.timeout_sec` | 30 | |

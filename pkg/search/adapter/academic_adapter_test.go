@@ -37,6 +37,16 @@ func newTestAdapter(engines ...antirobot.Engine) *AcademicAdapter {
 	}
 }
 
+func TestAcademicAdapterKeepsOpenAlexLookupKey(t *testing.T) {
+	a := NewAcademicAdapter(AcademicConfig{
+		Network:  antirobot.RegionChina,
+		OpenAlex: antirobot.OpenAlexOpts{Enabled: true, APIKey: "test-openalex-key"},
+	})
+	if a == nil || a.openalexOpts.APIKey != "test-openalex-key" || !a.openalexOpts.Enabled {
+		t.Fatal("DOI lookup must retain the configured OpenAlex key")
+	}
+}
+
 // TestSearchAcademicRaw_PartialEngineError 部分引擎失败：返回成功结果 + EngineErrors 仅含失败引擎。
 func TestSearchAcademicRaw_PartialEngineError(t *testing.T) {
 	adapter := newTestAdapter(
@@ -102,14 +112,33 @@ func TestSearchAcademicRaw_AllFailed(t *testing.T) {
 		&fakeEngine{name: "crossref", err: errors.New("crossref HTTP 503")},
 	)
 
-	_, err := adapter.SearchAcademicRaw("attention")
+	res, err := adapter.SearchAcademicRaw("attention")
 	if err == nil {
 		t.Fatal("全部失败应返回 error")
 	}
-	if !strings.Contains(err.Error(), "学术引擎搜索无结果") ||
+	if !strings.Contains(err.Error(), "学术检索未返回可用结果，存在引擎失败") ||
 		!strings.Contains(err.Error(), "arxiv: timeout") ||
 		!strings.Contains(err.Error(), "crossref: crossref HTTP 503") {
 		t.Errorf("error 应汇总各引擎错误, got %v", err)
+	}
+	if res.EngineErrors["arxiv"] != "timeout" || res.EngineErrors["crossref"] != "crossref HTTP 503" {
+		t.Fatalf("structured failures lost: %v", res.EngineErrors)
+	}
+}
+
+func TestSearchAcademicRawEmptyResultsWithFailure(t *testing.T) {
+	for _, enhanced := range []bool{false, true} {
+		adapter := newTestAdapter(&fakeEngine{name: "crossref"}, &fakeEngine{name: "dblp", err: errors.New("Anubis challenge required")})
+		adapter.enhance = enhanced
+		res, err := adapter.SearchAcademicRaw("consensus")
+		if err == nil || !strings.Contains(err.Error(), "存在引擎失败") || res.EngineErrors["dblp"] != "Anubis challenge required" {
+			t.Fatalf("enhanced=%v result=%v error=%v", enhanced, res, err)
+		}
+		adapter = newTestAdapter(&fakeEngine{name: "crossref"})
+		adapter.enhance = enhanced
+		if _, err = adapter.SearchAcademicRaw("consensus"); err == nil || err.Error() != "学术引擎搜索无结果" {
+			t.Fatalf("normal empty response changed: enhanced=%v error=%v", enhanced, err)
+		}
 	}
 }
 

@@ -2,6 +2,27 @@
 
 [English](CHANGELOG.en.md) | [中文](CHANGELOG.md)
 
+## v3.8.0 — 2026-10-14 (Retrieval reliability and source control)
+
+> Branch `feat/absorb-pr18`: absorbs [PR #18](https://github.com/daidaiJ/websearch-mcpserver/pull/18) by [@MattLYT](https://github.com/MattLYT) (Matt.Li). His six feature commits keep their original authorship; a follow-up adaptation aligns the control-center frontend and pending-PDF semantics. Writes stay loopback-only by default; operators may allow any CIDR via `write_allowed_networks`.
+
+> Credits: the core of this release comes from PR #18 by [@MattLYT](https://github.com/MattLYT) (failure surfacing, source switches, call attribution, shared skill, time-window isolation, long-result `result_ref`); those commits keep their original authorship.
+
+### Added
+- **Source switches and draft settings save** (PR #18, @MattLYT): grouped web/API/academic switches, draft → diff preview → revision-checked write and restart; cache isolated by config generation
+- **Call attribution and unified call log** (PR #18, @MattLYT): SDK client identity plus optional `project` stats label; expandable source attempts and CSV export
+- **Shared retrieval skill** (PR #18, @MattLYT): `skills/websearch-mcp` for evidence checks, PDF path boundaries, and bounded resume
+- **Long-result `result_ref` paging** (PR #18, @MattLYT): oversized bodies are read through `cleanfetch(result_ref, offset, limit)` without a sixth tool
+
+### Changed
+- **Independent write allowlist `write_allowed_networks`** (PR #18, @MattLYT): writes default to loopback; operators may allow any CIDR/IP in `dashboard.yaml`; the admin password is still required, forwarded headers are not trusted, and the read allowlist grants no writes
+- **Native CSS variable switches** (absorb adaptation): drop the Bootstrap form-switch subset; switches follow theme `accent`
+- **MinerU pending delivered as a tool error** (absorb adaptation): no-body status sets `IsError=true`, keeps `task_ref`, and is not counted as telemetry success
+
+### Fixed
+- **Retrieval failure surfacing and PDF text quality** (PR #18, @MattLYT): all-engine failure is no longer an empty success; optional OpenAlex Bearer; Everything quoting for spaced directories; PDF proxy pins public targets
+- **Time-window and cache isolation** (PR #18, @MattLYT): omitted `time_range` defaults to 3 months, explicit `0` sends no filter; `web:v2` cache keys isolate months; providers no longer mutate shared defaults
+
 ## v3.7.0 — 2026-10-10 (Local File Search)
 
 > Branch `feat/file-search-everything`: adds the fifth tool `file_search` (filename/path search over the Everything index) plus the `skills/everything-http-server` enable/hardening guide. The tool is probe-gated (no `enabled` switch) and its search path carries four context guards: directory whitelist, lexical-alignment second-stage filtering, a hard per-page cap, and paging.

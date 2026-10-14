@@ -89,7 +89,11 @@ func AppendExcludes(query string, excludes []string) string {
 // pathTerm 生成 Everything 的路径前缀限定项：带尾部分隔符的路径
 // 会被 Everything 按完整路径前缀匹配。
 func pathTerm(dir string) string {
-	return dir + `\`
+	term := dir + `\`
+	if strings.ContainsAny(dir, " \t") {
+		return `"` + term + `"`
+	}
+	return term
 }
 
 // joinQuery 拼接限定项与用户查询词。

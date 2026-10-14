@@ -6,13 +6,15 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 	"websearch/pkg/config"
 	"websearch/pkg/fetch/jina"
-	"websearch/pkg/search"
 	"websearch/pkg/fetch/webfetch"
+	"websearch/pkg/search"
 )
 
 import (
@@ -323,15 +325,19 @@ func TestEnrichTopN_SavedToFileNotFailure(t *testing.T) {
 
 // TestFormatSavedToFileResult 验证落盘格式化：标题 + 统计 + 文件路径 + 读取提示。
 func TestFormatSavedToFileResult(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.md")
+	if err := os.WriteFile(path, []byte("Fixed public fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	r := formatSavedToFileResult(&webfetch.Result{
 		Title:      "Big Doc",
 		Mode:       "saved_to_file",
-		FilePath:   "/tmp/webfetch/test.md",
+		FilePath:   path,
 		TotalLines: 500,
 		TotalChars: 50000,
 		AgentHint:  "Use read_file to read",
 	})
-	for _, want := range []string{"Big Doc", "500 行", "50000", "/tmp/webfetch/test.md", "读取提示"} {
+	for _, want := range []string{"Big Doc", "500 行", "50000", path, "读取提示", "cleanfetch"} {
 		if !strings.Contains(r, want) {
 			t.Fatalf("formatted output should contain %q, got %q", want, r)
 		}
@@ -560,7 +566,7 @@ func TestSearchToolSchema_FetchTopNEmbedded(t *testing.T) {
 	initTestLogger()
 	restoreGlobals(t)
 	academicSearcher = nil
-	searchapi = nil
+	searchapi = &mockSearch{name: "mock"}
 	webfetchInst = nil
 
 	conf := config.Config{Bing: config.BingConfig{Enabled: true}}
@@ -593,7 +599,6 @@ func TestSearchToolSchema_FetchTopNEmbedded(t *testing.T) {
 		t.Errorf("fetch_top_n description should reference server config, got: %s", desc)
 	}
 }
-
 
 func TestEnsureWebFetchLazyInit(t *testing.T) {
 	oldWF := webfetchInst
@@ -636,7 +641,8 @@ func TestHeadCheckRedirectToPrivateRejected(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, target, http.StatusFound)
 		}))
-		err := headCheck(context.Background(), srv.URL)
+		usePDFTestProxy(t, srv.URL)
+		err := headCheck(context.Background(), "http://93.184.216.34/probe")
 		srv.Close()
 		if err == nil || !strings.Contains(err.Error(), "不安全") {
 			t.Errorf("redirect to %s should be rejected, got %v", target, err)
@@ -654,7 +660,8 @@ func TestHeadCheckRedirectToPublicAllowed(t *testing.T) {
 		http.Redirect(w, r, "http://192.0.2.1/x", http.StatusFound)
 	}))
 	defer srv.Close()
-	if err := headCheck(context.Background(), srv.URL); err != nil {
+	usePDFTestProxy(t, srv.URL)
+	if err := headCheck(context.Background(), "http://93.184.216.34/probe"); err != nil {
 		t.Fatalf("redirect to public IP should be allowed, got %v", err)
 	}
 }

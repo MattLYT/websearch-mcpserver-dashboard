@@ -48,12 +48,32 @@ func TestAcademicSearchRecordsProviderFailureWhenAggregateFails(t *testing.T) {
 	if !found {
 		t.Fatalf("dblp failure was not recorded: %+v", rows)
 	}
+	academicSearcher = &failureAcademic{structured: true}
+	if _, _, err := AcademicSearchHandler(context.Background(), nil, &AcademicSearchParams{Query: "consensus"}); err == nil || strings.Contains(err.Error(), "搜索无结果") {
+		t.Fatalf("challenge must not be presented as normal empty results: %v", err)
+	}
+	rows, err = store.Recent(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	challengeEvents := 0
+	for _, row := range rows {
+		if row.ErrorKind == telemetry.ErrorKindCaptcha && !row.Success && (row.Tool == "academicsearch" || row.Provider == "dblp") {
+			challengeEvents++
+		}
+	}
+	if challengeEvents != 2 {
+		t.Fatalf("expected tool and provider challenge events: %+v", rows)
+	}
 }
 
-type failureAcademic struct{}
+type failureAcademic struct{ structured bool }
 
 func (f *failureAcademic) AcademicEngines() []string { return []string{"dblp"} }
 func (f *failureAcademic) SearchAcademicRaw(query string, opts ...search.AcademicSearchOptions) (search.AcademicSearchResult, error) {
+	if f.structured {
+		return search.AcademicSearchResult{EngineErrors: map[string]string{"dblp": "dblp: Anubis challenge required"}}, fmt.Errorf("学术检索未返回可用结果，存在引擎失败（dblp: Anubis challenge required）")
+	}
 	return search.AcademicSearchResult{}, fmt.Errorf("学术引擎搜索无结果（dblp: dblp parse: invalid character '<'）")
 }
 

@@ -40,14 +40,29 @@ func NewMCPServer(conf config.Config, opts *mcp.ServerOptions) *mcp.Server {
 }
 
 func registerTools(server *mcp.Server, conf config.Config) {
+	states := pendingTools()
+	for i := range states {
+		states[i].State = "disabled"
+	}
+	setState := func(name, state string) {
+		for i := range states {
+			if states[i].Name == name {
+				states[i].State = state
+				states[i].Registered = state == "registered"
+			}
+		}
+	}
 	// ── 注册 smartsearch 工具 ──
-	if conf.Bing.Enabled {
+	if smartsearchAvailable() {
 		searchDesc := "通用联网检索工具，获取实时信息（新闻/技术文档/产品/数据等）。查询词需精准凝练、聚焦核心意图，避免堆砌大量同义/次要词形成关键词列表（会稀释相关性）。"
 		if conf.LLMEnabled() {
 			searchDesc += "可用 intent 参数说明检索目的以获得更精准的结构化摘要。"
 		}
-		searchDesc += "可用 fetch_top_n 对评分最高的前 N 条抓取正文（默认 0 不抓，上限 5）。主引擎不可用时自动回退 Bing。"
-	searchDesc += "适用边界：时效性事实、网页线索与文档检索；系统性文献综述、需要引用数据的学术问题请改用 academicsearch。"
+		searchDesc += "可用 fetch_top_n 对评分最高的前 N 条抓取正文（默认 0 不抓，上限 5）。"
+		if fallbackSearch != nil {
+			searchDesc += "主引擎不可用时自动回退 Bing。"
+		}
+		searchDesc += "适用边界：时效性事实、网页线索与文档检索；系统性文献综述、需要引用数据的学术问题请改用 academicsearch。"
 
 		if conf.LLMEnabled() {
 			mcp.AddTool(server, &mcp.Tool{
@@ -62,6 +77,9 @@ func registerTools(server *mcp.Server, conf config.Config) {
 			}, WebSearchNoIntent)
 			log.Info("Available tool: smartsearch (no intent, LLM disabled)")
 		}
+		setState("smartsearch", "registered")
+	} else {
+		setState("smartsearch", "unavailable")
 	}
 
 	// ── 注册 academicsearch 工具 ──
@@ -72,16 +90,21 @@ func registerTools(server *mcp.Server, conf config.Config) {
 			Description: acadDesc,
 		}, AcademicSearchHandler)
 		log.Infof("Available tool: academicsearch (engines: %v)", academicSearcher.AcademicEngines())
+		setState("academicsearch", "registered")
+	} else if conf.Academic.Enabled {
+		setState("academicsearch", "unavailable")
 	}
 
-	// ── 注册 cleanfetch 工具（需显式启用） ──
-	if conf.CleanFetch.Enabled {
-		mcp.AddTool(server, &mcp.Tool{
-			Name:        "cleanfetch",
-			Description: "网页内容抓取工具，获取指定 URL 的干净 Markdown 内容。可用 urls 批量抓取（与 url 合并去重，最多 5 个），单条失败不影响其它。适用边界：抓取已知 URL 的正文；发现新来源请先用 smartsearch（本工具不做检索）。",
-		}, CleanFetch)
-		log.Info("Available tool: cleanfetch")
-	}
+	// Saved-body reads remain available even when URL fetching is disabled.
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "cleanfetch",
+		Description: "正文获取工具。url/urls 抓取网页 Markdown（合并去重最多 5 个）；或传原工具返回的 result_ref 分段读取已保存的搜索、网页或 PDF 正文，返回 content、next_offset、eof，不重新请求来源。两种模式互斥；offset/limit 仅用于引用读取。始终注册，cleanfetch.enabled 仅控制 URL 抓取。发现新来源请先用 smartsearch。",
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, DestructiveHint: new(bool)},
+	}, func(ctx context.Context, req *mcp.CallToolRequest, params *CleanFetchParams) (*mcp.CallToolResult, any, error) {
+		return cleanFetch(ctx, req, params, conf.CleanFetch.Enabled)
+	})
+	log.Info("Available tool: cleanfetch")
+	setState("cleanfetch", "registered")
 
 	// ── 注册 file_search 工具（接入时探测通过才暴露，见 ensureEverything） ──
 	if ensureEverything() {
@@ -96,26 +119,32 @@ func registerTools(server *mcp.Server, conf config.Config) {
 			Description: fileDesc,
 		}, FileSearch)
 		log.Info("Available tool: file_search")
+		setState("file_search", "registered")
+	} else {
+		setState("file_search", "unavailable")
 	}
 
 	// ── 注册 pdf_parser 工具（默认关闭） ──
 	if conf.PDFParser.Enabled && webfetchInst != nil {
-		pdfDesc := "PDF 解析工具，path 为本地文件路径、file:// 或远程 http(s) PDF URL（学术结果的 pdf_url 可直接传入）。优先用 PDF 库提取文本转为 Markdown；长文档可用 pages 指定页码（如 '1-10'），省略时默认只解析前 20 页（pdf_parser.max_pages）并提示截断；大文档自动存储到临时文件。"
+		pdfDesc := "PDF 解析工具，path 为服务进程可见的本地路径、file:// 或远程 http(s) PDF URL（学术结果的 pdf_url 可直接传入）。Docker 仅能读取容器内或已挂载路径，file_search 的宿主机路径不能直接通用。本地优先提取文本，响应标明实际解析器；长文档可用 pages 指定页码（如 '1-10'），省略时默认只解析前 20 页（pdf_parser.max_pages）并提示截断；大文档可存储到临时文件。"
 		if conf.PDFParser.MinerUOCREnabled() {
 			pdfDesc += "本地读不到文本时回退 MinerU OCR（扫描件/图片型 PDF）。"
-		} else if conf.PDFParser.MinerUToken != "" {
-			pdfDesc += "已配置 MinerU Token（远程 URL 可用精准解析）。"
 		}
-		if conf.PDFParser.MinerUEnabled() {
+		if conf.PDFParser.MinerUToken != "" && conf.PDFParser.MinerURemotePDF {
+			pdfDesc += "符合 PDF 地址规则的远程 URL 优先使用 MinerU 精准解析。"
 			pdfDesc += "原件超页或源 URL 被 MinerU 拒绝时自动本地裁切所选页分批上传，并实时推送分批进度。"
 		}
-		pdfDesc += "适用边界：仅解析 PDF；网页正文抓取请用 cleanfetch。"
+		pdfDesc += "MinerU 等待可用 wait_seconds 调整（0-1800秒，每任务默认300秒）；返回 task_ref 时可省略 path/pages 查询原任务，默认只查一次，不重新提交。适用边界：仅解析 PDF；网页正文抓取请用 cleanfetch。"
 		mcp.AddTool(server, &mcp.Tool{
 			Name:        "pdf_parser",
 			Description: pdfDesc,
 		}, PDFParserHandler)
 		log.Info("Available tool: pdf_parser")
+		setState("pdf_parser", "registered")
+	} else if conf.PDFParser.Enabled {
+		setState("pdf_parser", "unavailable")
 	}
+	publishTools(states)
 }
 
 func RegisterRouter(mux *http.ServeMux, conf config.Config) {
@@ -138,8 +167,7 @@ func RegisterRouter(mux *http.ServeMux, conf config.Config) {
 		// GET（SSE 长连）返回 405。对齐 MCP 2026-07-28 stateless-first 方向。
 		Stateless: conf.MCPStateless,
 	})
-	// 客户端识别：从 User-Agent 归一化宿主标识注入上下文，遥测按客户端分组
-	mux.Handle("/mcp", AuthMiddleware(conf, withClientContext(conf.MCPStateless, http.StripPrefix("/mcp", handler))))
+	mux.Handle("/mcp", AuthMiddleware(conf, http.StripPrefix("/mcp", handler)))
 }
 
 // AuthMiddleware 业务端点鉴权中间件。
@@ -204,7 +232,7 @@ func buildAcademicToolDescription() string {
 		sb.WriteString(fmt.Sprintf("  - %s: %s\n", name, desc))
 	}
 	sb.WriteString("\n引擎选择建议：医学/生物 → pubmed, europepmc | CS/AI → arxiv, semantic_scholar, dblp | 全学科 → crossref, openalex, google_scholar | 开放获取 → doaj")
-	sb.WriteString("\n\n已持有 DOI 或 arXiv id 时，直接将其作为 query（如 '10.1038/s41586-020-2649-2'、'doi:10.1038/s41586-020-2649-2'、'https://doi.org/10.1038/s41586-020-2649-2' 或 '2401.04085'、'arXiv:2401.04085'、'https://arxiv.org/abs/2401.04085'），将走单篇精确查询（忽略 engines/time_range/page）；拿到结果中的 pdf_url 后，可将该 URL 作为 pdf_parser 工具的 path 参数解析全文。")
+	sb.WriteString("\n\n已持有 DOI 或 arXiv id 时，直接将其作为 query（如 '10.1038/s41586-020-2649-2'、'doi:10.1038/s41586-020-2649-2'、'https://doi.org/10.1038/s41586-020-2649-2' 或 '2401.04085'、'arXiv:2401.04085'、'https://arxiv.org/abs/2401.04085'），将走单篇精确查询（遵守已注册/指定 engines；time_range/page 不用于精确查询）；拿到结果中的 pdf_url 后，可将该 URL 作为 pdf_parser 工具的 path 参数解析全文。")
 	sb.WriteString("\n\n适用边界：论文、预印本与 DOI 级学术检索；新闻、产品文档等通用网页信息请改用 smartsearch。")
 	return sb.String()
 }

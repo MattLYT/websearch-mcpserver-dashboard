@@ -192,6 +192,22 @@ Qwen Code common flags:
 
 Restart Qwen Code (`/exit` then relaunch) for changes to take effect; check connection status with `/mcp`.
 
+### Skill / Application/Project Attribution
+
+Application identity uses standard MCP clientInfo. All five tools accept an optional per-call `project` argument over HTTP and stdio. It is a statistics label only: it does not change search scope, authentication, routing or quotas. Existing clients may omit it; new projects do not require their own client configuration.
+
+Install the bundled [websearch-mcp skill](../skills/websearch-mcp/SKILL.md) in your host's supported skill location, or import the whole `skills/websearch-mcp` directory through your existing skill manager. Its `agents/openai.yaml` declares the local `http://127.0.0.1:8338/mcp` dependency. Hosts supporting this mechanism can use it; other hosts still need their usual one-time MCP connection. A dependency does not grant authorization. Change the URL for other deployments, not a global project label.
+
+The skill uses only an explicit current workspace/project name or an already confirmed project root. Keep the same nickname within a task and reconsider it when switching workspaces. Labels accept up to 64 letters, digits, spaces and `._-`, including Chinese; paths, URLs, credentials and conversation identifiers are not labels. Omit unknown projects instead of guessing from a query or asking users solely to fill statistics. Example:
+
+```json
+{"url":"https://example.com","project":"Example"}
+```
+
+Refresh the tool list after upgrading, use the skill to fetch a public page, and inspect application/project in the collapsed call row. The skill omits `project` when an older tool schema does not expose it. Missing skill/context or omitted arguments remain unlabeled. This is self-reported attribution, not OS-verified identity, and cannot reconstruct old untagged calls.
+
+Existing `X-WebSearch-Project` / `X-WebSearch-Client` headers remain available for advanced clients. A valid per-call `project` wins over the project header; missing/invalid labels fall back. Generic client names cannot identify their host. See [dashboard attribution rules](dashboard.en.md#search-call-usage) for precedence.
+
 ### Cursor / Other Clients
 
 ```json
@@ -439,7 +455,7 @@ launchctl list | grep websearch
 
 | Problem | Solution |
 |---------|----------|
-| Tools unavailable after start | Check `mode` and corresponding keys; `cleanfetch` needs `cleanfetch.enabled: true` |
+| Tools unavailable after start | Check `mode` and corresponding keys; `cleanfetch` is always registered; URL fetching requires `cleanfetch.enabled: true` |
 | Academic search timeout | Check `network` setting; overseas engines need proxy (auto-detected by default) |
 | Port in use | `status` to check if already running, or `kill` then restart |
 | Stale cache results | Cache auto-expires after 6h, or delete `cache.storage_path` file and restart |

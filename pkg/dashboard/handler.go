@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -54,7 +55,8 @@ func IsLoopbackRemote(r *http.Request) bool {
 }
 
 // authorizeWrite 是所有写端点的统一闸门：
-//  1. 仅限 loopback —— allowed_networks 放行的远程查看者永远只读；
+//  1. 默认仅 loopback；write_allowed_networks 可放行用户指定的 CIDR/IP，
+//     读白名单不会授予写权限，不信任 X-Forwarded-* / X-Real-IP；
 //  2. 管理员口令 —— 必须在 dashboard.yaml 显式配置 dashboard.admin_password
 //     （或 admin_password_sha256），经 X-Admin-Password 头随请求提交。
 //     该口令不在设置页白名单、不写入 secrets 覆盖文件，即 WebUI 无法读取
@@ -63,8 +65,8 @@ func IsLoopbackRemote(r *http.Request) bool {
 //     X-Admin-User 头匹配（常量时间比较）；未配置 = 与口令-only 行为一致，
 //     不做任何用户名检查。
 func (h *Handler) authorizeWrite(w http.ResponseWriter, r *http.Request) bool {
-	if !IsLoopbackRemote(r) {
-		writeJSON(w, http.StatusForbidden, map[string]any{"error": "写操作仅限本机 loopback 访问"})
+	if allowed, reason := h.writeAccess(r); !allowed {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": reason})
 		return false
 	}
 	if !h.conf.Dashboard.AdminPasswordConfigured() {
@@ -101,6 +103,8 @@ func (h *Handler) Register(mux *http.ServeMux, guard func(http.HandlerFunc) http
 	}))
 	mux.HandleFunc("/__admin/api/overview", guard(h.overview))
 	mux.HandleFunc("/__admin/api/events", guard(h.events))
+	mux.HandleFunc("/__admin/api/calls", guard(h.calls))
+	mux.HandleFunc("/__admin/api/request-events", guard(h.requestEvents))
 	mux.HandleFunc("/__admin/api/quotas", guard(h.quotas))
 	mux.HandleFunc("/__admin/api/quotas/reset", guard(h.quotaReset))
 	mux.HandleFunc("/__admin/api/quotas/adjust", guard(h.quotaAdjust))
@@ -205,7 +209,72 @@ func (h *Handler) events(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	h.attributeEvents(out)
 	writeJSON(w, http.StatusOK, out)
+}
+
+func (h *Handler) calls(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	if h.store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "dashboard telemetry disabled"})
+		return
+	}
+	query := r.URL.Query()
+	limit := query.Get("limit")
+	if limit == "" {
+		limit = "100"
+	}
+	out, err := h.store.RecentCalls(telemetry.CallFilter{
+		Tool: strings.TrimSpace(query.Get("tool")), Provider: strings.TrimSpace(query.Get("provider")),
+		Status: eventStatus(query.Get("status")), ErrorKind: eventErrorKind(query.Get("error_kind")),
+		Limit: eventLimit(limit),
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	h.attributeEvents(out)
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (h *Handler) requestEvents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	if h.store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "dashboard telemetry disabled"})
+		return
+	}
+	requestID := strings.TrimSpace(r.URL.Query().Get("request_id"))
+	if requestID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "request_id is required"})
+		return
+	}
+	out, err := h.store.RequestEvents(requestID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	h.attributeEvents(out)
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (h *Handler) projectForClient(client, project string) string {
+	if project != "" {
+		return project
+	}
+	return telemetry.NormalizeProject(h.conf.Dashboard.ClientProjects[strings.ToLower(strings.TrimSpace(client))])
+}
+
+func (h *Handler) attributeEvents(rows []telemetry.StoredEvent) {
+	for i := range rows {
+		rows[i].Application = telemetry.Application(rows[i].Client)
+		rows[i].Project = h.projectForClient(rows[i].Client, rows[i].Project)
+	}
 }
 
 // providers returns the merged provider state, including the read-only
@@ -246,7 +315,13 @@ func (h *Handler) quotas(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) settings(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		writeJSON(w, http.StatusOK, settingsView(h.conf))
+		out := settingsFileView(h.conf, config.GetConfigFile())
+		allowed, reason := h.writeAccess(r)
+		if out["config_error"] != nil {
+			allowed, reason = false, "配置文件不可读取或解析"
+		}
+		out["write_access"] = map[string]any{"allowed": allowed, "reason": reason}
+		writeJSON(w, http.StatusOK, out)
 	case http.MethodPost:
 		if !h.authorizeWrite(w, r) {
 			return
@@ -256,15 +331,51 @@ func (h *Handler) settings(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
 		}
-		out, err := applySettings(h.conf, req)
+		out, err := applySettingsFile(h.conf, req, config.GetConfigFile(), func() error {
+			if h.cache == nil {
+				return nil
+			}
+			_, err := h.cache.Clear()
+			return err
+		})
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			status := http.StatusBadRequest
+			if errors.Is(err, errSettingsConflict) {
+				status = http.StatusConflict
+			}
+			writeJSON(w, status, map[string]any{"error": err.Error()})
 			return
 		}
 		writeJSON(w, http.StatusOK, out)
 	default:
 		methodNotAllowed(w)
 	}
+}
+
+func (h *Handler) writeAccess(r *http.Request) (bool, string) {
+	if !h.conf.Dashboard.AdminPasswordConfigured() {
+		return false, "管理员口令未配置，写操作已禁用"
+	}
+	if IsLoopbackRemote(r) {
+		return true, ""
+	}
+	networks, err := h.conf.Dashboard.ParseWriteAllowedNetworks()
+	if err != nil {
+		return false, "写访问白名单配置非法"
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(host)
+	if ip != nil {
+		for _, network := range networks {
+			if network.Contains(ip) {
+				return true, ""
+			}
+		}
+	}
+	return false, "当前连接仅有只读权限"
 }
 
 func (h *Handler) secrets(w http.ResponseWriter, r *http.Request) {
@@ -442,7 +553,7 @@ func methodNotAllowed(w http.ResponseWriter) {
 	writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 }
 
-// clients 按客户端聚合工具层调用（User-Agent 归组，最近 7 天）。
+// clients exposes retained search-call usage, not model tokens or account quota.
 func (h *Handler) clients(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		methodNotAllowed(w)
@@ -452,12 +563,29 @@ func (h *Handler) clients(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "dashboard telemetry disabled"})
 		return
 	}
-	rows, err := h.store.ClientUsageStats(7)
+	days := 7
+	if raw := r.URL.Query().Get("days"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || (parsed != 1 && parsed != 7 && parsed != 30) {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "days must be 1, 7 or 30"})
+			return
+		}
+		days = parsed
+	}
+	usage, days, err := h.store.AttributionUsageStats(days)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"window_days": 7, "clients": rows})
+	for i := range usage {
+		usage[i].Project = h.projectForClient(usage[i].Client, usage[i].Project)
+	}
+	rows, err := h.store.ClientUsageStats(days)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"window_days": days, "clients": rows, "usage": usage})
 }
 
 // brandLogo 提供品牌 logo 本地文件（dashboard.brand.logo 配置为路径时生效）。

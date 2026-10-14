@@ -2,6 +2,8 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -10,6 +12,8 @@ import (
 	"websearch/pkg/fetch/webfetch"
 	"websearch/pkg/log"
 	"websearch/pkg/telemetry"
+
+	fetchengine "github.com/daidaiJ/go-webfetch"
 )
 
 import (
@@ -25,13 +29,57 @@ import (
 // 支持 url + urls 批量（合并去重，最多 5 个）：并发抓取，单条失败不影响其它。
 // 只传一个 URL 时输出与旧版完全一致。
 func CleanFetch(ctx context.Context, req *mcp.CallToolRequest, params *CleanFetchParams) (result *mcp.CallToolResult, extra any, err error) {
+	return cleanFetch(ctx, req, params, true)
+}
+
+func cleanFetch(ctx context.Context, req *mcp.CallToolRequest, params *CleanFetchParams, fetchEnabled bool) (result *mcp.CallToolResult, extra any, err error) {
 	requestID := telemetry.NewRequestID()
 	ctx = telemetry.WithRequestID(ctx, requestID)
 	started := time.Now()
 	count := 0
+	query := params.URL
+	mode := "url_fetch"
+	if params.ResultRef != "" {
+		query = ""
+		mode = "saved_result"
+	}
 	defer func() {
-		telemetry.RecordEventContext(ctx, telemetry.Event{Kind: "tool", Tool: "cleanfetch", Query: params.URL, Success: err == nil, Duration: time.Since(started), ResultCount: count, Error: err, RequestID: requestID, AttemptChain: recentAttemptChain(started, 15)})
+		chain := ""
+		if mode == "url_fetch" {
+			chain = recentAttemptChain(started, 15)
+		}
+		telemetry.RecordEventContext(ctx, telemetry.Event{Kind: "tool", Tool: "cleanfetch", Query: query, Detail: mode, Success: err == nil, Duration: time.Since(started), ResultCount: count, Error: err, RequestID: requestID, AttemptChain: chain})
 	}()
+	if params.ResultRef != "" {
+		if params.URL != "" || len(params.URLs) != 0 {
+			return nil, nil, fmt.Errorf("result_ref 不能与 url/urls 混用")
+		}
+		read := &ReadResultParams{Ref: params.ResultRef}
+		if params.Offset != nil {
+			read.Offset = *params.Offset
+		}
+		if params.Limit != nil {
+			read.Limit = *params.Limit
+		}
+		_, page, err := readSavedResult(ctx, req, read)
+		if err != nil {
+			return nil, nil, err
+		}
+		body, err := json.Marshal(page)
+		if err != nil {
+			return nil, nil, err
+		}
+		count = 1
+		result := textResult(string(body))
+		result.StructuredContent = page
+		return result, nil, nil
+	}
+	if params.Offset != nil || params.Limit != nil {
+		return nil, nil, fmt.Errorf("offset/limit 仅用于 result_ref 读取")
+	}
+	if !fetchEnabled {
+		return nil, nil, fmt.Errorf("cleanfetch URL 抓取已关闭；仍可用 result_ref 读取已保存正文")
+	}
 	urls := mergeFetchURLs(params.URL, params.URLs)
 	count = len(urls)
 	if len(urls) == 0 {
@@ -125,6 +173,9 @@ func fetchCleanPage(ctx context.Context, rawURL string) (string, error) {
 			return formatWebFetchResult(result), nil
 		}
 		recordProvider(telemetry.Event{Provider: "webfetch", Success: false, Duration: time.Since(started), Error: err})
+		if !allowFetchFallback(err) {
+			return "", err
+		}
 		log.Infof("webfetch 抓取失败(%v)，尝试回退到 Jina Reader", err)
 
 		// ── 第二层：Jina Reader（需代理，jinaInst != nil 即表示代理已开启）──
@@ -152,6 +203,14 @@ func fetchCleanPage(ctx context.Context, rawURL string) (string, error) {
 	}
 
 	return "", fmt.Errorf("webfetch 和 jina reader 均未初始化")
+}
+
+func allowFetchFallback(err error) bool {
+	var missing *fetchengine.NotFoundError
+	var blocked *fetchengine.SSRFError
+	var challenge *fetchengine.WAFError
+	return err != nil && !errors.As(err, &missing) && !errors.As(err, &blocked) &&
+		!errors.As(err, &challenge) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)
 }
 
 func textResult(s string) *mcp.CallToolResult {
@@ -192,9 +251,7 @@ func formatWebFetchResult(result *webfetch.Result) string {
 		}
 		fmt.Fprintf(&sb, "内容已保存到文件（共 %d 行，%d 字符）\n\n", result.TotalLines, result.TotalChars)
 		fmt.Fprintf(&sb, "**文件路径**: `%s`\n\n", result.FilePath)
-		if result.AgentHint != "" {
-			fmt.Fprintf(&sb, "**读取提示**: %s\n", result.AgentHint)
-		}
+		sb.WriteString(savedResultReadNotice(result))
 	}
 	return sb.String()
 }

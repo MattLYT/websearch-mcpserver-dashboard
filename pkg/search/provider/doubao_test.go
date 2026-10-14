@@ -122,6 +122,38 @@ func TestDoubao_Custom_TimeRange(t *testing.T) {
 	}
 }
 
+func TestDoubaoICPFilterIsGlobalOnly(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		engine, requests := newDoubaoGlobalTestServer(t, http.StatusOK, doubaoGlobalOKResp)
+		engine.icpHostOnly = enabled
+		if _, err := engine.SearchRaw("filter boundary"); err != nil {
+			t.Fatal(err)
+		}
+		req := <-requests
+		if enabled && (req.Filter == nil || !req.Filter.ICPHostOnly) || !enabled && req.Filter != nil {
+			t.Fatalf("Global filter enabled=%v, got %#v", enabled, req.Filter)
+		}
+	}
+	engine, requests := newDoubaoCustomTestServer(t, http.StatusOK, doubaoCustomOKResp)
+	engine.icpHostOnly = true
+	if _, err := engine.SearchRaw("custom boundary"); err != nil {
+		t.Fatal(err)
+	}
+	b, err := json.Marshal(<-requests)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var req map[string]any
+	if err := json.Unmarshal(b, &req); err != nil {
+		t.Fatal(err)
+	}
+	if filter, ok := req["Filter"].(map[string]any); ok {
+		if _, exists := filter["IcpHostOnly"]; exists {
+			t.Fatal("Global ICP filter must not be sent to Custom")
+		}
+	}
+}
+
 func TestDoubao_AuthErrorIsKeyError(t *testing.T) {
 	engine, _ := newDoubaoGlobalTestServer(t, http.StatusUnauthorized, `{"ResponseMetadata":{"Error":{"Code":"10403","Message":"denied"}}}`)
 	_, err := engine.SearchRaw("query")

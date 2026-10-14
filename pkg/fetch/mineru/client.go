@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 	"websearch/pkg/log"
@@ -23,7 +24,6 @@ const (
 	standardAPIPath = "/api/v4"
 	agentAPIPath    = "/api/v1/agent"
 
-	pollInterval   = 3 * time.Second
 	pollTimeout    = 5 * time.Minute
 	maxAgentSizeMB = 10
 
@@ -36,6 +36,9 @@ const (
 
 // ErrFileTooLarge 文件超过 Agent 轻量 API 限制（10MB）。
 var ErrFileTooLarge = errors.New("file exceeds MinerU Agent API size limit (10MB)")
+
+// shortcut: matches MinerU inline images; expand only if Agent adds other image syntax.
+var ocrNonText = regexp.MustCompile(`(?s)<!--.*?-->|!\[[^]]*\]\([^)]*\)`)
 
 // ErrPageLimit means MinerU rejected the original document's page count.
 var ErrPageLimit = errors.New("MinerU PDF 页数超过接口限制")
@@ -127,7 +130,7 @@ func (c *Client) ParseURLWithPages(ctx context.Context, fileURL string, pages []
 
 	md, err := c.downloadZIP(ctx, zipURL)
 	if err != nil {
-		return "", fmt.Errorf("MinerU 结果下载失败: %w", err)
+		return "", fmt.Errorf("MinerU 结果下载失败: %w；task_ref=%q", err, "standard:"+taskID)
 	}
 	return fmt.Sprintf("> **MinerU 完整结果 ZIP（含图片资源）**：%s。Markdown 中的相对图片路径需与 ZIP 内的 images/ 一起使用。\n\n%s", zipURL, md), nil
 }
@@ -196,7 +199,7 @@ func (c *Client) ParseFileWithPages(ctx context.Context, filePath string, pages 
 	log.Infof("MinerU Agent API 任务已创建: task_id=%s", taskID)
 
 	if err := c.uploadFile(ctx, uploadURL, filePath); err != nil {
-		return "", fmt.Errorf("MinerU 文件上传失败: %w", err)
+		return "", fmt.Errorf("MinerU 文件上传失败: %w；task_ref=%q", err, "agent:"+taskID)
 	}
 	log.Infof("MinerU 文件上传完成，等待解析: task_id=%s", taskID)
 
@@ -207,7 +210,7 @@ func (c *Client) ParseFileWithPages(ctx context.Context, filePath string, pages 
 
 	md, err := c.downloadMarkdown(ctx, mdURL)
 	if err != nil {
-		return "", fmt.Errorf("MinerU 结果下载失败: %w", err)
+		return "", fmt.Errorf("MinerU 结果下载失败: %w；task_ref=%q", err, "agent:"+taskID)
 	}
 	if strings.Contains(md, "images/") {
 		md = "> 注：MinerU 轻量 API 仅提供 Markdown 链接，未提供可下载的图片包；文中的 images/ 相对路径可能无法读取。需要完整配图时请使用带 Token 的精准 API。\n\n" + md
@@ -276,77 +279,8 @@ func classifyStandardError(code int, msg string) error {
 	}
 }
 
-type taskStatusResp struct {
-	Code int    `json:"code"`
-	Msg  string `json:"msg"`
-	Data struct {
-		TaskID          string `json:"task_id"`
-		State           string `json:"state"`
-		FullZipURL      string `json:"full_zip_url"`
-		ErrMsg          string `json:"err_msg"`
-		ErrCode         int    `json:"err_code"`
-		ExtractProgress struct {
-			ExtractedPages int    `json:"extracted_pages"`
-			TotalPages     int    `json:"total_pages"`
-			StartTime      string `json:"start_time"`
-		} `json:"extract_progress"`
-	} `json:"data"`
-}
-
 func (c *Client) pollStandardTask(ctx context.Context, taskID string) (string, error) {
-	deadline, cancel := context.WithTimeout(ctx, pollTimeout)
-	defer cancel()
-
-	for {
-		select {
-		case <-deadline.Done():
-			return "", fmt.Errorf("MinerU 解析超时（超过 %s），请稍后重试 task_id: %s", pollTimeout, taskID)
-		default:
-		}
-
-		var resp taskStatusResp
-		res, err := c.client.R().
-			SetContext(deadline).
-			SetHeader("Authorization", "Bearer "+c.token).
-			SetResult(&resp).
-			Get(fmt.Sprintf("%s%s/extract/task/%s", c.endpoint, standardAPIPath, taskID))
-		if err != nil {
-			return "", fmt.Errorf("MinerU 查询失败: %w", err)
-		}
-		if res.StatusCode() != http.StatusOK {
-			if res.StatusCode() == http.StatusUnauthorized {
-				return "", fmt.Errorf("MinerU Token 无效或已过期 (HTTP 401)，请在 https://mineru.net/apiManage 重新获取")
-			}
-			return "", fmt.Errorf("MinerU 服务异常 (HTTP %d)", res.StatusCode())
-		}
-		if resp.Code != 0 {
-			if err := classifyStandardError(resp.Code, resp.Msg); err != nil {
-				return "", err
-			}
-			return "", fmt.Errorf("MinerU 查询失败: %s", mapAPIError(resp.Code, resp.Msg))
-		}
-
-		switch resp.Data.State {
-		case "done":
-			if resp.Data.FullZipURL == "" {
-				return "", fmt.Errorf("MinerU 解析完成但未返回结果链接")
-			}
-			return resp.Data.FullZipURL, nil
-		case "failed":
-			if err := classifyStandardError(resp.Data.ErrCode, resp.Data.ErrMsg); err != nil {
-				return "", err
-			}
-			return "", fmt.Errorf("MinerU 解析失败: %s", mapAPIError(resp.Data.ErrCode, resp.Data.ErrMsg))
-		case "pending", "running", "converting":
-			ep := resp.Data.ExtractProgress
-			if ep.TotalPages > 0 {
-				log.Infof("MinerU 解析进度: %d/%d 页", ep.ExtractedPages, ep.TotalPages)
-			}
-			time.Sleep(pollInterval)
-		default:
-			time.Sleep(pollInterval)
-		}
-	}
+	return c.pollTask(ctx, "standard:"+taskID)
 }
 
 // ── Agent 轻量 API（/api/v1/agent）─────────────────────────────────────────
@@ -412,58 +346,8 @@ func (c *Client) uploadFile(ctx context.Context, uploadURL, filePath string) err
 	return nil
 }
 
-type agentStatusResp struct {
-	Code int    `json:"code"`
-	Msg  string `json:"msg"`
-	Data struct {
-		TaskID      string `json:"task_id"`
-		State       string `json:"state"`
-		MarkdownURL string `json:"markdown_url"`
-		ErrMsg      string `json:"err_msg"`
-		ErrCode     int    `json:"err_code"`
-	} `json:"data"`
-}
-
 func (c *Client) pollAgentTask(ctx context.Context, taskID string) (string, error) {
-	deadline, cancel := context.WithTimeout(ctx, pollTimeout)
-	defer cancel()
-
-	for {
-		select {
-		case <-deadline.Done():
-			return "", fmt.Errorf("MinerU 解析超时（超过 %s），请稍后重试 task_id: %s", pollTimeout, taskID)
-		default:
-		}
-
-		var resp agentStatusResp
-		res, err := c.client.R().
-			SetContext(deadline).
-			SetResult(&resp).
-			Get(fmt.Sprintf("%s%s/parse/%s", c.endpoint, agentAPIPath, taskID))
-		if err != nil {
-			return "", fmt.Errorf("MinerU 查询失败: %w", err)
-		}
-		if res.StatusCode() != http.StatusOK {
-			return "", fmt.Errorf("MinerU 服务异常 (HTTP %d)", res.StatusCode())
-		}
-		if resp.Code != 0 {
-			return "", fmt.Errorf("MinerU 查询失败: %s", mapAgentError(resp.Code, resp.Msg))
-		}
-
-		switch resp.Data.State {
-		case "done":
-			if resp.Data.MarkdownURL == "" {
-				return "", fmt.Errorf("MinerU 解析完成但未返回结果链接")
-			}
-			return resp.Data.MarkdownURL, nil
-		case "failed":
-			return "", fmt.Errorf("MinerU 解析失败: %s", mapAgentError(resp.Data.ErrCode, resp.Data.ErrMsg))
-		case "waiting-file", "uploading", "pending", "running":
-			time.Sleep(pollInterval)
-		default:
-			time.Sleep(pollInterval)
-		}
-	}
+	return c.pollTask(ctx, "agent:"+taskID)
 }
 
 // ── 下载与提取 ──────────────────────────────────────────────────────────────
@@ -487,7 +371,11 @@ func (c *Client) downloadMarkdown(ctx context.Context, mdURL string) (string, er
 	if res.StatusCode() != http.StatusOK {
 		return "", fmt.Errorf("下载失败，HTTP %d", res.StatusCode())
 	}
-	return string(res.Bytes()), nil
+	md := string(res.Bytes())
+	if c.ocr && strings.TrimSpace(ocrNonText.ReplaceAllString(md, "")) == "" {
+		return "", fmt.Errorf("OCR未提取到可读文本")
+	}
+	return md, nil
 }
 
 func extractFullMD(data []byte) (string, error) {

@@ -46,7 +46,9 @@ type CacheRecord struct {
 
 // Cache SQLite 缓存层，并发安全
 type Cache struct {
-	db *sql.DB
+	db         *sql.DB
+	namespace  string
+	generation *int64
 }
 
 // New 创建缓存实例，自动建表
@@ -65,6 +67,11 @@ func New(storagePath string) (*Cache, error) {
 
 	// 先建表（首次运行时表不存在）
 	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS cache_generation (
+			id INTEGER PRIMARY KEY CHECK (id = 1),
+			generation INTEGER NOT NULL
+		);
+		INSERT OR IGNORE INTO cache_generation (id, generation) VALUES (1, 0);
 		CREATE TABLE IF NOT EXISTS search_cache (
 			id          INTEGER PRIMARY KEY AUTOINCREMENT,
 			query       TEXT    NOT NULL,
@@ -140,11 +147,40 @@ func (c *Cache) Close() error {
 // Clear removes cached search results and returns the number of deleted rows.
 // Dashboard telemetry is stored in a separate database and is unaffected.
 func (c *Cache) Clear() (int64, error) {
-	res, err := c.db.Exec(`DELETE FROM search_cache`)
+	tx, err := c.db.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("开始清空缓存事务失败: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`UPDATE cache_generation SET generation = generation + 1 WHERE id = 1`); err != nil {
+		return 0, fmt.Errorf("失效缓存代次失败: %w", err)
+	}
+	res, err := tx.Exec(`DELETE FROM search_cache`)
 	if err != nil {
 		return 0, fmt.Errorf("清空缓存失败: %w", err)
 	}
-	return res.RowsAffected()
+	count, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return count, tx.Commit()
+}
+
+// ForRequest pins the persisted generation and source fingerprint before work
+// starts. Do not close this view: it shares the parent database connection.
+func (c *Cache) ForRequest(namespace string) (*Cache, error) {
+	var generation int64
+	if err := c.db.QueryRow(`SELECT generation FROM cache_generation WHERE id = 1`).Scan(&generation); err != nil {
+		return nil, fmt.Errorf("读取缓存代次失败: %w", err)
+	}
+	return &Cache{db: c.db, namespace: namespace, generation: &generation}, nil
+}
+
+func (c *Cache) key(query string) string {
+	if c.generation == nil {
+		return query
+	}
+	return fmt.Sprintf("\x00%d:%s:%d:%s", len(c.namespace), c.namespace, *c.generation, query)
 }
 
 // Lookup 查询缓存，两步查询优化索引利用
@@ -167,7 +203,7 @@ func (c *Cache) Lookup(query, intent string, academic bool) (*CacheRecord, strin
 		  FROM search_cache
 		 WHERE query = ? AND intent = ? AND academic = ?
 		 LIMIT 1`,
-		query, intent, academicInt,
+		c.key(query), intent, academicInt,
 	).Scan(&rec.ID, &rec.Query, &rec.Intent, &recAcademicInt, &rec.RawResults, &rec.Summary, &createdAt, &lastHitAt, &ttlSeconds)
 
 	if err == nil {
@@ -176,6 +212,7 @@ func (c *Cache) Lookup(query, intent string, academic bool) (*CacheRecord, strin
 			return nil, "miss", nil
 		}
 		rec.Academic = recAcademicInt == 1
+		rec.Query = query
 		rec.CreatedAt = time.Unix(createdAt, 0)
 		rec.LastHitAt = time.Unix(lastHitAt, 0)
 		rec.TTLSeconds = ttlSeconds
@@ -197,7 +234,7 @@ func (c *Cache) Lookup(query, intent string, academic bool) (*CacheRecord, strin
 		 WHERE query = ?
 		 ORDER BY last_hit_at DESC
 		 LIMIT 1`,
-		query,
+		c.key(query),
 	).Scan(&rec.ID, &rec.Query, &rec.Intent, &recAcademicInt, &rec.RawResults, &rec.Summary, &createdAt, &lastHitAt, &ttlSeconds)
 
 	if err == sql.ErrNoRows {
@@ -212,6 +249,7 @@ func (c *Cache) Lookup(query, intent string, academic bool) (*CacheRecord, strin
 		return nil, "miss", nil
 	}
 	rec.Academic = recAcademicInt == 1
+	rec.Query = query
 	rec.CreatedAt = time.Unix(createdAt, 0)
 	rec.LastHitAt = time.Unix(lastHitAt, 0)
 	rec.TTLSeconds = ttlSeconds
@@ -255,20 +293,30 @@ func (c *Cache) Store(query, intent string, academic bool, results []core.Search
 		ttl = DefaultTTL
 	}
 	ttlSeconds := int64(ttl / time.Second)
+	var generation any
+	if c.generation != nil {
+		generation = *c.generation
+	}
 
-	_, err = c.db.Exec(
+	res, err := c.db.Exec(
 		`INSERT INTO search_cache (query, intent, academic, raw_results, summary, created_at, last_hit_at, ttl_seconds)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		 SELECT ?, ?, ?, ?, ?, ?, ?, ? FROM cache_generation
+		 WHERE id = 1 AND (? IS NULL OR generation = ?)
 		 ON CONFLICT(query, intent, academic) DO UPDATE SET
 			raw_results = excluded.raw_results,
 			summary     = excluded.summary,
 			last_hit_at = excluded.last_hit_at,
 			created_at  = excluded.created_at,
 			ttl_seconds = excluded.ttl_seconds`,
-		query, intent, academicInt, string(rawJSON), summary, now, now, ttlSeconds,
+		c.key(query), intent, academicInt, string(rawJSON), summary, now, now, ttlSeconds, generation, generation,
 	)
 	if err != nil {
 		return fmt.Errorf("缓存写入失败: %w", err)
+	}
+	if affected, err := res.RowsAffected(); err != nil {
+		return err
+	} else if affected == 0 {
+		return nil // The request predates a successful Clear.
 	}
 
 	log.Infof("缓存已存储: query=%q, intent=%q, academic=%v, has_summary=%v, ttl=%v", query, intent, academic, summary != "", ttl)
@@ -279,7 +327,7 @@ func (c *Cache) Store(query, intent string, academic bool, results []core.Search
 func (c *Cache) UpdateSummary(query, intent string, summary string) error {
 	_, err := c.db.Exec(
 		`UPDATE search_cache SET summary = ? WHERE query = ? AND intent = ? AND summary = ''`,
-		summary, query, intent,
+		summary, c.key(query), intent,
 	)
 	return err
 }

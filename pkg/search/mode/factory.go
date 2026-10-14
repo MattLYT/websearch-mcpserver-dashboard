@@ -7,17 +7,17 @@ import (
 
 	"websearch/pkg/antirobot"
 	"websearch/pkg/config"
-	"websearch/pkg/search/engine/baidu"
-	"websearch/pkg/search/engine/bing"
-	"websearch/pkg/search/engine/ddg"
-	"websearch/pkg/search/engine/googlenews"
-	"websearch/pkg/search/engine/google"
-	"websearch/pkg/search/engine/so360"
-	"websearch/pkg/search/engine/wikipedia"
 	"websearch/pkg/log"
 	"websearch/pkg/search/adapter"
 	"websearch/pkg/search/apipool"
 	"websearch/pkg/search/core"
+	"websearch/pkg/search/engine/baidu"
+	"websearch/pkg/search/engine/bing"
+	"websearch/pkg/search/engine/ddg"
+	"websearch/pkg/search/engine/google"
+	"websearch/pkg/search/engine/googlenews"
+	"websearch/pkg/search/engine/so360"
+	"websearch/pkg/search/engine/wikipedia"
 	"websearch/pkg/search/hybrid"
 	"websearch/pkg/search/provider"
 )
@@ -50,7 +50,7 @@ func BuildEngineMode(conf config.Config, fallback *adapter.BingSearchAdapter, ad
 	if ads.GNews != nil {
 		engines = append(engines, ads.GNews)
 	}
-	if fallback != nil {
+	if conf.Bing.Enabled && fallback != nil {
 		engines = append(engines, fallback)
 	}
 	if ads.Google != nil {
@@ -73,7 +73,7 @@ func BuildEngineMode(conf config.Config, fallback *adapter.BingSearchAdapter, ad
 
 // BuildBaiduMode 百度千帆搜索（enable_ai_search 控制端点，失败自动回退百度网页搜索）。
 func BuildBaiduMode(conf config.Config, pool *provider.KeyPool, baiduWeb *adapter.EngineSearchAdapter, fallback *adapter.BingSearchAdapter) core.SearchInf {
-	if pool != nil {
+	if conf.APISourceEnabled("baidu") && pool != nil {
 		primary := newBaiduSearchFromConf(pool, conf)
 		if baiduWeb != nil {
 			if conf.Baidu.EnableAISearch {
@@ -89,8 +89,8 @@ func BuildBaiduMode(conf config.Config, pool *provider.KeyPool, baiduWeb *adapte
 		log.Info("搜索模式: baidu（网页搜索，无需 API Key）")
 		return baiduWeb
 	}
-	if fallback != nil {
-		log.Error("mode=baidu 但未配置 baidu.api_key/sk_list 且无可用引擎，回退到 Bing")
+	if conf.Bing.Enabled && fallback != nil {
+		log.Error("mode=baidu API 源不可用且无网页引擎，回退到 Bing")
 		return fallback
 	}
 	return nil
@@ -114,18 +114,24 @@ func exaOptions(conf config.Config) []provider.ExaOption {
 
 // BuildTavilyMode Tavily 单引擎模式。
 func BuildTavilyMode(conf config.Config, pool *provider.KeyPool, fallback *adapter.BingSearchAdapter) core.SearchInf {
-	if pool == nil {
-		log.Error("mode=tavily 但未配置 tavily.api_key/sk_list，回退到 engine 模式")
-		return fallback
+	if !conf.APISourceEnabled("tavily") || pool == nil {
+		log.Error("mode=tavily API 源已关闭或未配置 Key")
+		if conf.Bing.Enabled && fallback != nil {
+			return fallback
+		}
+		return nil
 	}
 	return provider.NewTavilySearch(pool, conf.BlackListHost, tavilyOptions(conf)...)
 }
 
 // BuildExaMode Exa 单引擎模式。
 func BuildExaMode(conf config.Config, pool *provider.KeyPool, fallback *adapter.BingSearchAdapter) core.SearchInf {
-	if pool == nil {
-		log.Error("mode=exa 但未配置 exa.api_key/sk_list，回退到 engine 模式")
-		return fallback
+	if !conf.APISourceEnabled("exa") || pool == nil {
+		log.Error("mode=exa API 源已关闭或未配置 Key")
+		if conf.Bing.Enabled && fallback != nil {
+			return fallback
+		}
+		return nil
 	}
 	numResults := conf.Exa.NumResults
 	if numResults <= 0 {
@@ -140,6 +146,12 @@ func BuildExaMode(conf config.Config, pool *provider.KeyPool, fallback *adapter.
 
 // BuildAnysearchMode AnySearch 单引擎模式。
 func BuildAnysearchMode(conf config.Config, pool *provider.KeyPool, fallback *adapter.BingSearchAdapter) core.SearchInf {
+	if !conf.APISourceEnabled("anysearch") {
+		if conf.Bing.Enabled && fallback != nil {
+			return fallback
+		}
+		return nil
+	}
 	if pool == nil {
 		// 零 Key 匿名档（P0-2 来源扩充）：上游支持免鉴权匿名 IP 限流档，
 		// 本项目出口实测可用（2026-10-06）；匿名档受 provider 内保守限流钳制
@@ -151,9 +163,12 @@ func BuildAnysearchMode(conf config.Config, pool *provider.KeyPool, fallback *ad
 
 // BuildDoubaoMode 豆包联网搜索单引擎模式。
 func BuildDoubaoMode(conf config.Config, pool *provider.KeyPool, fallback *adapter.BingSearchAdapter) core.SearchInf {
-	if pool == nil {
-		log.Error("mode=doubao 但未配置 doubao.api_key/sk_list，回退到 engine 模式")
-		return fallback
+	if !conf.APISourceEnabled("doubao") || pool == nil {
+		log.Error("mode=doubao API 源已关闭或未配置 Key")
+		if conf.Bing.Enabled && fallback != nil {
+			return fallback
+		}
+		return nil
 	}
 	return newDoubaoFromConf(pool, conf)
 }
@@ -166,7 +181,10 @@ func BuildApipoolMode(conf config.Config, anysearchPool, baiduPool, tavilyPool, 
 	// 按配置顺序构建供应商（web 兜底始终追加在末尾）
 	var providers []apipool.ApipoolProvider
 	for _, name := range conf.Apipool.GetEngines() {
-		switch strings.ToLower(name) {
+		if !conf.APISourceEnabled(name) {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(name)) {
 		case "anysearch":
 			if anysearchPool != nil {
 				providers = append(providers, apipool.NewApipoolProvider("anysearch", provider.NewAnysearchSearch(anysearchPool, conf.Anysearch.NumResults, conf.BlackListHost), anysearchPool))
@@ -207,7 +225,7 @@ func BuildApipoolMode(conf config.Config, anysearchPool, baiduPool, tavilyPool, 
 		providers = append(providers, apipool.NewApipoolProvider("baidu_web", baiduWeb, nil))
 	}
 	if len(providers) == 0 {
-		log.Error("apipool 模式需要至少一个 API Key（anysearch/baidu/tavily/exa）")
+		log.Error("apipool 模式无可用搜索源")
 		return nil
 	}
 	ap := apipool.NewApipoolSearch(conf.Apipool.GetStrategy(), providers...)
@@ -223,13 +241,11 @@ func BuildApipoolMode(conf config.Config, anysearchPool, baiduPool, tavilyPool, 
 // BuildHybridMode 全引擎混合模式：Anysearch（有 Key 走轮转 / 无 Key 匿名档）+ 百度搜索 + 百度网页 + 360 + Wikipedia + Google News + Tavily + Exa + 豆包（有 Key 时）+ Bing + Google + DuckDuckGo。
 func BuildHybridMode(conf config.Config, anysearchPool, baiduPool, tavilyPool, exaPool, doubaoPool *provider.KeyPool, ads EngineAdapters, fallback *adapter.BingSearchAdapter) core.SearchInf {
 	var engines []core.SearchInf
-	if anysearchPool != nil {
+	if conf.APISourceEnabled("anysearch") {
+		// A nil pool uses the anonymous tier, governed by the same source switch.
 		engines = append(engines, provider.NewAnysearchSearch(anysearchPool, conf.Anysearch.NumResults, conf.BlackListHost))
-	} else {
-		// 零 Key 匿名档（P0-2）：无 Key 时也以匿名档加入混合编排（受保守限流钳制）
-		engines = append(engines, provider.NewAnysearchSearch(nil, conf.Anysearch.NumResults, conf.BlackListHost))
 	}
-	if baiduPool != nil {
+	if conf.APISourceEnabled("baidu") && baiduPool != nil {
 		engines = append(engines, newBaiduSearchFromConf(baiduPool, conf))
 	}
 	if ads.BaiduWeb != nil {
@@ -244,10 +260,10 @@ func BuildHybridMode(conf config.Config, anysearchPool, baiduPool, tavilyPool, e
 	if ads.GNews != nil {
 		engines = append(engines, ads.GNews)
 	}
-	if tavilyPool != nil {
+	if conf.APISourceEnabled("tavily") && tavilyPool != nil {
 		engines = append(engines, provider.NewTavilySearch(tavilyPool, conf.BlackListHost, tavilyOptions(conf)...))
 	}
-	if exaPool != nil {
+	if conf.APISourceEnabled("exa") && exaPool != nil {
 		numResults := conf.Exa.NumResults
 		if numResults <= 0 {
 			numResults = 5
@@ -258,10 +274,10 @@ func BuildHybridMode(conf config.Config, anysearchPool, baiduPool, tavilyPool, e
 		}
 		engines = append(engines, provider.NewExaSearchWithResults(exaPool, numResults, lookbackDays, conf.BlackListHost, exaOptions(conf)...))
 	}
-	if doubaoPool != nil {
+	if conf.APISourceEnabled("doubao") && doubaoPool != nil {
 		engines = append(engines, newDoubaoFromConf(doubaoPool, conf))
 	}
-	if fallback != nil {
+	if conf.Bing.Enabled && fallback != nil {
 		engines = append(engines, fallback)
 	}
 	if ads.Google != nil {
@@ -445,7 +461,7 @@ func InitAcademicEngine(conf config.Config) core.AcademicSearcher {
 			PerMin:  conf.GetRateLimitPerMin(),
 		},
 		Crossref:        antirobot.CrossrefOpts{Enabled: !acad.DisableCrossref},
-		OpenAlex:        antirobot.OpenAlexOpts{Enabled: !acad.DisableOpenAlex},
+		OpenAlex:        antirobot.OpenAlexOpts{Enabled: !acad.DisableOpenAlex, APIKey: acad.OpenAlexAPIKey},
 		SemanticScholar: antirobot.SemanticScholarOpts{Enabled: !acad.DisableSemanticScholar, APIKey: acad.SemanticScholarAPIKey},
 		PubMed:          antirobot.PubMedOpts{Enabled: !acad.DisablePubMed},
 		GoogleScholar:   antirobot.GoogleScholarOpts{Enabled: !acad.DisableGoogleScholar},

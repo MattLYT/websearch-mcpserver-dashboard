@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"time"
 )
 
 // ParseStandardFile sends a locally cropped PDF through MinerU's signed upload API.
@@ -26,7 +25,7 @@ func (c *Client) ParseStandardFile(ctx context.Context, filePath string) (string
 		return "", err
 	}
 	if err := c.uploadFile(ctx, uploadURL, filePath); err != nil {
-		return "", fmt.Errorf("MinerU 文件上传失败: %w", err)
+		return "", fmt.Errorf("MinerU 文件上传失败: %w；task_ref=%q", err, "batch:"+batchID)
 	}
 	zipURL, err := c.pollStandardUpload(ctx, batchID)
 	if err != nil {
@@ -34,7 +33,7 @@ func (c *Client) ParseStandardFile(ctx context.Context, filePath string) (string
 	}
 	md, err := c.downloadZIP(ctx, zipURL)
 	if err != nil {
-		return "", fmt.Errorf("MinerU 结果下载失败: %w", err)
+		return "", fmt.Errorf("MinerU 结果下载失败: %w；task_ref=%q", err, "batch:"+batchID)
 	}
 	return fmt.Sprintf("> **MinerU 完整结果 ZIP（含图片资源）**：%s。Markdown 中的相对图片路径需与 ZIP 内的 images/ 一起使用。\n\n%s", zipURL, md), nil
 }
@@ -77,56 +76,6 @@ func (c *Client) createStandardUpload(ctx context.Context, name string) (string,
 	return result.Data.BatchID, result.Data.FileURLs[0], nil
 }
 
-type standardUploadStatus struct {
-	Code int    `json:"code"`
-	Msg  string `json:"msg"`
-	Data struct {
-		ExtractResult []struct {
-			State      string `json:"state"`
-			FullZipURL string `json:"full_zip_url"`
-			ErrCode    int    `json:"err_code"`
-			ErrMsg     string `json:"err_msg"`
-		} `json:"extract_result"`
-	} `json:"data"`
-}
-
 func (c *Client) pollStandardUpload(ctx context.Context, batchID string) (string, error) {
-	deadline, cancel := context.WithTimeout(ctx, pollTimeout)
-	defer cancel()
-	for {
-		if err := deadline.Err(); err != nil {
-			return "", fmt.Errorf("MinerU 解析超时（超过 %s），batch_id: %s", pollTimeout, batchID)
-		}
-		var result standardUploadStatus
-		resp, err := c.client.R().SetContext(deadline).
-			SetHeader("Authorization", "Bearer "+c.token).
-			SetResult(&result).
-			Get(fmt.Sprintf("%s%s/extract-results/batch/%s", c.endpoint, standardAPIPath, batchID))
-		if err != nil {
-			return "", fmt.Errorf("MinerU 查询失败: %w", err)
-		}
-		if resp.StatusCode() != http.StatusOK {
-			return "", fmt.Errorf("MinerU 服务异常 (HTTP %d)", resp.StatusCode())
-		}
-		if result.Code != 0 {
-			return "", fmt.Errorf("MinerU 查询失败: %s", mapAPIError(result.Code, result.Msg))
-		}
-		if len(result.Data.ExtractResult) == 1 {
-			file := result.Data.ExtractResult[0]
-			switch file.State {
-			case "done":
-				if file.FullZipURL == "" {
-					return "", fmt.Errorf("MinerU 解析完成但未返回结果链接")
-				}
-				return file.FullZipURL, nil
-			case "failed":
-				return "", fmt.Errorf("MinerU 解析失败: %s", mapAPIError(file.ErrCode, file.ErrMsg))
-			}
-		}
-		select {
-		case <-deadline.Done():
-			return "", fmt.Errorf("MinerU 解析超时（超过 %s），batch_id: %s", pollTimeout, batchID)
-		case <-time.After(pollInterval):
-		}
-	}
+	return c.pollTask(ctx, "batch:"+batchID)
 }

@@ -1,8 +1,8 @@
 package core
 
 import (
-	"sort"
 	"fmt"
+	"sort"
 	"strings"
 	"websearch/pkg/antirobot"
 )
@@ -22,20 +22,20 @@ const (
 )
 
 type SearchResult struct {
-	Title       string  `json:"title"`
-	Url         string  `json:"url"`
-	Content     string  `json:"content"`
-	PublishDate string  `json:"publishedDate"`
-	DateSource  string  `json:"date_source,omitempty"` // PublishDate 来源注记（DateSource*，旧缓存行可能缺失）
-	Score       float64 `json:"score,omitempty"`       // 搜索相关性分数（Tavily 等引擎回传，0 表示无分数）
-	Engine      string  `json:"engine,omitempty"`      // 结果来源引擎名（首个返回该 URL 的引擎）
-	Engines     []string `json:"engines,omitempty"`    // 返回该 URL 的全部引擎（Wigolo 评分增强的共识 Boost 使用）
-	Type        string  `json:"type,omitempty"`        // "paper" 或 "web"，学术搜索时为 "paper"
-	Authors     string  `json:"authors,omitempty"`     // 论文作者
-	DOI         string  `json:"doi,omitempty"`         // 论文 DOI
-	Journal     string  `json:"journal,omitempty"`     // 期刊/会议名
-	CitedBy     int     `json:"cited_by,omitempty"`    // 被引次数
-	PDFURL      string  `json:"pdf_url,omitempty"`     // PDF 链接
+	Title       string   `json:"title"`
+	Url         string   `json:"url"`
+	Content     string   `json:"content"`
+	PublishDate string   `json:"publishedDate"`
+	DateSource  string   `json:"date_source,omitempty"` // PublishDate 来源注记（DateSource*，旧缓存行可能缺失）
+	Score       float64  `json:"score,omitempty"`       // 搜索相关性分数（Tavily 等引擎回传，0 表示无分数）
+	Engine      string   `json:"engine,omitempty"`      // 结果来源引擎名（首个返回该 URL 的引擎）
+	Engines     []string `json:"engines,omitempty"`     // 返回该 URL 的全部引擎（Wigolo 评分增强的共识 Boost 使用）
+	Type        string   `json:"type,omitempty"`        // "paper" 或 "web"，学术搜索时为 "paper"
+	Authors     string   `json:"authors,omitempty"`     // 论文作者
+	DOI         string   `json:"doi,omitempty"`         // 论文 DOI
+	Journal     string   `json:"journal,omitempty"`     // 期刊/会议名
+	CitedBy     int      `json:"cited_by,omitempty"`    // 被引次数
+	PDFURL      string   `json:"pdf_url,omitempty"`     // PDF 链接
 }
 
 type SearchInf interface {
@@ -46,7 +46,9 @@ type SearchInf interface {
 }
 
 // SearchTimeRanger 支持按时间范围搜索的引擎可实现此可选接口。
-// lookbackDays 控制搜索最近多少天的结果，0 表示使用引擎默认值。
+// lookbackDays 控制搜索最近多少天的结果，0 表示不发送时间筛选。
+// SearchRaw 保留引擎的构造默认值；时间范围仅作用于当前请求。
+// 正天数的筛选精度取决于引擎支持的时间枚举或日期字段。
 type SearchTimeRanger interface {
 	SearchRawWithTimeRange(query string, lookbackDays int) ([]SearchResult, error)
 }
@@ -64,7 +66,6 @@ type AcademicSearcher interface {
 	AcademicEngines() []string // 返回可用的学术引擎列表
 }
 
-
 // FormatScore 将 score 格式化为显示字符串，score <= 0 时返回空。
 func FormatScore(score float64) string {
 	if score <= 0 {
@@ -78,6 +79,8 @@ func FormatScore(score float64) string {
 type AcademicSearchResult struct {
 	Results      []SearchResult
 	EngineErrors map[string]string // engine name → error message
+	// nil preserves legacy selection inference; non-nil is the actual attempt set.
+	AttemptedEngines []string
 }
 
 // ScoreBucket 单引擎按相关性排序的结果列表（提供 RRF 排名）。

@@ -84,10 +84,10 @@ func TestBaiduSearchImpl_SearchRawWithTimeRange_Integration(t *testing.T) {
 	skipIfLiveBaiduUnavailable(t, err)
 	t.Logf("semiyear 范围结果数: %d", len(results))
 
-	// 测试默认时间范围（使用引擎默认值）
+	// 测试不限时间范围（省略筛选字段）
 	results, err = baidu.SearchRawWithTimeRange("AI news", 0)
 	skipIfLiveBaiduUnavailable(t, err)
-	t.Logf("默认范围结果数: %d", len(results))
+	t.Logf("不限时间范围结果数: %d", len(results))
 }
 
 func TestLookbackDaysToRecency(t *testing.T) {

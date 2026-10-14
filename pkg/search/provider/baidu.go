@@ -1,9 +1,9 @@
 package provider
 
 import (
-	"websearch/pkg/search/core"
 	"fmt"
 	"websearch/pkg/client"
+	"websearch/pkg/search/core"
 )
 
 type BaiduSearchImpl struct {
@@ -29,7 +29,7 @@ type baiduSearchReq struct {
 	SearchSource string                  `json:"search_source"` // 必填，固定值 baidu_search_v2
 	TypeFliter   []baiduSearchTypeFliter `json:"resource_type_filter"`
 	BlackSites   []string                `json:"block_websites"`
-	Recency      string                  `json:"search_recency_filter"`
+	Recency      string                  `json:"search_recency_filter,omitempty"`
 }
 
 type referenceCtx struct {
@@ -70,14 +70,12 @@ func (b *BaiduSearchImpl) Search(query string) (string, error) {
 
 // SearchRawWithTimeRange 实现 core.SearchTimeRanger 接口，支持动态时间范围。
 func (b *BaiduSearchImpl) SearchRawWithTimeRange(query string, lookbackDays int) ([]core.SearchResult, error) {
-	recency := b.recency
+	request := *b
+	request.recency = ""
 	if lookbackDays > 0 {
-		recency = lookbackDaysToRecency(lookbackDays)
+		request.recency = lookbackDaysToRecency(lookbackDays)
 	}
-	saved := b.recency
-	b.recency = recency
-	defer func() { b.recency = saved }()
-	return b.SearchRaw(query)
+	return request.SearchRaw(query)
 }
 
 // lookbackDaysToRecency 将天数转换为百度 API 的 recency 值。

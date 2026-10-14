@@ -81,10 +81,10 @@ func TestTavilySearchImpl_SearchRawWithTimeRange_Integration(t *testing.T) {
 	}
 	t.Logf("month 范围结果数: %d", len(results))
 
-	// 测试默认时间范围（不限）
+	// 测试不限时间范围
 	results, err = tavily.SearchRawWithTimeRange("technology", 0)
 	if err != nil {
-		t.Fatalf("SearchRawWithTimeRange(default) failed: %v", err)
+		t.Fatalf("SearchRawWithTimeRange(no filter) failed: %v", err)
 	}
-	t.Logf("默认范围结果数: %d", len(results))
+	t.Logf("不限时间范围结果数: %d", len(results))
 }

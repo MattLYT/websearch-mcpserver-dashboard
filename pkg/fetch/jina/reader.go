@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 	"websearch/pkg/config"
+	fetchcontent "websearch/pkg/fetch"
 	"websearch/pkg/log"
 	"websearch/pkg/proxy"
 
@@ -22,6 +23,7 @@ type FetchResult struct {
 	Description   string `json:"description"`
 	URL           string `json:"url"`
 	Content       string `json:"content"`
+	Warning       string `json:"warning"`
 	PublishedTime string `json:"publishedTime"`
 	Usage         struct {
 		Tokens int `json:"tokens"`
@@ -97,7 +99,8 @@ func (r *Reader) Fetch(rawURL string) (*FetchResult, error) {
 		SetHeader("X-Base", "final").
 		SetHeader("X-Proxy", "auto").
 		SetHeader("X-Retain-Images", "none").
-		SetHeader("X-Return-Format", "markdown").
+		SetHeader("X-Respond-With", "content").
+		SetHeader("X-Assert-Status-Code", "200").
 		SetHeader("X-Timeout", "8").
 		SetResult(&resp).
 		Get(fetchURL)
@@ -110,6 +113,13 @@ func (r *Reader) Fetch(rawURL string) (*FetchResult, error) {
 	}
 	if resp.Code != 200 {
 		return nil, fmt.Errorf("目标页面: %s", describeHTTPError(resp.Code))
+	}
+	// Reader can return a successful envelope for a failed target response.
+	if strings.HasPrefix(strings.TrimSpace(resp.Data.Warning), "Target URL returned error ") {
+		return nil, fmt.Errorf("目标页面抓取失败: %s", resp.Data.Warning)
+	}
+	if !fetchcontent.HasPageBody(resp.Data.Content, resp.Data.Title) {
+		return nil, fmt.Errorf("未获得页面正文(可能需要 JavaScript 渲染)")
 	}
 	return &resp.Data, nil
 }

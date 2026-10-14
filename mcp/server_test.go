@@ -14,9 +14,9 @@ import (
 	"time"
 
 	"websearch/pkg/config"
+	"websearch/pkg/fetch/webfetch"
 	"websearch/pkg/log"
 	"websearch/pkg/search"
-	"websearch/pkg/fetch/webfetch"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -79,9 +79,13 @@ func initTestLogger() {
 func restoreGlobals(t *testing.T) {
 	t.Helper()
 	oldSearch := searchapi
+	oldGroup := searchGroup
+	oldTools := ToolSnapshot()
+	searchGroup = nil
 	oldAcad := academicSearcher
 	oldWF := webfetchInst
 	oldCache := cacheInst
+	oldNamespace := cacheNamespace
 	oldSum := summarizerInst
 	oldJina := jinaInst
 	oldFallback := fallbackSearch
@@ -89,9 +93,12 @@ func restoreGlobals(t *testing.T) {
 	oldLazyCfg := webfetchLazyCfg
 	t.Cleanup(func() {
 		searchapi = oldSearch
+		searchGroup = oldGroup
+		publishTools(oldTools)
 		academicSearcher = oldAcad
 		webfetchInst = oldWF
 		cacheInst = oldCache
+		cacheNamespace = oldNamespace
 		summarizerInst = oldSum
 		jinaInst = oldJina
 		fallbackSearch = oldFallback
@@ -174,6 +181,7 @@ func TestNewMCPServer_RegisterTools(t *testing.T) {
 		{
 			name: "bing on, academic mock, optional off",
 			setup: func() {
+				searchapi = &mockSearch{name: "bing"}
 				academicSearcher = &mockAcademic{engines: []string{"arxiv"}}
 				webfetchInst = nil
 			},
@@ -181,12 +189,13 @@ func TestNewMCPServer_RegisterTools(t *testing.T) {
 				Bing:     config.BingConfig{Enabled: true},
 				Academic: config.AcademicConfig{Enabled: true},
 			},
-			want:    []string{"academicsearch", "smartsearch"},
-			wantNot: []string{"cleanfetch", "pdf_parser"},
+			want:    []string{"academicsearch", "smartsearch", "cleanfetch"},
+			wantNot: []string{"pdf_parser"},
 		},
 		{
 			name: "academic enabled but searcher nil",
 			setup: func() {
+				searchapi = &mockSearch{name: "bing"}
 				academicSearcher = nil
 			},
 			conf: config.Config{
@@ -250,6 +259,7 @@ func TestNewMCPServer_SmartsearchIntentDescription(t *testing.T) {
 	restoreGlobals(t)
 	academicSearcher = nil
 	webfetchInst = nil
+	searchapi = &mockSearch{name: "bing"}
 
 	noLLM := toolByName(t, config.Config{Bing: config.BingConfig{Enabled: true}}, "smartsearch")
 	if strings.Contains(noLLM.Description, "intent") {

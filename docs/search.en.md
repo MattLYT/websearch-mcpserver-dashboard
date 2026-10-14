@@ -142,9 +142,11 @@ Response behaviors introduced in phases 1-3, shared by `smartsearch` and `academ
 
 **Result date provenance**: each result date carries a `date_source` state — `structured` (from the engine API) / `snippet` (parsed from snippet text, weak) / `undated`; academic results use the same scheme. Response headers carry `retrieved_at` (search time; on cache hits the original search time) and `cache_age_seconds`, plus a fixed `usage_note`: snippet dates only locate sources — verify dates, amounts and versions on the page itself before citing.
 
-**Oversize response dump**: when the rendered result exceeds `smartsearch.inline_max_chars` (default 32768, negative = disabled), the full text is written to `fetchdata/search-*.md` (stale files lazily cleaned after 7 days) and the response keeps the provenance header, result/char counts, file path and a segmented-read hint — zero loss; the failure list always stays in the response. Shared by the live and cache-hit paths.
+**Oversize response dump**: when the rendered result exceeds `smartsearch.inline_max_chars` (default 32768, negative = disabled), the full text is written to `fetchdata/search-*.md` (stale files lazily cleaned after 7 days). The response retains provenance, counts, every candidate's title/URL/source/excerpt (up to 160 characters), file path and `result_ref`. Read the complete body through `cleanfetch`; failures remain in the initial response. Live and ordinary cache-hit paths share this flow, with fresh references on cache hits. Enriched results containing temporary file notices are neither persisted nor reused from old entries.
 
 **Freshness-aware cache TTL**: smartsearch `time_range` ≤1 month → 24h, otherwise the default 6h; academic `time_range` buckets day → 1h / week → 6h (default) / month → 24h. Time-sensitive queries no longer hit stale cache.
+
+**Web cache isolation**: smartsearch partitions cached results by query, effective `time_range`, and `fetch_top_n`. Page enrichment and summaries retain the same time window. Omitted or null means 3 months; explicit `0` omits the time filter. Request-specific time settings do not mutate shared providers; ordinary SearchRaw retains constructor defaults. Legacy web entries without a time window are not reused and remain subject to existing cleanup. Precision depends on each source: some providers use discrete ranges, while some web engines and Bing fallback have no time parameter. Omitting filters does not guarantee the absence of upstream defaults or accurate dates on every result.
 
 **Persisted circuit-breaker state**: engine cooldown/rate-limit state lives in a unified registry persisted to `engine_health.json` (next to the cache DB, 24h memory window, advisory semantics); after a restart, unexpired cooldowns are adopted automatically so dead engines are not re-hit. Currently covers DuckDuckGo / arXiv.
 
@@ -231,7 +233,7 @@ apipool:
 
 ## MCP Tools
 
-> Tool registration conditions: `smartsearch` needs `bing.enabled=true`; `academicsearch` needs `academic.enabled=true`; `cleanfetch` needs `cleanfetch.enabled=true`; `pdf_parser` needs `pdf_parser.enabled=true`; `file_search` has no switch — it is registered when the lazy probe of the Everything HTTP Server at first MCP client connection succeeds, and stays hidden otherwise.
+> Tool registration conditions: `smartsearch` needs `bing.enabled=true`; `academicsearch` needs `academic.enabled=true`; `cleanfetch` is always registered; `cleanfetch.enabled` only gates URL fetching; `pdf_parser` needs `pdf_parser.enabled=true`; `file_search` has no switch — it is registered when the lazy probe of the Everything HTTP Server at first MCP client connection succeeds, and stays hidden otherwise.
 
 ### `smartsearch` — General Web Search
 
@@ -265,9 +267,11 @@ With `time_range`, each academic engine uses its official syntax (aligned in v3.
 | DOAJ | `bibjson.year:[startYear TO current UTC year]` (no `*`; `day`/`week`/`month` collapse to year granularity) |
 | arXiv | `submittedDate:[YYYYMMDDHHMM TO YYYYMMDDHHMM]` (UTC/GMT) |
 
-**Single-paper lookup (DOI / arXiv id short-circuit)**: when you already have a DOI or arXiv id, pass it directly as `query`, e.g. `10.1038/s41586-020-2649-2`, `doi:10.1038/s41586-020-2649-2`, `https://doi.org/10.1038/s41586-020-2649-2`, or `2401.04085`, `arXiv:2401.04085`, `https://arxiv.org/abs/2401.04085`. This triggers a single-paper lookup that ignores `engines` / `time_range` / `page`; once you have the `pdf_url` from the result, pass that URL as the `path` parameter of the `pdf_parser` tool to parse the full text instead of searching by title.
+**Single-paper lookup (DOI / arXiv id short-circuit)**: when you already have a DOI or arXiv id, pass it directly as `query`, e.g. `10.1038/s41586-020-2649-2`, `doi:10.1038/s41586-020-2649-2`, `https://doi.org/10.1038/s41586-020-2649-2`, or `2401.04085`, `arXiv:2401.04085`, `https://arxiv.org/abs/2401.04085`. This triggers a single-paper lookup that ignores `time_range` / `page` but respects enabled sources and requested `engines`; once you have the `pdf_url` from the result, pass that URL as the `path` parameter of the `pdf_parser` tool to parse the full text instead of searching by title.
 
 Results are ranked by the academic scoring enhancement (enabled by default): RRF fusion ranking + citation / journal authority / PDF availability / recency signals, with low-score papers auto-filtered (Top-1 + per-engine floor). Config: `academic.enhance` (default true), `academic.threshold` (default 0.02).
+
+When no usable results remain and engines have failed, the error retains each engine's reason rather than implying an ordinary empty search. Recognized DBLP Anubis HTML challenge pages report human verification; other malformed responses retain their parse errors. This does not bypass verification or change enabled sources.
 
 **Scope boundary**: papers, preprints and DOI-level academic lookup; for news, product docs and other general web information, use `smartsearch`.
 
@@ -275,10 +279,13 @@ Results are ranked by the academic scoring enhancement (enabled by default): RRF
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `url` | string | one of `url`/`urls` | Web page URL |
-| `urls` | string[] | one of `url`/`urls` | Batch fetch; merged with `url`, deduplicated, up to 5 |
+| `url` | string | URL mode: one of `url`/`urls` | Web page URL; mutually exclusive with `result_ref` |
+| `urls` | string[] | URL mode: one of `url`/`urls` | Batch fetch; merged with `url`, deduplicated, up to 5 |
+| `result_ref` | string | required in reference mode | Returned reference; mutually exclusive with `url`/`urls` |
+| `offset` | integer | no | Reference mode only: Unicode offset, default 0 |
+| `limit` | integer | no | Reference mode only: default/0 = 4096, maximum 8192 |
 
-Requires `cleanfetch.enabled: true`. Based on go-webfetch, no proxy needed; built-in DNS rebinding protection and HEAD pre-check for large files (`max_fetch_size_mb` controls threshold, default 10MB; every redirect hop is re-checked against private-network/metadata rules, up to 5 hops); falls back to Jina Reader on failure (requires `jina.api_key`, proxy auto-detected).
+URL fetching requires `cleanfetch.enabled: true`; saved-body reads do not. Based on go-webfetch, no proxy needed; built-in DNS rebinding protection and HEAD pre-check for large files (`max_fetch_size_mb` controls threshold, default 10MB; every redirect hop is re-checked against private-network/metadata rules, up to 5 hops); falls back to Jina Reader on failure (requires `jina.api_key`, proxy auto-detected).
 
 In batch mode (`urls`), each URL is pre-checked and fetched independently; one failure does not affect the others, and results are returned grouped by URL. With only `url`, output is identical to previous versions.
 
@@ -288,10 +295,14 @@ In batch mode (`urls`), each URL is pre-checked and fetched independently; one f
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `path` | string | ✅ | Local PDF file path or remote http(s) URL (academic `pdf_url` can be passed directly) |
+| `path` | string | New tasks | Local PDF file path or remote http(s) URL (academic `pdf_url` can be passed directly); mutually exclusive with `task_ref` |
 | `pages` | string | ❌ | Page range (1-based), e.g. `1-10`, `1,3,5-7`; invalid formats raise a parameter error, and explicit page counts above `max_pages` or a single range wider than 1000 pages are rejected with a split suggestion |
+| `task_ref` | string | ❌ | Retrieve an existing MinerU job: `standard:<task_id>`, `batch:<batch_id>` or `agent:<task_id>`. Omit `path/pages`; the original selection is preserved |
+| `wait_seconds` | integer | ❌ | 0-1800 seconds per MinerU job; defaults to 300 for new tasks, 0 (query once) for resumption |
 
 Requires `pdf_parser.enabled: true`. Large documents auto-stored to temp files. Remote URLs use the same SSRF and HEAD pre-checks as `cleanfetch` (including per-hop redirect re-checks) and are not prefixed with `file://`.
+
+**MinerU waiting and resumption**: polling backs off from 2 to at most 30 seconds. A supplied progress token receives state changes and known page progress. Exhausting the wait budget is not an upstream parsing failure. Text fallback retains the last state and `task_ref`. Use `{"task_ref":"standard:<returned-task-id>"}` to query the original job; pending responses are status, not document content, and completed results are retrieved without resubmitting the PDF. Set `wait_seconds:900` when a longer wait is appropriate. Resuming an uploaded batch returns only that batch, with cropped page numbering; request remaining batches separately by original page numbers. Unknown page counts are not estimated.
 
 When `pages` is omitted, the first `pdf_parser.max_pages` (default 20) pages are requested. Local PDF text extraction reports the known total and truncation; MinerU may not return the original page count. Remote MinerU Standard API first uses `page_ranges` (per-task page limit defaults to 600 per MinerU official docs, tunable via `pdf_parser.mineru_page_limit`); MinerU rejects the task outright when the source file exceeds its page limit or the source URL is not fetchable; in that case the service downloads it, uses qpdf to select the requested pages, and uploads the smaller PDF. Explicitly requesting pages beyond the per-task limit (requires raising `pdf_parser.max_pages`; the default 20 rejects wide requests first) takes the same path (original download cap 200 MB; the uploaded file must still meet MinerU's 200 MB / 600-page limits). With `pdf_parser.mineru_page_batch_size` (10-200, 0 = no batching) set, pages beyond the per-task limit are split into batches submitted serially, bounded by the `pdf_parser.mineru_page_budget` page budget per call; on exhaustion the parsed part is returned with a continuation hint. Per-batch progress (source download, each batch start/completion) is streamed via MCP progress notifications, so agents do not block blind through the whole run. The result states the original page count and renumbering and includes a complete ZIP URL. Relative `images/` references in Markdown require the images in that ZIP. Scanned OCR also crops before upload, with at most 20 pages per request and a 10 MB cropped-file limit. Agent returns Markdown only and does not guarantee downloadable relative image assets. Standalone binaries require qpdf on the host; project Docker images include it.
 
@@ -304,6 +315,10 @@ When `pages` is omitted, the first `pdf_parser.max_pages` (default 20) pages are
 **Scope boundary**: PDF parsing only; for web page body text use `cleanfetch`.
 
 ---
+
+#### cleanfetch Saved Result Reading
+
+Always registered; accepts only this service's `result_ref`. Start with `cleanfetch(result_ref, offset=0, limit=4096)` and continue with `next_offset` until `eof=true`; each page returns up to 8192 Unicode code points in `content`. No Docker or host file access is needed, and the source is not requested again. Existing `/mcp` authentication applies. References survive MCP session changes but not restart, expiry, cleanup or detected identity/size/modification-time changes. See the [API contract](api.en.md#reading-long-results).
 
 ### `file_search` — Local File Quick Search
 
