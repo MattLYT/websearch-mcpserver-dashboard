@@ -8,14 +8,15 @@ import (
 // MCPToolView 是控制中心展示的公开 MCP 工具清单条目。它与
 // telemetry.Overview.Tools 不同：后者只包含产生过真实调用的事件聚合。
 type MCPToolView struct {
-	Name        string        `json:"name"`
-	Label       string        `json:"label"`
-	Enabled     bool          `json:"enabled"`
-	Registered  bool          `json:"registered"`
-	State       string        `json:"state"`
-	Description string        `json:"description"`
-	PDF         *PDFToolView  `json:"pdf,omitempty"`
-	File        *FileToolView `json:"file,omitempty"`
+	Name         string        `json:"name"`
+	Label        string        `json:"label"`
+	Enabled      bool          `json:"enabled"`
+	Registered   bool          `json:"registered"`
+	State        string        `json:"state"`
+	Description  string        `json:"description"`
+	FetchEnabled *bool         `json:"fetch_enabled,omitempty"`
+	PDF          *PDFToolView  `json:"pdf,omitempty"`
+	File         *FileToolView `json:"file,omitempty"`
 }
 
 type FileToolView struct {
@@ -50,10 +51,11 @@ func mcpToolCatalog(conf config.Config) []MCPToolView {
 			Description: "多学术数据库并行检索",
 		},
 		{
-			Name:        "cleanfetch",
-			Label:       "网页抓取",
-			Enabled:     conf.CleanFetch.Enabled,
-			Description: "网页正文抓取与 Markdown 提取",
+			Name:         "cleanfetch",
+			Label:        "正文获取",
+			Enabled:      true,
+			FetchEnabled: &conf.CleanFetch.Enabled,
+			Description:  "已保存正文读取始终可用；URL 抓取由配置开关控制",
 		},
 		{
 			Name:        "pdf_parser",

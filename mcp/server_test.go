@@ -189,8 +189,8 @@ func TestNewMCPServer_RegisterTools(t *testing.T) {
 				Bing:     config.BingConfig{Enabled: true},
 				Academic: config.AcademicConfig{Enabled: true},
 			},
-			want:    []string{"academicsearch", "smartsearch"},
-			wantNot: []string{"cleanfetch", "pdf_parser"},
+			want:    []string{"academicsearch", "smartsearch", "cleanfetch"},
+			wantNot: []string{"pdf_parser"},
 		},
 		{
 			name: "academic enabled but searcher nil",

@@ -67,7 +67,7 @@ Once registered, your LLM client gets 4 MCP tools covering one connected workflo
 | `cleanfetch` | Fetch page content | Read a full article; `urls` batches up to 5 |
 | `pdf_parser` | Parse PDFs (local text first, MinerU OCR fallback for scans; oversized sources are cropped and batched automatically) | Pass `pdf_url` from an `academicsearch` result to read the full text; use `pages` for long documents |
 
-> If a tool is missing in the client, check the registration conditions (`bing.enabled` / `academic.enabled` / `cleanfetch.enabled` / `pdf_parser.enabled`), see [search.en.md](search.en.md#mcp-tools).
+> If a tool is missing in the client, check the registration conditions (`bing.enabled` / `academic.enabled` / `pdf_parser.enabled`), see [search.en.md](search.en.md#mcp-tools).
 
 ## Tuning: observe first, then adjust
 

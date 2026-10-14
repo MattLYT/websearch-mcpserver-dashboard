@@ -263,7 +263,7 @@ jina:
 
 # 增强型网页抓取（默认关闭）
 cleanfetch:
-  enabled: false            # 显式 true 才启用 cleanfetch 工具；smartsearch 的 fetch_top_n 不受此开关约束，会按当前配置惰性初始化 webfetch
+  enabled: false            # 仅启用 URL 抓取；cleanfetch 始终注册，result_ref 读取与 smartsearch.fetch_top_n 不受约束
   file_output_dir: ""       # 默认 exe 同目录 fetchdata/
   file_ttl_hours: 24        # 临时文件保留时长（小时）
   max_inline_lines: 100     # 超过此行数存文件
@@ -532,7 +532,7 @@ dashboard:
 | `proxy.enabled` | 未设置 | 未设置时自动检测系统代理；显式 false 禁用；显式 true 使用 endpoint |
 | `proxy.endpoint` | `http://127.0.0.1:7897` | 仅 `enabled: true` 时生效 |
 | `proxy.api_providers` | false | API 供应商上游请求（千帆/Tavily/Exa/AnySearch/豆包/LLM）是否走代理；false 强制直连，环境变量代理不生效 |
-| `cleanfetch.enabled` | false | 旧配置不启用，需显式开启；仅约束 cleanfetch 工具，`fetch_top_n` 不受限（惰性初始化 webfetch） |
+| `cleanfetch.enabled` | false | 仅启用 URL 抓取；工具始终注册，result_ref 正文读取与 `fetch_top_n` 不受限 |
 | `cleanfetch.file_ttl_hours` | 24 | |
 | `cleanfetch.max_inline_lines` | 100 | |
 | `cleanfetch.timeout_sec` | 30 | |

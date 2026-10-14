@@ -170,15 +170,15 @@ DBLP 返回已识别的 Anubis 挑战页时，工具和来源事件记为人机�
 
 保存及恢复都携带配置内容版本 `revision`。配置在预览后被其他会话或外部编辑改动时，服务端返回 **HTTP 409**，不覆盖新内容；刷新后重新比较/编写草稿再保存。被环境变量覆盖的字段标为锁定；由独立 dashboard.yaml 管理的 dashboard 字段同样不可从主配置写路径覆盖。需在真正的环境/overlay 来源修改并重启，不通过 WebUI 绕过。
 
-## 五工具与观测边界
+## 工具与观测边界
 
-工具清单固定展示五个公开工具，注册状态来自当前 MCP 运行快照，调用次数与健康来自真实工具事件。配置开启、已经注册、尚无观测是不同状态；未采集或无调用不是成功记录。
+工具清单展示五个公开工具，注册状态来自当前 MCP 运行快照，调用次数与健康来自真实工具事件。配置开启、已经注册、尚无观测是不同状态；未采集或无调用不是成功记录。
 
 | 工具 | 边界 |
 |---|---|
 | `smartsearch` | 当前模式的可用网页/API组合；Bing 是源与回退，不是工具总开关 |
 | `academicsearch` | 已注册学术源及请求指定子集；关闭源也约束 DOI/arXiv 精确查询 |
-| `cleanfetch` | 网页正文抓取；工具开关不限制 smartsearch 的 `fetch_top_n` 路径 |
+| `cleanfetch` | 始终注册；已保存正文读取可用，URL 抓取独立展示开关（`fetch_enabled`）；开关不限制 smartsearch 的 `fetch_top_n`。遥测 detail 为 `url_fetch` 或 `saved_result`，不记录引用/正文 |
 | `pdf_parser` | PDF 解析；展示 `max_pages`（省略 `pages` 时默认 20 页）、`mineru_page_limit`（`GetMinerUPageLimit()` 默认 600 页）、分批大小、单次页预算和 OCR 配置，不代表本次已执行 OCR |
 | `file_search` | Everything 只读文件名/路径索引检索，不读取文件正文；接入 MCP 时按既有机制延迟探测，dashboard 读取不触发探测 |
 

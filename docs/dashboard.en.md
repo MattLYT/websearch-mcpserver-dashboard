@@ -170,15 +170,15 @@ Source lists separate web/API and academic sources, showing enable switches and 
 
 Save and restore requests carry the configuration-content `revision`. Another session or external edit changing the file after preview produces **HTTP 409**, without overwriting the new content. Refresh, compare and rebuild the draft before saving. Environment-overridden fields are locked; dashboard fields managed by the separate dashboard.yaml are likewise not writable through the main-config path. Edit the actual environment/overlay source and restart instead of bypassing the lock.
 
-## Five tools and observation boundaries
+## Tools and observation boundaries
 
-The catalog always displays the five public tools. Registration comes from the current MCP runtime snapshot; call counts and health come from actual tool events. Configured, registered and not yet observed are separate states. Missing telemetry or no calls is not a successful call record.
+The catalog displays five public tools. Registration comes from the current MCP runtime snapshot; call counts and health come from actual tool events. Configured, registered and not yet observed are separate states. Missing telemetry or no calls is not a successful call record.
 
 | Tool | Boundary |
 |---|---|
 | `smartsearch` | Available web/API routes in the configured mode; Bing is a source/fallback, not the tool master switch |
 | `academicsearch` | Registered academic sources and the requested subset; disabled sources are also excluded from DOI/arXiv exact lookups |
-| `cleanfetch` | Web-page body extraction; its switch does not gate smartsearch's `fetch_top_n` path |
+| `cleanfetch` | Always registered; saved-body reads remain available, URL fetching has a separate `fetch_enabled` status. The switch does not gate smartsearch's `fetch_top_n`. Telemetry detail is `url_fetch` or `saved_result`, never references or body text |
 | `pdf_parser` | PDF parsing; displays `max_pages` (default 20 pages when `pages` is omitted), `mineru_page_limit` (`GetMinerUPageLimit()` defaults to 600 pages), batch size, per-call page budget and OCR configuration, not proof that OCR ran |
 | `file_search` | Read-only Everything filename/path indexing, not file-content reading; the existing lazy probe runs at MCP connection time, never because the dashboard is read |
 

@@ -26,16 +26,16 @@ An MCP search service written in Go. Built-in Baidu web search, Bing, DuckDuckGo
 
 ## Architecture at a glance
 
-Layered design: clients see five MCP tools; the engine group is assembled by `mode`; scoring, cache, proxy, and fetch all run in-process. Queries never pass through a third-party aggregator.
+Layered design: clients see up to five MCP tools; the engine group is assembled by `mode`; scoring, cache, proxy, and fetch all run in-process. Queries never pass through a third-party aggregator.
 
 <p align="center">
-  <img src="docs/images/architecture.png" alt="System architecture: client, protocol (5 tools and dashboard), orchestration, 8 general and 9 academic engines, supporting components" width="900">
+  <img src="docs/images/architecture.png" alt="System architecture: client, retrieval protocol and dashboard, orchestration, 8 general and 9 academic engines, supporting components" width="900">
 </p>
 
 | Layer | Role |
 |-------|------|
 | **Client** | Claude Code / Qwen Code / Cursor / HTTP API / embed as a Go module |
-| **Protocol** | `/mcp` five tools · `/searxng/search` for LiteLLM · `/__admin` process management · `/dashboard` optional local console |
+| **Protocol** | `/mcp` up to five tools · `/searxng/search` for LiteLLM · `/__admin` process management · `/dashboard` optional local console |
 | **Orchestration** | `factory` / `mode` · `hybrid` / `apipool` · `enhance` (RRF / Boost / MMR) |
 | **Engines** | General: Baidu web / Qianfan / Bing / DDG / Tavily / Exa / AnySearch / Doubao; 9 academic sources in parallel |
 | **Support** | SQLite cache, system-proxy auto-detect, webfetch (SSRF), MinerU, streaming LLM summary, Everything |
@@ -46,7 +46,7 @@ Fallback chain, proxy detection, and embedding details: [docs/architecture.en.md
 
 ## A complete tool chain for LLMs
 
-Five tools cover the retrieval workflow. Results feed into each other — one config enables the whole chain:
+Five retrieval tools feed into each other. Saved long search, webpage and PDF bodies are read through `cleanfetch` without client access to container files. Start at `offset=0`, then follow `next_offset` until `eof=true`.
 
 <p align="center">
   <img src="docs/images/toolchain.png" alt="smartsearch → academicsearch → cleanfetch → pdf_parser toolchain, plus file_search for local files" width="900">
@@ -61,7 +61,7 @@ Five tools cover the retrieval workflow. Results feed into each other — one co
 | Zero-key search | `engine` mode runs Baidu web search + Bing concurrently, no API keys required |
 | Multi-engine fusion | Multiple search modes, 8 general engines + 9 academic engines, auto-fallback on primary failure |
 | Relevance scoring | RRF fusion ranking + lexical alignment / domain quality / consensus / authority / recency boosts, low-score results pruned; MMR breaks up mirrors / reposts |
-| Response transparency | Structured failure lists (engine / failure kind / reason) make empty results explainable; result dates carry `date_source` provenance plus response-header provenance; oversize responses are dumped to file (zero loss) |
+| Response transparency | Failure lists, date and retrieval provenance; oversize search results retain candidate previews and a `result_ref` for complete body delivery through the `cleanfetch` saved-result mode |
 | Academic search | 9 academic engines in parallel, scored by citation count / journal authority / PDF availability / recency; cross-engine DOI dedup |
 | Web fetching | `cleanfetch` with built-in SSRF / DNS-rebinding protection and oversized-file pre-check; fallback to Jina Reader |
 | PDF parsing | Local PDFs prefer text extraction; scanned PDFs can fall back to MinerU OCR; remote MinerU returns the ZIP URL with images; when the source exceeds the per-task page limit (default 600), selected pages are cropped locally with qpdf, with configurable auto-batching and a per-call page budget ; bounded MinerU waiting with state and task references for resuming existing jobs |
@@ -116,9 +116,9 @@ So I started in 2026-04 with a single Baidu Qianfan engine and evolved it into a
 
 **Scalable complexity** — One config file, with `mode` scaling from `engine` (zero config) to `hybrid` (all engines). Zero-config and power users each get what they need without paying for complexity.
 
-**Decoupled and composable** — Engines, modes, and tools are not coupled: `mode` decides the engine group, the 4 web tools each have their own `enabled` switch (`file_search` is probe-gated instead), keys are optional (`sk_list` multi-key rotation). Everything is config-driven (per-engine filtering, scoring thresholds, MMR, blocked sites, rate limits) — all tunable, nothing hardcoded.
+**Decoupled and composable** — Engines, modes, and tools are not coupled: `mode` decides the engine group, network capabilities follow their config switches (`cleanfetch` is always registered and its switch only gates URL fetching; `file_search` is probe-gated), keys are optional (`sk_list` multi-key rotation). Everything is config-driven (per-engine filtering, scoring thresholds, MMR, blocked sites, rate limits) — all tunable, nothing hardcoded.
 
-**A complete tool chain for LLMs** — The 5 tools cover the full retrieval workflow: `smartsearch` → `academicsearch` → `cleanfetch` → `pdf_parser` → `file_search` (Windows + Everything, auto-exposed when the client-connection probe passes), with results feeding into each other — one config enables the whole chain.
+**A complete tool chain for LLMs** — Five retrieval tools cover webpages, papers, PDFs and local files (`file_search` needs Windows + Everything and a successful probe). The `cleanfetch` saved-result mode delivers saved bodies through MCP.
 
 **Scenario-specific optimization** — Optimized for real usage scenarios: academic search (9 engines + citation / journal / PDF scoring), China networking (direct connect + system proxy auto-detection), scanned PDFs (MinerU OCR fallback), recency queries (`time_range`).
 
@@ -181,7 +181,7 @@ With `dashboard.enabled: true`, open `http://127.0.0.1:8338/dashboard/` in a loc
 
 | Page | What it shows |
 |------|---------------|
-| **Overview** | KPIs (successful calls with total and cache hits / failures / avg latency), system status (including suspended count), running configuration, observation status of the five tools, client usage grouping |
+| **Overview** | KPIs (successful calls with total and cache hits / failures / avg latency), system status (including suspended count), running configuration, tool observation status, client usage grouping |
 | **Sources** | Per-source health, last 20 results, failure composition (e.g. `parse ×4`), success rate, avg / P95 latency, quotas, latest error and suspension countdown |
 | **Usage** | Tools and sources in separate dimensions; filter by level / status / tool / source / error kind; click a request id on a tool row to expand the source chain of that call |
 | **Settings** | Writes whitelisted config (mode, timeouts, thresholds, suspension durations, etc.) after backing up the current YAML; secrets are never echoed |

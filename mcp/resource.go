@@ -90,7 +90,7 @@ func renderCapabilities(conf config.Config) string {
 	}
 	if registered["cleanfetch"] {
 		anyTool = true
-		b.WriteString("- `cleanfetch`：网页干净 Markdown 抓取（SSRF 防护，支持批量）\n")
+		fmt.Fprintf(&b, "- `cleanfetch`：result_ref 已保存正文读取始终可用；URL 抓取启用: %v（SSRF 防护，支持批量）\n", conf.CleanFetch.Enabled)
 	}
 	if registered["pdf_parser"] {
 		anyTool = true

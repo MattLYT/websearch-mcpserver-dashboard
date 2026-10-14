@@ -6,7 +6,7 @@
 
 本页以 v3.7.0 为基线，并包含本分支正文/PDF 与时间缓存修复；其他部署可能尚无这些修复。项目参数及来源开关按当前工具 schema 和能力资源确认。部署配置、可用工具、来源与额度可能不同，升级后核验受影响项。
 
-优先发现当前工具与 schema。四工具按配置注册；`smartsearch.intent` 只有服务端 LLM 配置完整时才出现。不要向未暴露该参数的工具传入它。常规调用不需要重新检查 Docker 或读取全部配置。
+优先发现当前工具与 schema。本分支 `cleanfetch` 始终注册，URL 抓取需 cleanfetch.enabled=true，引用读取不受此开关限制；其他工具按实际条件注册；`smartsearch.intent` 只有服务端 LLM 配置完整时才出现。不要向未暴露该参数的工具传入它。常规调用不需要重新检查 Docker 或读取全部配置。
 
 v3.7.0 新增的 `file_search` 依 Everything 探测注册，只有探测成功时才暴露。宿主支持 Resources 时，可按需读取 `search://capabilities` 和 `search://health`；它们只读、不占工具槽位，可被配置关闭。
 
@@ -25,7 +25,7 @@ v3.6.2 起的结果消费：
 
 - 头部 `retrieved_at` 是检索时刻，缓存命中可含 `cache_age_seconds`；不是来源发表日期。日期来源 `structured/snippet/undated` 必须区别，snippet 仅定位，关键日期、金额、版本读原页核实。
 - 尾部失败清单说明 timeout/rate_limit/challenge/off_topic 等，结果≤3 条时可附 `filter_diagnostics` 与阈值放宽提示。低条数不证明没有资料。`off_topic_guard=shadow` 默认只标疑似整桶、不丢弃；不能把 shadow 命中当过滤完成。
-- 渲染结果超过 `smartsearch.inline_max_chars`（默认 32,768 字符）整体写 `search-*.md`，不是截断；响应保留统计、路径、溯源头与失败清单。必须读取文件后才能评价来源。搜索文件缺省保留 7 天，落盘时惰性清理。
+- 渲染结果超过 `smartsearch.inline_max_chars`（默认 32,768 字符）整体写 `search-*.md`，不是截断；响应保留候选标题、URL、来源和最多 160 字符摘录，以及统计、溯源头、失败清单和 `result_ref`。预览用于筛选，需要原文细节时用 `cleanfetch` 读取段落。搜索文件缺省保留 7 天，落盘时惰性清理。
 
 ## academicsearch：身份、分页与覆盖
 
@@ -42,7 +42,7 @@ OpenAlex 匿名查询可能耗尽共享出口 IP 的每日预算而返回 429；
 
 ## cleanfetch 与 pdf_parser：共享底层，不同选项
 
-`cleanfetch` 的 schema 要求 `url`，`urls` 可选。示例采用第一条放 `url`、余下放 `urls`；handler 合并、去空白、去重后最多 5 项，超限报错而不是自动分批。批量结果按输入顺序分节，单条甚至全部失败都可能以正常工具响应返回，逐条检查 `抓取失败`。
+`cleanfetch` 支持互斥的 URL 和引用读取模式：URL 模式传 `url`/`urls`，引用模式只传 `result_ref` 及可选 `offset`/`limit`。URL 模式不能传分页字段，引用模式不能传 URL。示例采用第一条放 `url`、余下放 `urls`；handler 合并、去空白、去重后最多 5 项，超限报错而不是自动分批。批量结果按输入顺序分节，单条甚至全部失败都可能以正常工具响应返回，逐条检查 `抓取失败`。
 
 三条抓取路径共享 URL 安全预检、HEAD 大小预检及 WebFetch：
 
@@ -130,7 +130,11 @@ if ($LASTEXITCODE -ne 0) { throw '临时文件清理失败，需完成清理' }
 
 ### 服务返回的正文文件
 
-工具返回文件路径时：保留来源 URL 与对应文件的关系，使用当前可用的执行工具在容器内只读检索和按行读取。示例中的路径应替换为**本次实际返回并核验的路径**：
+本分支搜索、网页/PDF 落盘返回 `result_ref`。将引用原样传给当前发现的 `cleanfetch.result_ref`，从 `offset:0` 开始；读取 `content`，按 `next_offset` 续读到所需范围或 `eof:true`。偏移计 Unicode 码点，默认/0 页长 4096，上限 8192；JSON text 与 structured content 内容一致。保留来源 URL 与正文的关系；引用是凭据，不作为公开来源链接或永久引用。
+
+引用跨 MCP 会话有效，`project` 仅统计标签，鉴权沿用服务端认证。只接受服务生成文件的引用，不接受路径或 URL。搜索引用最多 7 天，普通抓取按 `cleanfetch.file_ttl`（默认 24 小时），以返回过期时间为准。重启、过期、清理或检测到文件身份/大小/修改时间变化时返回 `result_unavailable`，重新调用原工具获取新引用；与 MinerU 的 `task_ref` 不同。结果目录由可信宿主维护，校验不对抗已有文件写权限且刻意保留元数据的修改者。
+
+常规正文读取在 MCP 内完成。旧部署只有路径、没有引用或读取工具时，才在已有授权内按下面方式兼容读取；无法读取则明确证据缺口。示例路径须替换为**本次实际返回并核验的路径**：
 
 ```powershell
 docker exec websearch-mcpserver sed -n '1,100p' '/data/fetchdata/实际返回的文件名.md'
@@ -153,9 +157,11 @@ MSYS_NO_PATHCONV=1 docker exec websearch-mcpserver sed -n '1,100p' '/data/fetchd
 
 缓存是否启用以服务端配置为准，缺省关闭；项目统计标签不改变缓存或检索范围。
 
-本分支网页缓存键包含 query、生效的 time_range 和 fetch_top_n，补抓及摘要沿用同一时间范围；不复用旧版无时间范围的网页缓存，旧记录按原策略清理。上游 v3.7.0 仍缺少网页 time_range。学术键含 query、time_range、engines，但缺少 page，翻页仍可能复用旧结果；学术缓存还不保留 EngineErrors，重复响应可能不再显示原部分失败警告。接口没有 bypass-cache 参数，不清缓存来完成普通查询；严格新鲜度或完整分页按证据缺口补充来源。缓存结果中的临时文件路径仍可能过期。
+本分支网页缓存键包含 query、生效的 time_range 和 fetch_top_n，补抓及摘要沿用同一时间范围；不复用旧版无时间范围的网页缓存，旧记录按原策略清理。上游 v3.7.0 仍缺少网页 time_range。学术键含 query、time_range、engines，但缺少 page，翻页仍可能复用旧结果；学术缓存还不保留 EngineErrors，重复响应可能不再显示原部分失败警告。接口没有 bypass-cache 参数，不清缓存来完成普通查询；严格新鲜度或完整分页按证据缺口补充来源。本分支不持久缓存含临时文件提示的补抓结果，已有此类记录也不复用；普通长搜索缓存命中生成新文件和引用。旧部署的缓存文件路径仍可能过期。
 
 ## 源码依据与验证边界
+
+本分支新增读取契约见仓库 [tool_result.go](../../../mcp/tool_result.go) 和 [MCP 回归测试](../../../mcp/result_delivery_test.go)。协议自动化不代表各宿主已自动选择读取工具；更新部署后仍需真实验收。
 
 - [v3.7.0](https://github.com/daidaiJ/websearch-mcpserver/releases/tag/v3.7.0)、[v3.6.2](https://github.com/daidaiJ/websearch-mcpserver/releases/tag/v3.6.2)、[v3.6.1](https://github.com/daidaiJ/websearch-mcpserver/releases/tag/v3.6.1)、[v3.5.0](https://github.com/daidaiJ/websearch-mcpserver/releases/tag/v3.5.0)。
 - [工具参数/注册](https://github.com/daidaiJ/websearch-mcpserver/blob/v3.7.0/mcp/server.go)、[搜索实际时间与诊断](https://github.com/daidaiJ/websearch-mcpserver/blob/v3.7.0/mcp/tool_search.go)、[搜索落盘](https://github.com/daidaiJ/websearch-mcpserver/blob/v3.7.0/mcp/search_dump.go)。

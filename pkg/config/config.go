@@ -350,7 +350,7 @@ func ClampMaxResults(n int) int {
 // ── CleanFetch 配置 ──
 
 type CleanFetchConfig struct {
-	Enabled        bool   `mapstructure:"enabled"`           // 总开关（默认 false，旧配置不启用）
+	Enabled        bool   `mapstructure:"enabled"`           // URL 抓取开关（默认 false）；cleanfetch 引用读取始终可用
 	FileOutputDir  string `mapstructure:"file_output_dir"`   // 大文本文件输出目录（默认 exe 同目录 fetchdata/）
 	FileTTL        int    `mapstructure:"file_ttl_hours"`    // 文件保留时长（小时），默认 24
 	MaxInlineLines int    `mapstructure:"max_inline_lines"`  // 内联返回最大行数（默认 100）

@@ -94,7 +94,7 @@ func doWebSearch(ctx context.Context, req *mcp.CallToolRequest, query, intent st
 			rec, hitType, err := requestCache.Lookup(webSearchCacheQuery(query, timeRangeMonths, 0), intent, false)
 			if err == nil && rec != nil && !rec.Academic && hitType == "query_only" {
 				results, parseErr := rec.GetRawResults()
-				if parseErr == nil {
+				if parseErr == nil && !hasTransientResultFiles(results) {
 					cacheHit = true
 					resultCount = len(results)
 					results = enrichFetchedTopN(ctx, results, n)
@@ -206,6 +206,10 @@ func webSearchCacheQuery(query string, months, n int) string {
 }
 
 func finishCachedWebSearch(_ context.Context, rec *cache.CacheRecord, hitType, query, intent, cacheQuery string, requestCache *cache.Cache) (*mcp.CallToolResult, bool) {
+	results, parseErr := rec.GetRawResults()
+	if parseErr == nil && hasTransientResultFiles(results) {
+		return nil, false
+	}
 	switch hitType {
 	case "exact_intent":
 		if rec.Summary != "" {
@@ -214,7 +218,6 @@ func finishCachedWebSearch(_ context.Context, rec *cache.CacheRecord, hitType, q
 		}
 		fallthrough
 	case "query_only":
-		results, parseErr := rec.GetRawResults()
 		if parseErr != nil {
 			return nil, false
 		}
@@ -224,7 +227,7 @@ func finishCachedWebSearch(_ context.Context, rec *cache.CacheRecord, hitType, q
 			return nil, false
 		}
 		// 超限落盘与实时路径共用：缓存命中的大体量渲染结果同样转存临时文件
-		if notice, dumped := dumpSearchResultsIfOversize(len(results), ret); dumped {
+		if notice, dumped := dumpSearchResultsIfOversize(results, ret); dumped {
 			ret = notice
 		}
 		if intent != "" && summarizerInst != nil && rec.Summary == "" {
@@ -254,6 +257,10 @@ func asyncSummarize(query, cacheQuery, intent string, results []search.SearchRes
 // ttl 为本次缓存写入的存活时长（按查询时间范围分桶，见 cacheTTLForMonths）；
 // prov 为响应头溯源头（retrieved_at / cache_age_seconds / usage_note）。
 func finishWebSearch(ctx context.Context, req *mcp.CallToolRequest, query, intent, cacheQuery string, results []search.SearchResult, diag *searchcore.SearchDiagnostics, ttl time.Duration, prov provenance, requestCache *cache.Cache) (*mcp.CallToolResult, any, error) {
+	// File notices are transient, including legacy path-only notices; never persist them.
+	if hasTransientResultFiles(results) {
+		requestCache = nil
+	}
 	if intent != "" && summarizerInst != nil {
 		var output string
 		var sumErr error
@@ -271,6 +278,11 @@ func finishWebSearch(ctx context.Context, req *mcp.CallToolRequest, query, inten
 				// 缓存只存干净摘要，失败诊断不落缓存
 				_ = requestCache.Store(cacheQuery, intent, false, results, output, ttl)
 			}
+			for i, result := range results {
+				if strings.Contains(result.Content, "**文件路径**:") {
+					output += "\n\n" + searchcore.FormatMD(i+1, result.Title, result.Url, result.Content)
+				}
+			}
 			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: searchcore.ProvenanceHeader(prov.retrievedAt, prov.cacheAge) + appendDiagnostics(output, diag, len(results))}}}, nil, nil
 		}
 		log.Errf("LLM 摘要失败，回退到原始结果: %v", sumErr)
@@ -280,15 +292,24 @@ func finishWebSearch(ctx context.Context, req *mcp.CallToolRequest, query, inten
 	if err != nil {
 		return nil, nil, err
 	}
-	// 超限落盘（P1-11 移交小项）：响应体恒定，完整结果转存临时文件供 agent 分段读取；
+	// 超限时保留候选预览，完整结果转存临时文件供 MCP 分段读取；
 	// 缓存仍存原始结果，缓存命中路径按同一规则再落盘
-	if notice, dumped := dumpSearchResultsIfOversize(len(results), ret); dumped {
+	if notice, dumped := dumpSearchResultsIfOversize(results, ret); dumped {
 		ret = notice
 	}
 	if requestCache != nil {
 		_ = requestCache.Store(cacheQuery, intent, false, results, "", ttl)
 	}
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: searchcore.ProvenanceHeader(prov.retrievedAt, prov.cacheAge) + appendDiagnostics(ret, diag, len(results))}}}, nil, nil
+}
+
+func hasTransientResultFiles(results []search.SearchResult) bool {
+	for _, result := range results {
+		if strings.Contains(result.Content, "**文件路径**:") {
+			return true
+		}
+	}
+	return false
 }
 
 // cacheTTLForMonths 按查询时间范围分桶缓存 TTL：时间窗越小，内容时效越敏感，
@@ -427,9 +448,7 @@ func formatSavedToFileResult(res *webfetch.Result) string {
 	}
 	fmt.Fprintf(&sb, "正文较长（共 %d 行，%d 字符），已保存到文件\n\n", res.TotalLines, res.TotalChars)
 	fmt.Fprintf(&sb, "**文件路径**: `%s`", res.FilePath)
-	if res.AgentHint != "" {
-		fmt.Fprintf(&sb, "\n\n**读取提示**: %s", res.AgentHint)
-	}
+	fmt.Fprintf(&sb, "\n\n%s", savedResultReadNotice(res))
 	sb.WriteString("\n")
 	return sb.String()
 }
