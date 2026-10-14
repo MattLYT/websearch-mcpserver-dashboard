@@ -176,10 +176,12 @@ func TestWriteNetworksDoNotTrustForwardedHeaders(t *testing.T) {
 		remote, pass string
 		want         int
 	}{
-		{"172.18.0.1:123", "pw", http.StatusAccepted},
+		{"172.18.0.1:123", "pw", http.StatusForbidden},
 		{"172.18.0.1:123", "bad", http.StatusForbidden},
 		{"172.18.0.2:123", "pw", http.StatusForbidden},
 		{"192.168.1.2:123", "pw", http.StatusForbidden},
+		{"127.0.0.1:123", "pw", http.StatusAccepted},
+		{"127.0.0.1:123", "bad", http.StatusForbidden},
 	} {
 		r := httptest.NewRequest(http.MethodPost, "/__admin/api/restart", strings.NewReader(`{"confirm":true}`))
 		r.RemoteAddr = tc.remote

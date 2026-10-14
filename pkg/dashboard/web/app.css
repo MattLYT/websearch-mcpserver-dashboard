@@ -295,10 +295,16 @@ input:focus,select:focus{outline:2px solid color-mix(in srgb,var(--accent) 45%,t
 .provider-help .mode-tip{left:0;width:100%}
 .source-version{display:block;width:96px;max-width:100%;margin:4px auto 0;padding:4px 6px;font-size:12px;color:var(--ink-2)}
 .source-version:disabled{opacity:.55;cursor:not-allowed}
-.settings-toggle{--bs-body-bg:var(--surface);--bs-border-width:1px;--bs-border-color:var(--border-2);display:flex;align-items:center;gap:8px;min-height:32px;cursor:pointer}
-.form-grid .settings-toggle .form-check-input{width:36px;height:18px;flex:0 0 auto;margin:0;padding:0;font-size:18px;cursor:pointer}
-.source-toggle{--bs-body-bg:var(--surface);--bs-border-width:1px;--bs-border-color:var(--border-2);display:flex;align-items:center;justify-content:center;width:36px;min-height:22px;padding:0;margin:0 auto}
-.source-toggle .form-check-input{float:none;flex-shrink:0;margin:0;padding:0;font-size:18px;cursor:pointer}
+.settings-toggle{display:flex;align-items:center;gap:8px;min-height:32px;cursor:pointer}
+.form-check-input{appearance:none;-webkit-appearance:none;width:34px;height:19px;margin:0;flex:0 0 auto;position:relative;border:1px solid var(--border-2);border-radius:999px;background:var(--border);cursor:pointer;transition:background .15s,border-color .15s}
+.form-check-input::after{content:"";position:absolute;left:2px;top:2px;width:13px;height:13px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .15s}
+.form-check-input:checked{background:var(--accent);border-color:var(--accent)}
+.form-check-input:checked::after{transform:translateX(15px)}
+.form-check-input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.form-check-input:disabled{opacity:.55;cursor:not-allowed}
+.form-grid .settings-toggle .form-check-input{width:34px;height:19px;flex:0 0 auto;margin:0;padding:0;cursor:pointer}
+.source-toggle{display:flex;align-items:center;justify-content:center;width:36px;min-height:22px;padding:0;margin:0 auto}
+.source-toggle .form-check-input{float:none;flex-shrink:0;margin:0;padding:0;cursor:pointer}
 .source-toggle:has(input:disabled){cursor:not-allowed}
 .draft-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;min-width:0}
 .draft-actions select{min-width:0;max-width:100%}

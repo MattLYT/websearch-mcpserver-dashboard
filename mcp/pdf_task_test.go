@@ -40,7 +40,7 @@ func TestPDFTaskResultKeepsStatusAndAvailableContent(t *testing.T) {
 			if got != result || got.Content[0].(*mcp.TextContent).Text != content {
 				t.Fatal("discarded completed content")
 			}
-		} else if err != nil || !strings.Contains(got.Content[0].(*mcp.TextContent).Text, "尚无正文") ||
+		} else if err != nil || !got.IsError || !strings.Contains(got.Content[0].(*mcp.TextContent).Text, "尚无正文") ||
 			!strings.Contains(got.Content[0].(*mcp.TextContent).Text, "fallback unavailable") {
 			t.Fatalf("pending state=%+v error=%v", got, err)
 		}

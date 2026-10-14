@@ -60,7 +60,7 @@ func PDFParserHandler(ctx context.Context, req *mcp.CallToolRequest, params *PDF
 			Tool:         "pdf_parser",
 			Provider:     "pdf_pipeline",
 			Query:        params.Path,
-			Success:      err == nil,
+			Success:      err == nil && (resultOut == nil || !resultOut.IsError),
 			Duration:     time.Since(started),
 			ResultCount:  parsedPages,
 			Detail:       parseEngine,
@@ -99,7 +99,8 @@ func PDFParserHandler(ctx context.Context, req *mcp.CallToolRequest, params *PDF
 		result, resumeErr := webfetchInst.ResumeMinerUTask(ctx, params.TaskRef)
 		if errors.As(resumeErr, &pending) {
 			parseEngine = "mineru-task"
-			return textResult("> 任务状态（尚无正文）\n\n" + pending.Error()), nil, nil
+			status, statusErr := pdfTaskResult(nil, pending, resumeErr)
+			return status, nil, statusErr
 		}
 		if resumeErr != nil {
 			return nil, nil, resumeErr
@@ -212,12 +213,13 @@ func pdfTaskResult(result *mcp.CallToolResult, pending *mineru.TaskPendingError,
 			message = err.Error()
 		}
 		result = textResult("> 任务状态（尚无正文）\n\n" + message)
+		result.IsError = true
 		err = nil
 	}
 	result.Meta = mcp.Meta{"websearch/mineru_task": map[string]any{
 		"task_ref": pending.TaskRef, "status": pending.Status, "completed": false,
 	}}
-	return result, nil
+	return result, err
 }
 
 // parseRemotePDFWithCrop 远程 PDF 的本地裁切回退：MinerU 拒绝原文件（页数超限

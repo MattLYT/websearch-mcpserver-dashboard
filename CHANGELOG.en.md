@@ -2,6 +2,25 @@
 
 [English](CHANGELOG.en.md) | [中文](CHANGELOG.md)
 
+## Unreleased
+
+> Credits: the core of this batch comes from PR #18 by [@MattLYT](https://github.com/MattLYT) (Matt.Li); his six feature commits keep their original authorship. Later commits are absorb adaptations (writes stay loopback-only, native CSS switches, pending PDF delivered as `IsError`).
+
+### Added
+- **Source switches and draft settings save** (PR #18, @MattLYT): grouped web/API/academic switches, draft → diff preview → revision-checked write and restart; cache isolated by config generation
+- **Call attribution and unified call log** (PR #18, @MattLYT): SDK client identity plus optional `project` stats label; expandable source attempts and CSV export
+- **Shared retrieval skill** (PR #18, @MattLYT): `skills/websearch-mcp` for evidence checks, PDF path boundaries, and bounded resume
+- **Long-result `result_ref` paging** (PR #18, @MattLYT): oversized bodies are read through `cleanfetch(result_ref, offset, limit)` without a sixth tool
+
+### Fixed
+- **Retrieval failure surfacing and PDF text quality** (PR #18, @MattLYT): all-engine failure is no longer an empty success; optional OpenAlex Bearer; Everything quoting for spaced directories; PDF proxy pins public targets
+- **Time-window and cache isolation** (PR #18, @MattLYT): omitted `time_range` defaults to 3 months, explicit `0` sends no filter; `web:v2` cache keys isolate months; providers no longer mutate shared defaults
+
+### Changed
+- **Writes remain loopback-only** (absorb adaptation): remote `write_allowed_networks` is not taken; the password gate is unchanged
+- **Native CSS variable switches** (absorb adaptation): drop the Bootstrap form-switch subset; switches follow theme `accent`
+- **MinerU pending delivered as a tool error** (absorb adaptation): no-body status sets `IsError=true`, keeps `task_ref`, and is not counted as telemetry success
+
 ## v3.7.0 — 2026-10-10 (Local File Search)
 
 > Branch `feat/file-search-everything`: adds the fifth tool `file_search` (filename/path search over the Everything index) plus the `skills/everything-http-server` enable/hardening guide. The tool is probe-gated (no `enabled` switch) and its search path carries four context guards: directory whitelist, lexical-alignment second-stage filtering, a hard per-page cap, and paging.

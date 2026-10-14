@@ -46,7 +46,7 @@ assert.equal((sourcesPage.match(/<th>启用<\/th>/g) || []).length, 3);
 assert.equal((sourcesPage.match(/<th>最近 20 次<\/th>/g) || []).length, 3);
 assert.equal((sourcesPage.match(/<th(?:\s|>)/g) || []).length, 24);
 assert.doesNotMatch(sourcesPage, /实际冷却|失败构成|成功 \/ 失败|P95|最近观测|<th>额度/);
-assert.match(html, /href="bootstrap-switch.css"/);
+assert.doesNotMatch(html, /bootstrap-switch|cdn\.|unpkg|jsdelivr/i);
 const modeInputs = Array.from(html.matchAll(/<input type="radio" name="mode" value="([^"]+)" data-key="mode">/g), match => match[1]);
 assert.deepEqual(modeInputs,
   ['hybrid', 'engine', 'apipool']);

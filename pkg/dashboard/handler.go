@@ -55,7 +55,8 @@ func IsLoopbackRemote(r *http.Request) bool {
 }
 
 // authorizeWrite 是所有写端点的统一闸门：
-//  1. loopback 或独立 write_allowed_networks；读白名单不会授予写权限；
+//  1. 仅限 loopback —— allowed_networks 放行的远程查看者永远只读；
+//     不信任 X-Forwarded-* / X-Real-IP，也不提供远程写白名单；
 //  2. 管理员口令 —— 必须在 dashboard.yaml 显式配置 dashboard.admin_password
 //     （或 admin_password_sha256），经 X-Admin-Password 头随请求提交。
 //     该口令不在设置页白名单、不写入 secrets 覆盖文件，即 WebUI 无法读取
@@ -358,23 +359,7 @@ func (h *Handler) writeAccess(r *http.Request) (bool, string) {
 	if IsLoopbackRemote(r) {
 		return true, ""
 	}
-	networks, err := h.conf.Dashboard.ParseWriteAllowedNetworks()
-	if err != nil {
-		return false, "写访问白名单配置非法"
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
-	}
-	ip := net.ParseIP(host)
-	if ip != nil {
-		for _, network := range networks {
-			if network.Contains(ip) {
-				return true, ""
-			}
-		}
-	}
-	return false, "当前连接仅有只读权限"
+	return false, "写操作仅限本机 loopback 访问"
 }
 
 func (h *Handler) secrets(w http.ResponseWriter, r *http.Request) {
