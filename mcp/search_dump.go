@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 	"websearch/pkg/config"
 	"websearch/pkg/log"
+	"websearch/pkg/search"
 )
 
 // smartsearch 渲染响应超限落盘（P1-11 移交小项，2026-10-06 用户拍板口径）：
@@ -36,7 +37,7 @@ var searchDumpFileRe = regexp.MustCompile(`^search-\d{8}_\d{6}-[0-9a-f]{8}\.md$`
 // dumpSearchResultsIfOversize 渲染结果超过内联上限时整体落盘，返回替代响应文本
 // （统计 + 文件路径 + 读取提示）。未超限 / 落盘禁用时返回 ("", false)；
 // 写入失败按原样内联返回（fail-open：落盘只是体积保护，不应让搜索整体失败）。
-func dumpSearchResultsIfOversize(resultCount int, rendered string) (string, bool) {
+func dumpSearchResultsIfOversize(results []search.SearchResult, rendered string) (string, bool) {
 	limit, enabled := smartSearchConf.InlineMaxCharsOrDefault()
 	if !enabled || rendered == "" {
 		return "", false
@@ -50,12 +51,28 @@ func dumpSearchResultsIfOversize(resultCount int, rendered string) (string, bool
 		log.Errf("smartsearch 超限落盘失败，回退内联返回: %v", err)
 		return "", false
 	}
+	hint, err := resultFileNotice(path, searchDumpFileTTL)
+	if err != nil {
+		log.Errf("smartsearch 结果引用创建失败，回退内联返回: %v", err)
+		return "", false
+	}
 	log.Infof("smartsearch 渲染结果 %d 字符超过内联上限 %d，已落盘: %s", charCount, limit, path)
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "搜索结果渲染后共 %d 条 / %d 字符，超过内联上限（%d 字符），已整体保存到文件\n\n",
-		resultCount, charCount, limit)
+		len(results), charCount, limit)
+	for i, candidate := range results {
+		snippet := []rune(strings.TrimSpace(candidate.Content))
+		if len(snippet) > 160 {
+			snippet = append(snippet[:160], '.', '.', '.')
+		}
+		fmt.Fprintf(&sb, "%d. %s\n   URL: %s\n", i+1, candidate.Title, candidate.Url)
+		if candidate.Engine != "" {
+			fmt.Fprintf(&sb, "   来源: %s\n", candidate.Engine)
+		}
+		fmt.Fprintf(&sb, "   摘录: %s\n\n", string(snippet))
+	}
 	fmt.Fprintf(&sb, "**文件路径**: `%s`\n\n", path)
-	sb.WriteString("**读取提示**: 使用 read_file 读取该文件获取完整结果（内容较大时可分段读取）。")
+	sb.WriteString(hint)
 	return sb.String(), true
 }
 

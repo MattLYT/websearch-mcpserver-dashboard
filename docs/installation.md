@@ -454,7 +454,7 @@ launchctl list | grep websearch
 
 | 问题 | 排查 |
 |------|------|
-| 启动后工具不可用 | 检查 `mode` 和对应 Key；`cleanfetch` 需 `cleanfetch.enabled: true` |
+| 启动后工具不可用 | 检查 `mode` 和对应 Key；`cleanfetch` 始终注册，URL 抓取需 `cleanfetch.enabled: true` |
 | 学术搜索超时 | 检查 `network` 设置；海外引擎需代理（默认自动检测系统代理） |
 | 端口被占用 | `status` 查看是否已运行，或 `kill` 后重启 |
 | 缓存结果过旧 | 缓存 6h 自动过期，或删除 `cache.storage_path` 文件重启 |

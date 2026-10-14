@@ -1,7 +1,7 @@
 # 开发者指南 — 包结构、接口与关键链路
 
 > 面向本仓库的日常开发与 AI 智能体协作。English version: [developers.en.md](developers.en.md)包结构的权威描述同步维护在 [AGENTS.md](../AGENTS.md)；
-> 本文补充**每个包的接口职责**、**「我要改 X 该动哪个包」**和**五个 MCP 工具的调用链**。
+> 本文补充**每个包的接口职责**、**「我要改 X 该动哪个包」**和**MCP 工具的调用链**。
 
 ## 1. 包地图与依赖方向
 
@@ -27,7 +27,7 @@ mcp/ searxng/ ──► pkg/search（组合根）；pkg/cache  pkg/llm ──►
 | `cmd/` | 入口：配置加载、平台初始化（Windows 代理检测等） | `main` |
 | `server/` | HTTP 服务生命周期、路由、优雅关停 | `Run`、关机顺序引用 `mcp.GetWebFetch/GetCache` |
 | `searxng/` | SearXNG 兼容端点，复用同一套引擎组 | `mcp.GetSearchGroup()` |
-| `mcp/` | MCP 协议层：5 个工具的注册、schema、handler、缓存与摘要编排 | `server.go registerTools`、`tool.go`（参数/装配）、`tool_search.go`、`tool_academic.go`、`tool_cleanfetch.go`、`tool_pdf.go`、`tool_filesearch.go`、`tool_summarize.go`、`security.go`（SSRF/HEAD 预检 + 重定向逐跳复查）、`options.go` 按需装配（webfetch 支持 fetch_top_n 惰性初始化、everything 接入时惰性探测门控） |
+| `mcp/` | MCP 协议层：工具注册、schema、handler、缓存与摘要编排 | `server.go registerTools`、`tool.go`（参数/装配）、`tool_search.go`、`tool_academic.go`、`tool_cleanfetch.go`、`tool_pdf.go`、`tool_result.go`（正文引用/读取）、`tool_filesearch.go`、`tool_summarize.go`、`security.go`（SSRF/HEAD 预检 + 重定向逐跳复查）、`options.go` 按需装配（webfetch 支持 fetch_top_n 惰性初始化、everything 接入时惰性探测门控） |
 
 ### pkg/search — 搜索编排（分 7 个子包）
 
@@ -82,7 +82,7 @@ mcp/ searxng/ ──► pkg/search（组合根）；pkg/cache  pkg/llm ──►
 | 新增本地检索能力 / 改过滤策略 | `pkg/fetch/everything/`（HTTP 客户端 + ScopeQuery 白名单 + EnhanceItems 二次过滤）+ `mcp/tool_filesearch.go` + 配置 `everything.*` |
 | 用户问怎么启用/加固 Everything HTTP Server | `skills/everything-http-server/SKILL.md`（分版本流程 + 陷阱 + 验证 + 加固清单），agent 走 `/everything-http-server` |
 
-## 4. 五个工具的关键链路
+## 4. 工具的关键链路
 
 ### smartsearch（网页搜索）
 
@@ -152,6 +152,10 @@ mcp/tool_filesearch.go FileSearch
             ├► 噪声目录降权（everything.noise_dirs，组件级匹配）
             └► everything.min_alignment 阈值过滤 → 过滤后按页切片（单页 ≤ 20 条，跨页不重复不跳条），逐条一行输出
 ```
+
+### cleanfetch（服务生成正文读取）
+
+`mcp/tool_result.go` 为服务生成文件签发进程内随机引用；搜索落盘、网页/PDF 格式化共用入口。`cleanfetch` 按 Unicode 字符分页，校验有效期、文件身份与改动，沿用 MCP 鉴权。工具快照、能力资源及控制中心同步状态，遥测只记工具元数据。契约与验收见 [长结果交付](result-delivery.md)。
 
 ## 5. 网络集成测试的门控（internal/testenv）
 

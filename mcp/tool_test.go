@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -323,15 +325,19 @@ func TestEnrichTopN_SavedToFileNotFailure(t *testing.T) {
 
 // TestFormatSavedToFileResult 验证落盘格式化：标题 + 统计 + 文件路径 + 读取提示。
 func TestFormatSavedToFileResult(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.md")
+	if err := os.WriteFile(path, []byte("Fixed public fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	r := formatSavedToFileResult(&webfetch.Result{
 		Title:      "Big Doc",
 		Mode:       "saved_to_file",
-		FilePath:   "/tmp/webfetch/test.md",
+		FilePath:   path,
 		TotalLines: 500,
 		TotalChars: 50000,
 		AgentHint:  "Use read_file to read",
 	})
-	for _, want := range []string{"Big Doc", "500 行", "50000", "/tmp/webfetch/test.md", "读取提示"} {
+	for _, want := range []string{"Big Doc", "500 行", "50000", path, "读取提示", "cleanfetch"} {
 		if !strings.Contains(r, want) {
 			t.Fatalf("formatted output should contain %q, got %q", want, r)
 		}

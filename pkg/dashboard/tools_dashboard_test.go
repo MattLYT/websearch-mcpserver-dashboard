@@ -59,6 +59,15 @@ func TestOverviewListsAllMCPToolsWithoutObservedCall(t *testing.T) {
 	}
 }
 
+func TestCleanFetchViewKeepsReadsEnabled(t *testing.T) {
+	tools := mcpToolCatalog(config.Config{})
+	for _, tool := range tools {
+		if tool.Name == "cleanfetch" && (!tool.Enabled || tool.FetchEnabled == nil || *tool.FetchEnabled) {
+			t.Fatalf("saved reads and URL fetching must have distinct status: %+v", tool)
+		}
+	}
+}
+
 func TestFileToolViewReportsBoundaryWithoutSensitivePaths(t *testing.T) {
 	conf := config.Config{}
 	conf.Everything.URL = "http://private-endpoint:9999"

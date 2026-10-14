@@ -95,15 +95,16 @@ func registerTools(server *mcp.Server, conf config.Config) {
 		setState("academicsearch", "unavailable")
 	}
 
-	// ── 注册 cleanfetch 工具（需显式启用） ──
-	if conf.CleanFetch.Enabled {
-		mcp.AddTool(server, &mcp.Tool{
-			Name:        "cleanfetch",
-			Description: "网页内容抓取工具，获取指定 URL 的干净 Markdown 内容。可用 urls 批量抓取（与 url 合并去重，最多 5 个），单条失败不影响其它。适用边界：抓取已知 URL 的正文；发现新来源请先用 smartsearch（本工具不做检索）。",
-		}, CleanFetch)
-		log.Info("Available tool: cleanfetch")
-		setState("cleanfetch", "registered")
-	}
+	// Saved-body reads remain available even when URL fetching is disabled.
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "cleanfetch",
+		Description: "正文获取工具。url/urls 抓取网页 Markdown（合并去重最多 5 个）；或传原工具返回的 result_ref 分段读取已保存的搜索、网页或 PDF 正文，返回 content、next_offset、eof，不重新请求来源。两种模式互斥；offset/limit 仅用于引用读取。始终注册，cleanfetch.enabled 仅控制 URL 抓取。发现新来源请先用 smartsearch。",
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, DestructiveHint: new(bool)},
+	}, func(ctx context.Context, req *mcp.CallToolRequest, params *CleanFetchParams) (*mcp.CallToolResult, any, error) {
+		return cleanFetch(ctx, req, params, conf.CleanFetch.Enabled)
+	})
+	log.Info("Available tool: cleanfetch")
+	setState("cleanfetch", "registered")
 
 	// ── 注册 file_search 工具（接入时探测通过才暴露，见 ensureEverything） ──
 	if ensureEverything() {

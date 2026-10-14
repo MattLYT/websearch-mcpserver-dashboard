@@ -287,11 +287,11 @@ cache:
 
 # ==============================================
 # 增强型网页抓取（基于 go-webfetch）
-# 默认关闭，需显式 enabled: true 才会启用
+# URL 抓取默认关闭；cleanfetch 始终注册，result_ref 正文读取不受此开关限制
 # 启用后无需代理即可抓取网页，失败时回退到 Jina Reader（需代理）
 # ==============================================
 cleanfetch:
-  enabled: false            # 总开关（默认 false，旧配置不启用）；smartsearch 的 fetch_top_n 不受此开关约束，会按当前配置惰性初始化 webfetch
+  enabled: false            # 仅控制 URL 抓取；result_ref 读取始终可用，smartsearch.fetch_top_n 不受约束
   file_output_dir: ""       # 大文本文件输出目录（默认 exe 同目录 fetchdata/）
   file_ttl_hours: 24        # 临时文件保留时长（小时），默认 24
   max_inline_lines: 100     # 内联返回最大行数，超过则存文件（默认 100）

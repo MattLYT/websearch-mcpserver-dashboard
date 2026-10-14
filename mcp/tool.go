@@ -50,8 +50,11 @@ type AcademicSearchParams struct {
 // CleanFetchParams cleanfetch 工具参数。
 type CleanFetchParams struct {
 	projectParams
-	URL  string   `json:"url" jsonschema:"description,要抓取的网页 URL，例如 'https://example.com/article'"`
-	URLs []string `json:"urls,omitempty" jsonschema:"description,可选批量抓取：与 url 合并去重后最多 5 个。每条独立预检与抓取，单条失败不影响其它，结果按 URL 分节返回"`
+	URL       string   `json:"url,omitempty" jsonschema:"description,要抓取的网页 URL，例如 'https://example.com/article'；不能与 result_ref 混用"`
+	URLs      []string `json:"urls,omitempty" jsonschema:"description,可选批量抓取：与 url 合并去重后最多 5 个。每条独立预检与抓取，单条失败不影响其它，结果按 URL 分节返回"`
+	ResultRef string   `json:"result_ref,omitempty" jsonschema:"description,读取本服务已保存正文；仅接受原工具返回的 result_ref，不接受路径或 URL；与 url/urls 互斥"`
+	Offset    *int64   `json:"offset,omitempty" jsonschema:"description,仅用于 result_ref：从 0 开始的 Unicode 字符偏移，续读使用 next_offset"`
+	Limit     *int     `json:"limit,omitempty" jsonschema:"description,仅用于 result_ref：每段字符数，省略或 0 为 4096，上限 8192"`
 }
 
 // maxBatchFetchURLs 单次批量抓取的 URL 上限。

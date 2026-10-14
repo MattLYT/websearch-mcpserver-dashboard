@@ -26,16 +26,16 @@
 
 ## 架构一览
 
-分层设计：客户端面对 5 个 MCP 工具；引擎组由 `mode` 组装；评分、缓存、代理、抓取都在本进程内完成，查询不会经过第三方聚合服务。
+分层设计：客户端最多面对 5 个 MCP 工具；引擎组由 `mode` 组装；评分、缓存、代理、抓取都在本进程内完成，查询不会经过第三方聚合服务。
 
 <p align="center">
-  <img src="docs/images/architecture.png" alt="系统组成架构：接入层、协议层（5 个工具与 dashboard）、编排层、8 个通用引擎与 9 个学术引擎、支撑组件" width="900">
+  <img src="docs/images/architecture.png" alt="系统组成架构：接入层、检索协议层与 dashboard、编排层、8 个通用引擎与 9 个学术引擎、支撑组件" width="900">
 </p>
 
 | 层 | 做什么 |
 |----|--------|
 | **接入** | Claude Code / Qwen Code / Cursor / HTTP API / 嵌入 Go 模块 |
-| **协议** | `/mcp` 五个工具 · `/searxng/search` 兼容 LiteLLM · `/__admin` 进程管理 · `/dashboard` 可选本机控制台 |
+| **协议** | `/mcp` 最多五个工具 · `/searxng/search` 兼容 LiteLLM · `/__admin` 进程管理 · `/dashboard` 可选本机控制台 |
 | **编排** | `factory` / `mode` 组装 · `hybrid` / `apipool` · `enhance`（RRF / Boost / MMR） |
 | **引擎** | 通用：百度网页 / 千帆 / Bing / DDG / Tavily / Exa / AnySearch / 豆包；学术 9 源并行 |
 | **支撑** | SQLite 缓存、系统代理自动检测、webfetch（SSRF 防护）、MinerU、LLM 流式摘要、Everything |
@@ -46,7 +46,7 @@
 
 ## 面向 LLM 的工具链
 
-五个工具覆盖检索工作流，结果互相衔接，一次配置全链路可用：
+五个检索工具互相衔接；已保存的长搜索、网页/PDF 正文通过 `cleanfetch` 分段读回，无需客户端访问容器文件。读取从 `offset=0` 开始，按 `next_offset` 续读到 `eof=true`。
 
 <p align="center">
   <img src="docs/images/toolchain.png" alt="smartsearch → academicsearch → cleanfetch → pdf_parser 工具链，以及 file_search 本地文件检索" width="900">
@@ -61,7 +61,7 @@
 | 零 Key 搜索 | `engine` 模式内置百度网页搜索 + Bing 并发，无需任何 API Key |
 | 多引擎融合 | 多种搜索模式、8 个通用引擎 + 9 个学术引擎，主引擎失败自动回退 |
 | 相关性评分 | RRF 融合排名 + 词汇对齐 / 域名品质 / 共识 / 权威 / 时效加分，低分自动裁剪；MMR 打散转载 / 镜像 |
-| 响应透明 | 失败清单结构化透出（引擎 / 失败类型 / 原因），空结果可归因；结果日期带 `date_source` 来源注记与响应头溯源头；超限响应整体落盘（零丢失） |
+| 响应透明 | 失败清单、日期与检索溯源；超限搜索保留候选预览，完整结果落盘后提供 `result_ref`，通过 `cleanfetch` 的引用读取模式分段读取 |
 | 学术搜索 | 9 大学术引擎并行，按引用数 / 期刊权威 / PDF 可用性 / 新鲜度评分；DOI 跨引擎去重 |
 | 网页抓取 | `cleanfetch` 内置 SSRF / DNS rebinding 防护与超大文件预检，失败回退 Jina Reader |
 | PDF 解析 | 本地 PDF 文本优先提取，扫描件可回退 MinerU OCR；远程 MinerU 返回含图片 ZIP 地址；原文件超出单任务上限（默认 600 页）时本地 qpdf 裁切所选页，可配置自动分批与单次页数预算后分批上传；MinerU 等待可调，超时保留状态与任务引用，可续查原任务 |
@@ -115,9 +115,9 @@ LLM 需要联网搜索，但现成的 MCP 搜索方案不能满足我的偏好�
 
 **丰简由人** — 同一份配置，`mode` 从 `engine`（零配置）到 `hybrid`（全引擎）渐进式选择复杂度；零配置用户和重度用户各取所需，不为复杂度买单。
 
-**解耦可组合** — 引擎、模式、工具互不耦合：`mode` 决定引擎组，4 个联网工具各自 `enabled` 开关（`file_search` 由探测门控），Key 可选（`sk_list` 多 Key 轮询）。配置驱动一切（per-engine 过滤、评分阈值、MMR、屏蔽站点、限流），全部可调，不写死。
+**解耦可组合** — 引擎、模式、工具互不耦合：`mode` 决定引擎组，联网能力按配置开关控制（`cleanfetch` 始终注册，开关只控制 URL 抓取；`file_search` 由探测门控），Key 可选（`sk_list` 多 Key 轮询）。配置驱动一切（per-engine 过滤、评分阈值、MMR、屏蔽站点、限流），全部可调，不写死。
 
-**面向 LLM 的完整工具链** — 5 个工具覆盖检索工作流：`smartsearch` → `academicsearch` → `cleanfetch` → `pdf_parser` → `file_search`（Windows + Everything，探测通过自动暴露），结果互相衔接，一次配置全链路可用。
+**面向 LLM 的完整工具链** — 5 个检索工具覆盖网页、论文、PDF 和本地文件（`file_search` 需 Windows + Everything，探测通过自动暴露）；`cleanfetch` 的引用读取模式负责已保存正文的 MCP 交付。
 
 **场景化优化** — 针对真实使用场景：学术搜索（9 引擎 + 引用 / 期刊 / PDF 评分）、国内网络（直连 + 系统代理自动检测）、扫描件 PDF（MinerU OCR 回退）、时效性查询（`time_range`）。网页检索省略时间为 3 个月，显式 0 不发送时间筛选；缓存按时间窗口隔离，日期精度取决于来源。
 
@@ -180,7 +180,7 @@ autostart.vbs
 
 | 页面 | 能看到什么 |
 |------|------------|
-| **总览** | KPI（成功调用含总数与缓存命中 / 失败 / 平均耗时）、系统状态（含熔断中数量）、运行配置、五个工具模块的观测状态、客户端用量归组 |
+| **总览** | KPI（成功调用含总数与缓存命中 / 失败 / 平均耗时）、系统状态（含熔断中数量）、运行配置、工具模块的观测状态、客户端用量归组 |
 | **事件** | Provider 事件流（最近 20 条，独立页）：时间 / 来源 / 状态 / 耗时 / 结果数 / 主题语言 / 关键词 / 错误摘要 |
 | **搜索源** | 每个来源的健康、最近 20 次结果、失败构成（如 `解析失败 ×4`）、成功率、平均 / P95 延迟、额度、最近错误与熔断倒计时 |
 | **调用记录** | 工具与来源分列；可按层级 / 状态 / 工具 / 来源 / 错误类型筛选；工具行可点 request id 展开这次调用的来源链 |

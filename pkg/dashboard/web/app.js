@@ -15,7 +15,7 @@ const ERROR_KINDS = {
 const SYSTEM = { healthy: '运行正常', degraded: '部分降级', down: '部分异常', waiting: '等待真实调用' };
 const DOT = { healthy: 'healthy', degraded: 'degraded', down: 'down', unknown: 'unknown' };
 const DISPLAY = {
-  smartsearch: '智能搜索', academicsearch: '学术检索', cleanfetch: '网页抓取', pdf_parser: 'PDF 解析', file_search: '本地文件检索',
+  smartsearch: '智能搜索', academicsearch: '学术检索', cleanfetch: '正文获取', pdf_parser: 'PDF 解析', file_search: '本地文件检索',
   anysearch: 'AnySearch', baidu: '百度千帆', tavily: 'Tavily', exa: 'Exa', doubao: '豆包搜索',
   baidu_web: '百度网页', bing: 'Bing', google: 'Google', duckduckgo: 'DuckDuckGo',
   arxiv: 'arXiv', crossref: 'Crossref', openalex: 'OpenAlex', pubmed: 'PubMed', europepmc: 'Europe PMC',
@@ -367,10 +367,11 @@ function renderMCPTools() {
       : '<small>尚未产生工具层事件</small>';
     const pdf = tool.pdf ? `<small class="pdf-params">默认页数 ${esc(tool.pdf.max_pages)} · 单任务页限 ${esc(tool.pdf.mineru_page_limit)} · 批大小 ${esc(tool.pdf.mineru_page_batch_size)} · 调用预算 ${esc(tool.pdf.mineru_page_budget)} · OCR ${tool.pdf.ocr_enabled ? '开' : '关'}${tool.pdf.page_progress === 'not_collected' ? ' · 页进度未采集' : ''}</small>` : '';
     const file = tool.file ? `<small class="pdf-params">白名单根目录 ${esc(tool.file.allowed_root_count)} · ${tool.file.whitelist_enforced ? '白名单限制' : '目录未限制'}${tool.file.path_metadata_only ? ' · 仅路径/元数据' : ''}</small>` : '';
+    const fetch = typeof tool.fetch_enabled === 'boolean' ? `<small>已保存正文读取可用 · URL 抓取${tool.fetch_enabled ? '开' : '关'}</small>` : '';
     return `<div class="tool-row"><span class="tool-head">${dot(dotClass)}` +
       `<b>${esc(tool.label || displayName(tool.name))}</b><small class="mono">${esc(tool.name)}</small></span>` +
       `<span class="tool-state">${esc(stateLabel)}</span>` +
-      `<p class="tool-stats">${stats}${pdf}${file}</p></div>`;
+      `<p class="tool-stats">${stats}${pdf}${file}${fetch}</p></div>`;
   }).join('');
 }
 

@@ -160,7 +160,7 @@ MCP 客户端通过此端点完成协议握手、工具列表获取和工具调�
 |--------|------|------|
 | `smartsearch` | 网络检索 | `query`（必填）、`intent`（可选，LLM 启用时可用）、`time_range`（可选，月；省略/null 为 3，显式 0 不发送时间筛选，负数拒绝；上游粒度不同）、`fetch_top_n`（可选：不传与旧版一致只返回自带内容（服务端默认 0 可配），传 0 只要标题摘要和 URL，传 1-5 获取前 N 条页面原文——API 引擎走快速路径、网页引擎内部抓取，反爬拦截会显式标注） |
 | `academicsearch` | 学术论文检索（arXiv / Crossref / OpenAlex / PubMed / Europe PMC / DBLP / DOAJ 等） | `query`（必填；也可直接传 DOI 或 arXiv id 走单篇精确查询，忽略 `time_range`/`page`，仍遵守已启用来源与指定 `engines`）、`engines`（可选）、`time_range`（可选：`year`/`month`/`week`/`day`）、`page`（可选） |
-| `cleanfetch` | 网页内容抓取，返回 Markdown | `url`（与 `urls` 至少一者）、`urls`（可选批量，合并去重最多 5 个） — 需配置 `cleanfetch.enabled` |
+| `cleanfetch` | URL 抓取返回 Markdown，或读取已保存正文；始终注册 | `url`/`urls`（抓取，合并去重最多 5 个，需 `cleanfetch.enabled=true`）；或 `result_ref`（引用读取）及 `offset`（默认 0）、`limit`（默认/0 为 4096，上限 8192）；两种模式互斥，分页字段仅用于引用模式 |
 | `pdf_parser` | PDF 解析，支持 MinerU AI 增强（表格/公式/多栏识别） | `path`（新解析必填，本地路径或远程 URL；与 `task_ref` 互斥）、`task_ref`（续查原 MinerU 任务）、`wait_seconds`（0-1800，每任务新解析默认 300，续查默认 0）、`pages`（可选页码范围，如 1-10；单个区间宽度上限 1000 页） — 需配置 `pdf_parser.enabled`，可选 `mineru_token`；省略 pages 时受 `max_pages`（默认 20）约束。请求页码超出单任务上限（默认 600，`mineru_page_limit` 可调）或 MinerU 拒绝原件页数／URL 时，本地裁切所选页再上传（`mineru_page_batch_size` 可开启自动分批，`mineru_page_budget` 控制单次页数预算；分批进度经 MCP progress notification 实时推送）；精准 API 返回含图片 ZIP 地址，轻量 API 单次上限 20 页 |
 | `file_search` | 本地文件快速检索（Everything 索引，只读，Windows 专属） | `query`（必填，Everything 语法）、`folder`（可选目录限定，接受 Git Bash `/d/code/ai` 风格）、`match_case`/`whole_word`/`match_regex`/`match_diacritics`（可选原生过滤）、`max_results`（默认 10，硬上限 20）、`page`（页码，默认 1）、`sort`/`descending`、`exclude`（可选 NOT 排除项）、`min_alignment`（可选，覆盖服务端对齐阈值）、`time_format`（`datetime`/`iso`/`filetime`） — 无 enabled 开关：首个 MCP 客户端接入时探测 `everything.url`，通过即注册，探测不过不暴露；仅 Windows，Linux 发行版不建议启用（除非 WSL 指向 Windows 宿主）；`everything.roots` 白名单强制限定检索范围，二次过滤（对齐重排/噪声降权/阈值）防止弱匹配打爆上下文 |
 
@@ -176,8 +176,16 @@ MCP 客户端通过此端点完成协议握手、工具列表获取和工具调�
 
 - 响应末尾附结构化失败清单（引擎 / 失败类型 `timeout`·`rate_limit`·`challenge`·`off_topic`·`error` / 短原因），空结果可归因，失败清单不受任何预算或落盘裁剪；结果稀疏（≤3 条）时附过滤诊断
 - 结果日期带 `date_source` 三态来源注记，响应头含 `retrieved_at` / `cache_age_seconds` 与固定 `usage_note`
-- 渲染结果超 `smartsearch.inline_max_chars`（默认 32768）时整体落盘 `fetchdata/search-*.md`，响应内保留溯源头、统计与文件路径
+- 渲染结果超 `smartsearch.inline_max_chars`（默认 32768）时整体落盘 `fetchdata/search-*.md`，响应内保留溯源头、统计、候选标题/URL/来源/短摘录与 `result_ref`。网页/PDF 落盘同样提供引用；常规读取通过 MCP，无需客户端访问容器文件
 - 同一端点挂载只读 Resource `search://capabilities` 与 `search://health`（不占工具槽位、不带密钥，`mcp_resources` 可关）
+
+#### 长结果读取
+
+`cleanfetch` 始终注册；`cleanfetch.enabled=false` 只关闭 URL 抓取，引用读取仍可用。`result_ref` 与 `url`/`urls` 互斥；URL 模式拒绝 `offset`/`limit`，原 URL/批量调用保持兼容。
+
+将返回的 `result_ref` 原样作为 `cleanfetch.result_ref`，从 `offset=0` 开始。输出为 `ref`、`content`、`offset`、`next_offset`、`eof`，同时提供 JSON text content 与 structured content。继续使用 `next_offset`，直到 `eof=true`；偏移计 Unicode 码点，不是字节或行号。越界偏移、负数和 `limit>8192` 报错。
+
+引用是进程内随机能力凭据，与 MCP 会话和 `project` 无关；沿用端点鉴权，仅授予所引用的服务生成文件。搜索引用最长 7 天，普通抓取沿用 `cleanfetch.file_ttl`（默认 24 小时），实际过期时间随提示返回。重启、清理或检测到文件身份/大小/修改时间变化时返回 `result_unavailable`，重新调用原工具取得新引用。结果目录需由可信宿主维护；校验不对抗已有文件写权限且刻意保留元数据的修改者。含临时文件提示的补抓结果不持久缓存，已有此类缓存也不复用；普通长搜索缓存命中时重新生成文件和引用。摘要成功时仍保留已保存正文的引用。引用不是永久引用或路径，与 MinerU 的 `task_ref` 不同。
 
 #### 客户端配置示例
 

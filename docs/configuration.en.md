@@ -266,7 +266,7 @@ jina:
 
 # Enhanced web fetch (disabled by default)
 cleanfetch:
-  enabled: false            # Must be explicitly true for the cleanfetch tool; smartsearch's fetch_top_n is not gated by this switch (webfetch lazily initializes from current config)
+  enabled: false            # Only enables URL fetching; cleanfetch is always registered, saved-result reads and fetch_top_n are not gated
   file_output_dir: ""       # Default: exe sibling dir fetchdata/
   file_ttl_hours: 24        # Temp file retention (hours)
   max_inline_lines: 100     # Lines above this threshold stored to file
@@ -536,7 +536,7 @@ dashboard:
 | `proxy.enabled` | unset | Auto-detects system proxy when not set; explicit false disables; explicit true uses endpoint |
 | `proxy.endpoint` | `http://127.0.0.1:7897` | Only effective when `enabled: true` |
 | `proxy.api_providers` | false | Whether upstream API-provider requests (Qianfan/Tavily/Exa/AnySearch/Doubao/LLM) use the proxy; false forces direct connections immune to proxy env vars |
-| `cleanfetch.enabled` | false | Old configs don't enable; must be explicit. Only gates the cleanfetch tool — `fetch_top_n` is not gated (webfetch lazily initializes) |
+| `cleanfetch.enabled` | false | Only gates URL fetching; cleanfetch is always registered, result_ref reads and `fetch_top_n` are not gated |
 | `cleanfetch.file_ttl_hours` | 24 | |
 | `cleanfetch.max_inline_lines` | 100 | |
 | `cleanfetch.timeout_sec` | 30 | |

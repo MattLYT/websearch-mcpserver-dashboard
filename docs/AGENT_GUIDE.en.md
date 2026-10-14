@@ -2,7 +2,7 @@
 
 English | [中文](AGENT_GUIDE.md)
 
-MCP search server in Go: 4 tools (`smartsearch` / `academicsearch` / `cleanfetch` / `pdf_parser`), zero API key needed (`engine` mode), HTTP daemon or stdio. Full human-readable version: [HUMAN_GUIDE.en.md](HUMAN_GUIDE.en.md).
+MCP search server in Go: up to 5 tools (`smartsearch` / `academicsearch` / `cleanfetch` / `pdf_parser` / `file_search`), zero API key needed (`engine` mode), HTTP daemon or stdio. Full human-readable version: [HUMAN_GUIDE.en.md](HUMAN_GUIDE.en.md).
 
 > **Anti-patterns**: ① Do not `cleanfetch` a search results page to "search" — that is `smartsearch`'s job; ② If you already hold a DOI / arXiv id, do not re-search by title — pass the id directly as `academicsearch`'s `query` for exact lookup; ③ Do not pass a web page URL to `pdf_parser` — pages go through `cleanfetch`.
 
@@ -36,7 +36,7 @@ Deployment details (Docker / systemd / launchd / hooks auto start-stop / per-cli
 
 ## Tool quick reference
 
-Registration conditions: `smartsearch` needs `bing.enabled=true`; `academicsearch` needs `academic.enabled=true`; `cleanfetch` / `pdf_parser` each need their own `enabled=true`. Missing tool → check this first.
+Registration conditions: `smartsearch` needs `bing.enabled=true`; `academicsearch` needs `academic.enabled=true`; `cleanfetch` is always registered (its switch only gates URL fetching); `pdf_parser` needs `enabled=true`. Missing tool → check this first.
 
 ### smartsearch
 
@@ -58,7 +58,7 @@ Registration conditions: `smartsearch` needs `bing.enabled=true`; `academicsearc
 
 Once a result carries `pdf_url`, pass it straight to `pdf_parser` for the full text — do not re-search by title.
 
-### cleanfetch
+### cleanfetch - URL Fetch
 
 | Param | Req | Notes |
 |-------|-----|-------|
@@ -73,6 +73,10 @@ Once a result carries `pdf_url`, pass it straight to `pdf_parser` for the full t
 | `pages` | | Page ranges (1-based), e.g. `1-10`, `1,3,5-7`; omitted = first 20 pages only, with a continuation hint |
 
 When the source exceeds MinerU's page limit or the source URL is rejected, selected pages are cropped locally and uploaded automatically (`mineru_page_batch_size` for batching, `mineru_page_budget` for a per-call quota), with per-batch progress streamed via MCP progress notifications; explicit page counts are capped by `max_pages` (default 20)
+
+### cleanfetch - Saved-body Reads
+
+Pass the returned `result_ref` to `cleanfetch(result_ref, offset=0)`. Read `content` and continue with `next_offset` until `eof=true`. Default/0 page size is 4096 Unicode code points, maximum 8192. No client container access is needed. Repeat the original tool call when unavailable; expiry and file-check boundaries are in the [API](api.en.md#reading-long-results).
 
 ### file_search
 

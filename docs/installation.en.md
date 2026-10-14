@@ -455,7 +455,7 @@ launchctl list | grep websearch
 
 | Problem | Solution |
 |---------|----------|
-| Tools unavailable after start | Check `mode` and corresponding keys; `cleanfetch` needs `cleanfetch.enabled: true` |
+| Tools unavailable after start | Check `mode` and corresponding keys; `cleanfetch` is always registered; URL fetching requires `cleanfetch.enabled: true` |
 | Academic search timeout | Check `network` setting; overseas engines need proxy (auto-detected by default) |
 | Port in use | `status` to check if already running, or `kill` then restart |
 | Stale cache results | Cache auto-expires after 6h, or delete `cache.storage_path` file and restart |

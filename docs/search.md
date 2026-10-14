@@ -142,7 +142,7 @@ smartsearch:
 
 **结果来源注记**：结果日期带 `date_source` 三态——`structured`（引擎 API 给出）/ `snippet`（摘要文本解析，弱）/ `undated`；学术结果同口径。响应头带 `retrieved_at`（检索时间，缓存命中时为原检索时间）与 `cache_age_seconds`（缓存年龄），并附固定 `usage_note`：snippet 日期仅用于定位来源，引用日期、金额、版本前请打开原页核对。
 
-**响应超限落盘**：渲染结果超 `smartsearch.inline_max_chars`（默认 32768，负数 = 禁用）时整体写入 `fetchdata/search-*.md`（惰性清理 7 天旧文件），响应内保留溯源头、条数/字符统计、文件路径与分段读取提示，零丢失；失败清单永远保留在响应内。实时与缓存命中路径共用。
+**响应超限落盘**：渲染结果超 `smartsearch.inline_max_chars`（默认 32768，负数 = 禁用）时整体写入 `fetchdata/search-*.md`（惰性清理 7 天旧文件），响应保留溯源头、统计、每条候选的标题/URL/来源/最多 160 字符摘录、文件路径和 `result_ref`；完整正文用 `cleanfetch` 分段读取，失败清单保留在初始响应。实时与普通缓存命中路径共用，缓存命中生成新引用。含临时文件提示的补抓结果不进入持久缓存，也不复用旧记录。
 
 **freshness 感知缓存 TTL**：smartsearch `time_range` ≤1 月 → 24h，其余默认 6h；学术 `time_range` 分桶 day → 1h / week → 6h（默认）/ month → 24h。时效敏感查询不再命中陈旧缓存。
 
@@ -233,7 +233,7 @@ apipool:
 
 ## MCP 工具
 
-> 工具注册条件：`smartsearch` 需 `bing.enabled=true`；`academicsearch` 需 `academic.enabled=true`；`cleanfetch` 需 `cleanfetch.enabled=true`；`pdf_parser` 需 `pdf_parser.enabled=true`；`file_search` 无开关——首个 MCP 客户端接入时探测 Everything HTTP Server，通过即注册，探测不过不暴露。
+> 工具注册条件：`smartsearch` 需 `bing.enabled=true`；`academicsearch` 需 `academic.enabled=true`；`cleanfetch` 始终注册，`cleanfetch.enabled` 仅控制 URL 抓取；`pdf_parser` 需 `pdf_parser.enabled=true`；`file_search` 无开关——首个 MCP 客户端接入时探测 Everything HTTP Server，通过即注册，探测不过不暴露。
 
 ### `smartsearch` — 通用网络检索
 
@@ -279,10 +279,13 @@ apipool:
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `url` | string | 与 `urls` 至少一者 | 网页 URL |
-| `urls` | string[] | 与 `url` 至少一者 | 批量抓取，与 `url` 合并去重后最多 5 个 |
+| `url` | string | URL 模式与 `urls` 至少一者 | 网页 URL，与 `result_ref` 互斥 |
+| `urls` | string[] | URL 模式与 `url` 至少一者 | 批量抓取，与 `url` 合并去重后最多 5 个 |
+| `result_ref` | string | 引用模式必填 | 原工具返回的引用，与 `url`/`urls` 互斥 |
+| `offset` | integer | 否 | 仅引用模式，Unicode 偏移，默认 0 |
+| `limit` | integer | 否 | 仅引用模式，默认/0 为 4096，上限 8192 |
 
-需配置 `cleanfetch.enabled: true`。基于 go-webfetch，无需代理；内置 DNS rebinding 防护和 HEAD 预检防大文件（`max_fetch_size_mb` 控制阈值，默认 10MB；重定向逐跳复跑私网/metadata 校验，最多 5 跳）；失败时自动回退 Jina Reader（需配置 `jina.api_key`，代理自动检测）。
+URL 抓取需配置 `cleanfetch.enabled: true`；引用读取不受此开关限制。基于 go-webfetch，无需代理；内置 DNS rebinding 防护和 HEAD 预检防大文件（`max_fetch_size_mb` 控制阈值，默认 10MB；重定向逐跳复跑私网/metadata 校验，最多 5 跳）；失败时自动回退 Jina Reader（需配置 `jina.api_key`，代理自动检测）。
 
 批量模式（`urls`）下每条 URL 独立预检与抓取，单条失败不影响其它，结果按 URL 分节返回；只传 `url` 时输出与旧版一致。
 
@@ -312,6 +315,10 @@ apipool:
 **适用边界**：仅解析 PDF；网页正文抓取请用 `cleanfetch`。
 
 ---
+
+#### cleanfetch 引用读取
+
+始终注册，只接受本服务返回的 `result_ref`。调用 `cleanfetch(result_ref, offset=0, limit=4096)`，按 `next_offset` 续读到 `eof=true`；单次最多 8192 Unicode 字符，正文在 `content`。无需 Docker 或宿主文件权限，不重新请求来源；沿用 `/mcp` 鉴权。引用跨 MCP 会话有效，重启、过期/清理或检测到文件身份/大小/修改时间变化后失效。完整契约见 [API 文档](api.md#长结果读取)。
 
 ### `file_search` — 本地文件快速检索
 

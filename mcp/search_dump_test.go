@@ -30,7 +30,7 @@ func setDumpTestEnv(t *testing.T, dir string, conf config.SmartSearchConfig) {
 // TestDumpSearchResultsIfOversize_UnderLimit 未超限时不落盘。
 func TestDumpSearchResultsIfOversize_UnderLimit(t *testing.T) {
 	setDumpTestEnv(t, t.TempDir(), config.SmartSearchConfig{InlineMaxChars: 1000})
-	notice, dumped := dumpSearchResultsIfOversize(3, strings.Repeat("结果内容", 10))
+	notice, dumped := dumpSearchResultsIfOversize(make([]search.SearchResult, 3), strings.Repeat("结果内容", 10))
 	if dumped {
 		t.Fatalf("未超限不应落盘: %q", notice)
 	}
@@ -39,7 +39,7 @@ func TestDumpSearchResultsIfOversize_UnderLimit(t *testing.T) {
 // TestDumpSearchResultsIfOversize_Disabled 负数配置禁用落盘（旧版恒内联行为）。
 func TestDumpSearchResultsIfOversize_Disabled(t *testing.T) {
 	setDumpTestEnv(t, t.TempDir(), config.SmartSearchConfig{InlineMaxChars: -1})
-	notice, dumped := dumpSearchResultsIfOversize(3, strings.Repeat("结果内容", 1000))
+	notice, dumped := dumpSearchResultsIfOversize(make([]search.SearchResult, 3), strings.Repeat("结果内容", 1000))
 	if dumped {
 		t.Fatalf("禁用配置下不应落盘: %q", notice)
 	}
@@ -50,7 +50,7 @@ func TestDumpSearchResultsIfOversize_Disabled(t *testing.T) {
 func TestDumpSearchResultsIfOversize_OverLimit(t *testing.T) {
 	setDumpTestEnv(t, t.TempDir(), config.SmartSearchConfig{InlineMaxChars: 100})
 	body := strings.Repeat("搜索结果正文", 40) // 240 字符 > 100
-	notice, dumped := dumpSearchResultsIfOversize(7, body)
+	notice, dumped := dumpSearchResultsIfOversize(make([]search.SearchResult, 7), body)
 	if !dumped {
 		t.Fatal("超限应落盘")
 	}
@@ -63,9 +63,8 @@ func TestDumpSearchResultsIfOversize_OverLimit(t *testing.T) {
 		t.Fatal("响应不应内联完整结果")
 	}
 	// 提取路径并验证文件内容完整
-	start := strings.Index(notice, "`") + 1
-	end := strings.LastIndex(notice, "`")
-	path := notice[start:end]
+	_, rest, _ := strings.Cut(notice, "**文件路径**: `")
+	path, _, _ := strings.Cut(rest, "`")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("落盘文件读取失败: %v", err)
