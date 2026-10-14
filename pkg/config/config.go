@@ -572,8 +572,8 @@ type DashboardConfig struct {
 	// AllowedNetworks 显式放行可「查看」控制台的来源网段（CIDR，如 192.168.1.0/24）。
 	// 空列表 = 仅本机 loopback 可访问；不授予写权限。
 	AllowedNetworks []string `mapstructure:"allowed_networks"`
-	// WriteAllowedNetworks is accepted in YAML for overlay compatibility.
-	// It does not grant write access; writes remain loopback-only.
+	// WriteAllowedNetworks grants password-protected writes from explicit IPs/CIDRs.
+	// Empty lists or invalid entries fail closed to loopback-only writes.
 	WriteAllowedNetworks []string `mapstructure:"write_allowed_networks"`
 	// Shortcut 控制快捷方式落位行为（Windows）：desktop（默认，桌面）/
 	// start（开始菜单，可在开始屏幕搜索并手动固定）/ both / off（不创建）。

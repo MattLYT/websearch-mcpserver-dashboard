@@ -14,13 +14,14 @@
 |---|---|---|
 | 是否启用 | 「要开启本机控制中心 WebUI 吗？」 | 全新部署默认启用 |
 | 访问范围 | 「只在本机用，还是局域网内其它设备也要看？」「如果放行网段，是哪些 CIDR？」 | 仅本机 loopback |
+| 写入来源 | 「是否需要放行非 loopback 的写入来源？Docker 宿主请求在服务端实测是什么 IP？」 | `write_allowed_networks: []`；读白名单不授权写入 |
 | 管理员口令 | 「写操作（改设置/Key/重启/清缓存/额度）需要一个本机管理员口令，你想自己设置一个，还是让我生成随机的？」 | 预设文件随机生成 |
 | 管理员用户名 | 「要不要配置可选的 admin_username？配置后写操作需要同时提供用户名」 | 不配置（只验证口令） |
 | 快捷方式 | 「要在桌面 / 开始菜单创建快捷方式吗？」 | desktop（桌面） |
 | 遥测保留 | 「调用明细保留 30 天可以吗？想更短/更长吗？」 | 30 天 |
 | 额度管理 | 「需要按周期自动重置用量吗？各供应商上限设多少？」 | monthly，默认 1000 次 |
 
-红线（无需确认、直接遵守）：**admin_password 永不写进主 config.yaml 之外的任何会回显的地方；WebUI 永远无法读取或修改口令；放行非本机网段必须人类明确同意。写操作永远仅限 loopback。**
+红线（无需确认、直接遵守）：**管理员口令只在 dashboard.yaml 管理，不写入任何回显内容；WebUI 永远无法读取或修改口令；放行非本机读/写来源必须人类明确同意。**
 
 ---
 
@@ -61,9 +62,11 @@ dashboard:
   secrets_path: "./data/dashboard-secrets.json"  # API Key 私密覆盖文件（接口永不回显）
   config_path: ""               # dashboard.yaml 自身路径；空 = 主配置同目录
 
+  # —— 独立读/写访问边界 ——
   allowed_networks: []          # CIDR/裸 IP 白名单；空 = 仅本机 loopback
-  # allowed_networks: ["192.168.1.0/24", "172.16.0.0/12"]
-  # 非法条目 = 整体回退仅本机（fail-closed）。写操作永远仅限本机。
+  write_allowed_networks: []    # 独立写白名单；空 = 仅 loopback，仍需管理员口令
+  # 每份白名单任一条目非法 = 该份整体回退 loopback（fail-closed）。
+  # Docker 例外只放行服务端实测网关单地址 /32，参见安全模型。
 
   # —— 管理员口令（写操作闸门）——
   admin_password: ""            # 明文；或用下面 SHA-256 形态，二选一
@@ -110,6 +113,7 @@ dashboard:
 | `secrets_path` | path | `./data/dashboard-secrets.json` | WebUI 写入的 Key 存这里，接口只返回「已配置」状态 |
 | `config_path` | path | 空 | dashboard.yaml 的自定义位置（也可用环境变量） |
 | `allowed_networks` | []string | `[]` | 只读放行网段；fail-closed |
+| `write_allowed_networks` | []string | `[]` | 独立写白名单；空/非法 = 仅 loopback；口令校验不变，读白名单不授予写权限；overlay 显式 `[]` 可撤销主配置写白名单 |
 | `admin_password` | string | 空 | 写操作口令（明文形态） |
 | `admin_password_sha256` | string | 空 | 写操作口令（SHA-256 形态，更推荐） |
 | `admin_username` | string | 空 | 可选管理员用户名；配置后写请求必须携带匹配的 `X-Admin-User` 头（常量时间比较），未配置 = 不做用户名检查。与口令一样只住 dashboard.yaml，WebUI 无法读取或修改 |
@@ -205,12 +209,23 @@ PDF 页进度当前为 `not_collected`，控制中心不能据此展示真实逐
 | 操作 | 边界 |
 |---|---|
 | 读取（页面 + 只读 API） | 本机 loopback 始终可用；`allowed_networks` 放行的网段只读 |
-| 写操作（设置/密钥/重启/清缓存/额度管理） | 仅限本机 loopback **且** 请求头带正确 `X-Admin-Password`（常量时间比较，支持明文/SHA-256）；若配置了 `admin_username`，还需匹配的 `X-Admin-User` 头 |
+| 写操作（设置/密钥/重启/清缓存/额度管理） | 默认仅 loopback；独立 `write_allowed_networks` 可放行明确来源；所有写入仍须正确 `X-Admin-Password`（常量时间比较，支持明文/SHA-256），配置用户名时还须匹配 `X-Admin-User` |
 | 管理员口令 | 只存在于 dashboard.yaml；WebUI 与 API 永不返回，也无法修改 |
 | 未配置口令 | 所有写端点整体禁用（安全的默认） |
 | 查询隐私 | 遥测只存脱敏元数据（哈希/主题/语言/关键词/耗时），完整查询与 URL 不落库 |
 
-> **Docker 部署**：桥接网络 + 端口发布时，请求来源是 bridge 网关而不是 loopback —— 写操作会被拒绝，控制台只读（页面与指标正常）。只读访问要从宿主机浏览器打开，需把网段加入 `allowed_networks`；要写操作请在 Linux 主机上用 `network_mode: host`，或直接在宿主机改配置文件。卷映射（`dashboard.yaml`、`data/`）见 [installation.md#docker](installation.md#docker)。
+读白名单不授权写入，写白名单不替代页面/API的读取访问门槛，也不替代口令；任一白名单条目非法时该白名单整体 fail-closed。白名单与管理员认证不在WebUI可编辑范围。
+
+**Docker 部署**：保持宿主端口固定发布到回环，例如 `-p 127.0.0.1:8338:8338`。宿主浏览器在容器内可能表现为 bridge 网关；以服务端实际看到的请求来源 IP 为准，不能只据 `docker inspect` 网关值认定来源。需要宿主写入时，将这个实测单地址 `/32` 同时加入读/写白名单，并配置管理员口令；不放行整个 bridge 子网。以下地址仅示意，未经实测不能照抄：
+
+```yaml
+dashboard:
+  allowed_networks: ["172.17.0.1/32"]
+  write_allowed_networks: ["172.17.0.1/32"]
+  admin_password: "replace-with-a-private-admin-password"
+```
+
+未确认来源前保持 `write_allowed_networks: []`。卷映射（`dashboard.yaml`、`data/`）见 [installation.md#docker](installation.md#docker)。
 
 ## 数据与生命周期
 

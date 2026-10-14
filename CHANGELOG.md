@@ -2,9 +2,11 @@
 
 [English](CHANGELOG.en.md) | [中文](CHANGELOG.md)
 
-## Unreleased
+## v3.8.0 — 2026-10-14（检索可靠性与来源控制）
 
-> 致谢：本批核心改动来自 [@MattLYT](https://github.com/MattLYT)（Matt.Li）的 PR #18，其六个功能提交保留原作者署名进入本分支；后续提交为吸收后的适配（写模型仍仅 loopback、开关改原生 CSS、pending PDF 以 `IsError` 交付）。
+> 分支 `feat/absorb-pr18`：吸收 [@MattLYT](https://github.com/MattLYT)（Matt.Li）的 [PR #18](https://github.com/daidaiJ/websearch-mcpserver/pull/18)。六个功能提交保留原作者署名；其后适配提交对齐控制中心前端与 PDF pending 语义。写操作默认仅 loopback，用户可自行配置 `write_allowed_networks`。
+
+> 致谢：本版核心改动来自 [@MattLYT](https://github.com/MattLYT) 的 PR #18（检索失败透出、来源开关、调用归属、通用 Skill、时间窗口隔离、长结果 `result_ref`）；其提交保留原作者署名进入本版。
 
 ### 新增
 - **来源开关与设置草稿保存**（PR #18，@MattLYT）：网页/API/学术来源可分组开关，草稿→差异预览→修订冲突检查后写入并重启；配置代次隔离缓存
@@ -12,14 +14,14 @@
 - **通用检索 Skill**（PR #18，@MattLYT）：`skills/websearch-mcp` 指导原文核验、PDF 路径边界与有界续查
 - **长结果 `result_ref` 分页读取**（PR #18，@MattLYT）：超限正文复用 `cleanfetch(result_ref, offset, limit)` 分段读取，不新增第六个工具
 
+### 变更
+- **独立写白名单 `write_allowed_networks`**（PR #18，@MattLYT）：写操作默认仅 loopback；用户可在 `dashboard.yaml` 自行放行任意 CIDR/IP，仍须管理员口令，不信任转发头，读白名单不授予写权限
+- **控制中心开关改原生 CSS 变量**（吸收适配）：去掉 Bootstrap form-switch 子集，开关跟随主题 `accent`
+- **MinerU pending 以工具错误交付**（吸收适配）：尚无正文时 `IsError=true` 并保留 `task_ref`，遥测不计为成功
+
 ### 修复
 - **检索失败透出与 PDF 正文质量**（PR #18，@MattLYT）：引擎全失败不再伪装空成功；OpenAlex 可选 Bearer；Everything 带空格目录引用；PDF 代理钉扎公网目标
 - **时间窗口与缓存隔离**（PR #18，@MattLYT）：`time_range` 省略默认 3 月、显式 `0` 不筛选；缓存键 `web:v2` 按月份隔离，供应商不再改共享默认
-
-### 变更
-- **写操作仍仅 loopback**（吸收适配）：不采用 PR 中的 `write_allowed_networks` 远程写放行；口令闸门不变
-- **控制中心开关改原生 CSS 变量**（吸收适配）：去掉 Bootstrap form-switch 子集，开关跟随主题 `accent`
-- **MinerU pending 以工具错误交付**（吸收适配）：尚无正文时 `IsError=true` 并保留 `task_ref`，遥测不计为成功
 
 ## v3.7.0 — 2026-10-10（本地文件检索）
 

@@ -424,11 +424,21 @@ Academic search filters registered sources using request-level `engines` before 
 | Scenario | Rule |
 |----------|------|
 | Reads (pages + read-only APIs) | Loopback only by default; networks explicitly listed in `dashboard.allowed_networks` get read-only access |
-| Writes (settings / keys / restart / cache clear / quota reset & adjust) | **Loopback only** plus `X-Admin-Password`; plus matching `X-Admin-User` when a username is configured |
+| Writes (settings / keys / restart / cache clear / quota reset & adjust) | **Loopback only by default**; explicit `dashboard.write_allowed_networks` permits specified sources; every write still requires `X-Admin-Password`, plus matching `X-Admin-User` when a username is configured |
 | Admin password | Configured only in `dashboard.yaml` (`admin_password` plaintext or `admin_password_sha256` hex); **the WebUI can never read or modify it**; unset password = all write endpoints disabled (secure default) |
 
-- `allowed_networks` accepts CIDRs or bare IPs. Any invalid entry **falls that entire allowlist back to loopback-only** (fail-closed). The read allowlist does not grant writes.
-- Under Docker bridge networking the request source is the gateway, not loopback, so writes are rejected. Read access can add the segment to `allowed_networks`; for writes use `network_mode: host` or edit the config on the host.
+- Both allowlists accept CIDRs or bare IPs. Any invalid entry **falls that entire allowlist back to loopback-only** (fail-closed). `allowed_networks` does not grant writes; `write_allowed_networks` does not replace the page/API read-access gate or the admin password.
+- Docker: keep the host publication fixed to loopback, for example `-p 127.0.0.1:8338:8338`. Host-browser connections may appear as a bridge gateway inside the container. Use the request source IP actually observed by the server; the gateway from `docker inspect` is only a cross-check, not proof of the request source. For host writes, put only that observed address as a `/32` in both allowlists, never the whole bridge subnet.
+
+```yaml
+# dashboard.yaml; illustrative address only, replace with the observed host-request source
+dashboard:
+  allowed_networks: ["172.17.0.1/32"]
+  write_allowed_networks: ["172.17.0.1/32"]
+  admin_password: "replace-with-a-private-admin-password"
+```
+
+- Keep `write_allowed_networks: []` until the source is verified; do not copy the illustrative IP unchanged. An explicit `[]` in the independent overlay clears a write allowlist inherited from the main config.
 - The remote link is plain HTTP; only allow trusted LANs. Use an SSH tunnel or a TLS reverse proxy for anything else.
 - Password comparison is constant-time; prefer `admin_password_sha256` (lowercase hex of `sha256sum`) so no plaintext stays on disk.
 
@@ -489,6 +499,7 @@ Academic search filters registered sources using request-level `engines` before 
 | `port` | 8338 | stop/kill/status also use this port when no config |
 | `mode` | engine | Selects permitted sources; only enabled fallbacks can be used, while keyless AnySearch can use its anonymous tier |
 | `baidu.enabled` / `tavily.enabled` / `exa.enabled` / `anysearch.enabled` / `doubao.enabled` | true (omitted) | Independent API source switches; false keeps keys and applies to every mode, including anonymous AnySearch |
+| `dashboard.write_allowed_networks` | [] | Independent write allowlist; loopback-only by default; invalid entries fail closed; admin password still required |
 | `mcp_resources` | true | MCP Resource observability toggle: `search://capabilities` and `search://health`, read-only, secret-free, no tool slot |
 | `mcp_stateless` | false | Stateless MCP HTTP mode: each POST handled independently, no session handshake, easier horizontal scaling; GET SSE returns 405 |
 | `baidu.web_enabled` | false | Baidu web search engine disabled by default (CAPTCHA-blocked in testing); may be enabled explicitly with clean egress IPs |

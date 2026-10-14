@@ -244,6 +244,7 @@ cache:
 #   admin_password: ""       # 写操作口令（明文）；与 admin_password_sha256 二选一
 #   admin_password_sha256: "" # 写操作口令（SHA-256 十六进制）
 #   allowed_networks: []     # 只读放行网段（CIDR/裸 IP）；空 = 仅本机 loopback
+#   write_allowed_networks: [] # 独立写白名单；空/非法 = 仅 loopback，仍需管理员口令
 #   quotas:
 #     reset: monthly         # monthly / weekly / daily / none（仅手动重置）
 #     reset_day: 1           # monthly 的每月重置日（1-28）
@@ -419,11 +420,21 @@ log:
 | 场景 | 规则 |
 |------|------|
 | 读取（页面 + 只读 API） | 默认仅本机 loopback；`dashboard.allowed_networks` 显式放行的网段只读 |
-| 写操作（设置 / 密钥 / 重启 / 清缓存 / 额度重置与修正） | **仅限本机 loopback** + `X-Admin-Password` 头；已配置用户名时还须匹配 `X-Admin-User` |
+| 写操作（设置 / 密钥 / 重启 / 清缓存 / 额度重置与修正） | **默认仅 loopback**；显式 `dashboard.write_allowed_networks` 可放行指定来源；所有来源仍须 `X-Admin-Password` 头，已配置用户名时还须匹配 `X-Admin-User` |
 | 管理员口令 | 只能配置在 `dashboard.yaml`（`admin_password` 明文或 `admin_password_sha256` 十六进制），**WebUI 无法读取或修改**；未配置 = 所有写端点禁用（安全的默认） |
 
-- `allowed_networks` 接受 CIDR 或裸 IP；任一条目非法时该白名单整体回退为仅 loopback（fail-closed）。读白名单不授予写权限。
-- Docker 桥接网络下请求来源是网关而不是 loopback，写操作会被拒绝；只读可把网段加入 `allowed_networks`，写操作请用 `network_mode: host` 或在宿主机改配置。
+- 两份白名单均接受 CIDR 或裸 IP；任一条目非法时，该白名单**整体回退为仅 loopback**（fail-closed）。读白名单 `allowed_networks` 不授予写权限，写白名单 `write_allowed_networks` 不替代页面/API 的读取访问门槛，也不替代管理员口令。
+- Docker 固定发布到宿主回环，如 `-p 127.0.0.1:8338:8338`。宿主浏览器请求在容器内可能表现为 bridge 网关；须以服务端实际看到的请求来源 IP 为准，`docker inspect` 的网关地址只供核对，不能单独作为已实测的访问来源。需要宿主写入时，只把这个实测地址的 `/32` 同时加入读/写白名单，不放行整个 bridge 子网。
+
+```yaml
+# dashboard.yaml；地址仅示意，必须替换成服务端实测的宿主请求来源
+dashboard:
+  allowed_networks: ["172.17.0.1/32"]
+  write_allowed_networks: ["172.17.0.1/32"]
+  admin_password: "replace-with-a-private-admin-password"
+```
+
+- 未确认请求来源前保持 `write_allowed_networks: []`；不要照抄示意地址。独立 overlay 显式配置 `[]` 可清空主配置中的写白名单。
 - 远程链路为明文 HTTP，只建议放行受信内网；不受信网络请走 SSH 隧道或带 TLS 的反向代理。
 - 口令校验为常量时间比较；推荐配置 `admin_password_sha256`（`sha256sum` 明文的小写十六进制）避免明文落盘。
 
@@ -484,6 +495,7 @@ log:
 | `port` | 8338 | stop/kill/status 无配置时也用此端口 |
 | `mode` | engine | 按模式组合允许源；不可用时仅可使用已启用回退，AnySearch 无 Key 可走匿名档 |
 | `baidu.enabled` / `tavily.enabled` / `exa.enabled` / `anysearch.enabled` / `doubao.enabled` | true（省略） | API 源独立开关；false 保留 Key，约束所有模式；AnySearch 匿名档同受约束 |
+| `dashboard.write_allowed_networks` | [] | 独立写白名单；默认仅 loopback；非法条目整体 fail-closed，仍需管理员口令 |
 | `mcp_resources` | true | MCP Resource 观测开关：`search://capabilities` 与 `search://health`，只读、不含密钥、不占工具槽位 |
 | `mcp_stateless` | false | MCP 无状态 HTTP 模式：每个 POST 独立处理、免会话握手，便于水平扩展；GET SSE 返回 405 |
 | `baidu.web_enabled` | false | 百度网页搜索引擎默认禁用（实测被 CAPTCHA 识别），出口 IP 干净时可显式开启 |
