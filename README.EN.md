@@ -85,42 +85,9 @@ Results are not raw aggregation. After engines return, the server locally dedups
 
 ## Design Background & Goals
 
-### Why this project
+Existing MCP search solutions each fall short: vendor services (Tavily / Exa, etc.) require keys and per-use payment, route data through third-party servers, and are unstable from China; self-hosted SearXNG means maintaining a Python service and returns unoptimized raw aggregation. This project brings those capabilities back local: a single binary with multi-engine fusion, 9 academic sources, web fetch and PDF parsing — making search a **free, China-friendly, LLM-ready** basic capability.
 
-LLMs need web search, but existing MCP search solutions don't meet my preferences and needs:
-
-- **Vendor MCP services (Tavily / Exa, etc.)**: require API key registration and per-use payment (Tavily ~$8/1k, Exa $7/1k) with limited free tiers; data passes through third-party servers and cannot be self-hosted; overseas services are unstable and hard to pay for from China; a single provider with no fallback when rate-limited or down; search only — academic search, web fetch, PDF parsing, and summarization all need separate integrations.
-- **Self-hosted SearXNG + MCP wrapper**: requires deploying and maintaining a Python service (Docker, config, upgrades), and public instances are often rate-limited or blocked; results are raw aggregation with no LLM optimization (no relevance scoring, no dedup, no summarization); general web search only — no academic engines, fetch, or PDF; proxy must be configured manually.
-
-So I started in 2026-04 with a single Baidu Qianfan engine and evolved it into a multi-engine fused general search service. The goal is to make search a **free, China-friendly, LLM-ready** basic capability.
-
-### Differences from existing solutions
-
-| Dimension | Vendor MCP (Tavily / Exa) | SearXNG MCP | This project |
-|-----------|---------------------------|-------------|--------------|
-| Cost | Per-use, limited free tier | Free but self-hosted | Free, zero config |
-| Deployment | Register and use | Docker / Python self-hosted | Single binary, no CGO |
-| China-friendly | Poor (overseas) | Manual proxy config | System proxy auto-detection |
-| Provider resilience | Single provider, no fallback | Engine aggregation | Multi-engine + auto-fallback |
-| LLM optimization | Raw results | Raw results | Local scoring + dedup + optional summary |
-| Academic search | No | No | 9 academic engines |
-| Local file search | `file_search` locates local files in milliseconds via the Everything index, with a directory whitelist against scope creep and lexical-alignment second-stage filtering to protect context (needs Everything HTTP Server) |
-| Fetch / PDF | Separate integration | No | Built-in cleanfetch / pdf_parser |
-| Data privacy | Third-party servers | Local | Local |
-
-### Design principles
-
-**Local-first, private by default** — Search, scoring, and caching all happen locally; queries go only to the search engines themselves, with no third-party aggregation service in between. Data never leaves your machine — the most fundamental difference from vendor MCP services that route data through third-party servers.
-
-**Zero cost to start, pay only for what you use** — Free engines (Baidu web + Bing) work with zero keys; local heuristic scoring burns no AI tokens; SQLite caching avoids repeated requests. Keys are used only when you provide them — you never pay for capabilities you don't use.
-
-**Scalable complexity** — One config file, with `mode` scaling from `engine` (zero config) to `hybrid` (all engines). Zero-config and power users each get what they need without paying for complexity.
-
-**Decoupled and composable** — Engines, modes, and tools are not coupled: `mode` decides the engine group, network capabilities follow their config switches (`cleanfetch` is always registered and its switch only gates URL fetching; `file_search` is probe-gated), keys are optional (`sk_list` multi-key rotation). Everything is config-driven (per-engine filtering, scoring thresholds, MMR, blocked sites, rate limits) — all tunable, nothing hardcoded.
-
-**A complete tool chain for LLMs** — Five retrieval tools cover webpages, papers, PDFs and local files (`file_search` needs Windows + Everything and a successful probe). The `cleanfetch` saved-result mode delivers saved bodies through MCP.
-
-**Scenario-specific optimization** — Optimized for real usage scenarios: academic search (9 engines + citation / journal / PDF scoring), China networking (direct connect + system proxy auto-detection), scanned PDFs (MinerU OCR fallback), recency queries (`time_range`).
+The full project motivation, a dimension-by-dimension comparison with existing solutions, and the design principles (local-first privacy / zero cost to start / scalable complexity / decoupled and composable / a complete tool chain for LLMs / scenario-specific optimization) live in [docs/design.en.md](docs/design.en.md).
 
 ---
 
@@ -156,69 +123,21 @@ Or use MCP Hooks for session auto start/stop (Qwen Code example; full details in
 
 ## Search Modes at a Glance
 
-| Mode | Description | Key Required |
-|------|-------------|--------------|
-| `engine` | Baidu web search + Bing (DuckDuckGo joins when a proxy is available) | **None** |
-| `baidu` | Baidu Qianfan search, falls back to Baidu web search | Optional |
-| `apipool` | API key pool rotation: one provider per request, auto-switch on failure; supports round-robin / priority / weighted | All optional |
-| `tavily` | Tavily Search API ([get key](https://app.tavily.com/home)) | `TAVILY_SK` |
-| `exa` | Exa Web Search API ([get key](https://dashboard.exa.ai/api-keys)) | `EXA_API_KEY` |
-| `anysearch` | AnySearch API ([get key](https://www.anysearch.com/console/api-keys)) | `ANYSEARCH_API_KEY` |
-| `doubao` | Doubao Search Global / Custom ([get key](https://console.volcengine.com/search-infinity/api-key)) | `DOUBAO_SEARCH_API_KEY` |
-| `hybrid` | Full mix (Anysearch + Baidu + Tavily + Exa + Doubao if keyed + Bing + DuckDuckGo, etc.) | All optional |
+The single `mode` field decides the engine group: `engine` works with zero keys (Baidu web + Bing in parallel; 360 / DuckDuckGo / Wikipedia / Google News join automatically per config and proxy availability); `baidu` / `tavily` / `exa` / `anysearch` / `doubao` are single-provider modes (they participate only with a key, with auto-fallback on failure); `apipool` rotates a key pool (round-robin / priority / weighted, Baidu web as the final fallback); `hybrid` runs all engines concurrently. Missing keys auto-degrade to `engine`.
 
-> Auto-degrades to `engine` mode when keys are missing. See [docs/search.md](docs/search.md) for mode and engine details.
+Participating engines per mode, key-signup links, `sk_list` multi-key rotation, and per-engine rate limits: [docs/search.en.md](docs/search.en.md).
 
 ---
 
 ## Local Control Center (optional, off by default)
 
-> Full configuration reference (shortcut placement, brand about-block, every key and default) lives in [docs/dashboard.en.md](docs/dashboard.en.md).
-
-With `dashboard.enabled: true`, open `http://127.0.0.1:8338/dashboard/` in a local browser to see five pages:
+With `dashboard.enabled: true`, open `http://127.0.0.1:8338/dashboard/` in a local browser. Four pages: overview KPIs and client usage grouping, per-source health and failure composition, request-level call chains (filterable, CSV export), and whitelisted config writes after backup; fully passive observation — failure classes are reported only, calls are never skipped.
 
 ![Control center overview](docs/images/dashboard-overview.jpg)
 
-| Page | What it shows |
-|------|---------------|
-| **Overview** | KPIs (successful calls with total and cache hits / failures / avg latency), system status (including suspended count), running configuration, tool observation status, client usage grouping |
-| **Sources** | Per-source health, last 20 results, failure composition (e.g. `parse ×4`), success rate, avg / P95 latency, quotas, latest error and suspension countdown |
-| **Usage** | Tools and sources in separate dimensions; filter by level / status / tool / source / error kind; click a request id on a tool row to expand the source chain of that call |
-| **Settings** | Writes whitelisted config (mode, timeouts, thresholds, suspension durations, etc.) after backing up the current YAML; secrets are never echoed |
+To enable, copy `dashboard.example.yaml` to `dashboard.yaml` next to `config.yaml` (first `start` / `install` auto-generates it **enabled by default** with a random local admin password); delete the file and restart for a clean rollback with zero telemetry overhead. Privacy defaults: queries are stored only as sanitized hash + topic metadata; secrets and raw query text never reach the database and are never echoed; loopback-only reads by default, writes require `admin_password`.
 
-Behavior boundaries:
-
-- **Passive observation only**: records metadata produced by real MCP calls; no active probing, no fabricated data. Tools never called still show "callable · not observed yet".
-- **Failure classes + confidence**: failures are classified as rate limit / captcha / access denied / timeout / network / parse / no result; fewer than 5 samples is flagged "insufficient samples", and only 3 consecutive failures show suspension — **reporting only, calls are never skipped**.
-- **Request-level correlation**: one tool call and the source events it triggered share a request id, answering "who supplied this result, who failed".
-
-To enable: copy `dashboard.example.yaml` to `dashboard.yaml` next to the main config (recommended), or append a `dashboard:` block to `config.yaml`:
-
-```yaml
-dashboard:
-  enabled: true
-  storage_path: ./data/dashboard.db
-  retention_days: 30                          # detail retention days; daily rollups kept long-term
-  secrets_path: ./data/dashboard-secrets.json # private overlay file; the API never returns values
-  # admin_password / allowed_networks / quotas / branding: see dashboard.example.yaml
-```
-
-On first `start` / `install`, the server auto-generates this file **enabled by default** (with a random local admin password); set `enabled: false` or delete the file to turn it off with zero telemetry overhead. The overlay file overrides the main config field-by-field; deleting it and restarting is a clean rollback. The admin password, allowed networks, quotas and branding live only in `dashboard.yaml` — **the WebUI can never read or modify them**. Takes effect after restart; the desktop shortcut (created by `install`) is a lazy-start entry: it launches the server if needed, then opens the console. Machine-readable endpoints (read-only, never trigger searches):
-
-```bash
-curl http://127.0.0.1:8338/__admin/api/providers   # per-source state machine and failure composition
-curl http://127.0.0.1:8338/__admin/api/metrics     # Prometheus text metrics
-```
-
-### Data & privacy
-
-- Only sanitized metadata is stored: queries are persisted as hash + topic + language + keywords; **full queries and URLs never reach the database**. Error text is sanitized server-side (URLs / emails / secret-like strings replaced with placeholders) before storage and truncation.
-- Secrets live in a separate private overlay file; pages and APIs **never echo the value** — the server simply never sends it, not a client-side mask. The settings page links each provider's official "get key" console.
-- Loopback-only by default; networks listed in `allowed_networks` are **read-only**. Writes (settings / keys / restart / cache clear / quota management) require `dashboard.admin_password` and loopback; the password itself cannot be changed through the WebUI.
-- The overview groups calls by application or project; collapsed rows and CSV include attribution. Standard MCP identity identifies applications, with optional explicit HTTP labels. Codex can automatically label configured projects and Git projects through a header helper; other clients use project-scoped configuration. Unsupported historical calls remain untagged. See [first-time setup and automatic attribution](docs/installation.en.md#codex--applicationproject-attribution). No conversation content is collected and search permissions are unchanged.
-- No active probing of any provider.
-
-Full configuration reference: [docs/configuration.en.md](docs/configuration.en.md).
+> Page details, every config key, shortcut placement, the security model and call attribution: [docs/dashboard.en.md](docs/dashboard.en.md).
 
 ---
 
@@ -234,6 +153,7 @@ Full configuration reference: [docs/configuration.en.md](docs/configuration.en.m
 | 📚 Reference | [docs/configuration.md](docs/configuration.md) | Full config reference, environment variable overrides, defaults quick reference |
 | 📚 Reference | [docs/search.md](docs/search.md) | Search modes, engine reference, relevance scoring, MCP tool parameters |
 | 📚 Reference | [docs/architecture.md](docs/architecture.md) | Architecture, fallback chain, proxy detection, caching, Go module embedding, web-researcher extension |
+| 📚 Reference | [docs/design.md](docs/design.md) | Design background & goals: project motivation, comparison with existing solutions, design principles |
 | 📚 Reference | [docs/api.md](docs/api.md) | Go Module API and HTTP API (MCP / SearXNG / Admin endpoints) |
 | 📚 Reference | [docs/dashboard.md](docs/dashboard.md) | Local dashboard: every config key, write-operation security model, privacy boundaries |
 | 📚 Reference | [docs/developers.md](docs/developers.md) | Developer guide: package layout, interface contracts, tool call chains, change touchpoints |

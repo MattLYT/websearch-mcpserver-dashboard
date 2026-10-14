@@ -40,6 +40,23 @@ cp dashboard.example.yaml dashboard.yaml   # next to config.yaml, edit as needed
 - Disable: set `enabled: false` in dashboard.yaml or delete the file → restart; zero telemetry overhead
 - Disabling the control center does not undo source/settings edits already saved to config.yaml; restore those through the configuration-backup flow rather than deleting data
 
+## Console pages
+
+![Control center overview](images/dashboard-overview.jpg)
+
+| Page | What it shows |
+|------|---------------|
+| **Overview** | KPIs (successful calls with total and cache hits / failures / avg latency), system status (including suspended count), running configuration, tool observation status, client usage grouping |
+| **Sources** | Per-source health, last 20 results, failure composition (e.g. `parse ×4`), success rate, avg / P95 latency, quotas, latest error and suspension countdown |
+| **Usage** | Tool and source dimensions side by side; filter by level / status / tool / source / error kind; click a request id on a tool row to expand the source chain of that call (the former standalone "Events" page was merged here) |
+| **Settings** | Writes whitelisted config (mode, timeouts, thresholds, suspension durations, etc.) after backing up the current YAML; secrets are never echoed; theme and advanced actions live in the "Appearance & maintenance" card |
+
+Behavior boundaries:
+
+- **Passive observation only**: records metadata produced by real MCP calls; no active probing, no fabricated data. Tools never called still show "callable · not observed yet".
+- **Failure classes + confidence**: failures are classified as rate limit / captcha / access denied / timeout / network / parse / no result; fewer than 5 samples is flagged "insufficient samples", and only 3 consecutive failures show suspension — **reporting only, calls are never skipped**.
+- **Request-level correlation**: one tool call and the source events it triggered share a request id, answering "who supplied this result, who failed".
+
 ## Config files and precedence
 
 | Layer | Notes |

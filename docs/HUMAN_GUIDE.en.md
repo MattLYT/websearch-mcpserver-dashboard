@@ -26,6 +26,7 @@ The detailed docs are split by topic; this manual is their reading router:
 | Change settings, env-var overrides, look up defaults | [configuration.en.md](configuration.en.md) |
 | Understand search modes, engines, scoring, tool parameters | [search.en.md](search.en.md) |
 | Understand the architecture, fallback chain, proxy detection, Go module embedding | [architecture.en.md](architecture.en.md) |
+| Learn why this project exists and its design principles | [design.en.md](design.en.md) |
 | Call the HTTP API directly (MCP / SearXNG / Admin) | [api.en.md](api.en.md) |
 | Enable the local dashboard | [dashboard.en.md](dashboard.en.md) |
 | Contribute code, understand the codebase | [developers.en.md](developers.en.md) |
@@ -96,7 +97,7 @@ All parameters and defaults: [configuration.en.md](configuration.en.md); scoring
 
 | Symptom / error | Nature | Fix |
 |-----------------|--------|-----|
-| Autostart fails with `0x800704C7` | Environment: SmartScreen / antivirus / UAC blocks the exe; the script itself is fine | `Unblock-File .\websearch-mcpserver.exe` → whitelist in the antivirus → run once in the foreground to see the blocked dialog (details in [installation.en.md](installation.en.md#autostart-error-0x800704c7antivirus--smartscreen-blocking)) |
+| Autostart fails with `0x800704C7` | Environment: SmartScreen / antivirus / UAC blocks the exe; the script itself is fine | `Unblock-File .\websearch-mcpserver.exe` → whitelist in the antivirus → run once in the foreground to see the blocked dialog (details in [installation.en.md](installation.en.md#autostart-fails-with-0x800704c7-antivirus--smartscreen-blocking)) |
 | "not a valid Win32 application" | Environment: corrupted download or wrong architecture | Re-download the binary for your platform |
 | Some tools missing after startup | Usage: registration conditions unmet | Check each tool's `enabled` and `bing.enabled` (table above) |
 | "Some engines failed this run, results may be incomplete" | Network: some academic engines timed out / blocked | Expected degradation; overseas engines need a proxy (system proxy auto-detected), keep `network: china` in mainland China |
