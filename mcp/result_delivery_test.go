@@ -482,6 +482,80 @@ func TestLongSearchKeepsCandidatesOverMCP(t *testing.T) {
 
 type resultDeliverySearch struct{ *mockSearch }
 
+func TestSearchBodyContainingFileLabelIsCacheableOverMCP(t *testing.T) {
+	summary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Stream bool `json:"stream"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			return
+		}
+		if request.Stream {
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"FIXED_\"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"SUMMARY\"}}]}\n\ndata: [DONE]\n\n")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"choices":[{"message":{"content":"FIXED_SUMMARY"}}]}`)
+	}))
+	defer summary.Close()
+	srv := newMCPHTTPTestServer(t, config.Config{MCPStateless: true, LLM: config.LLMConfig{BaseURL: summary.URL, APIKey: "fixture", ModelId: "fixture"}})
+	setDumpTestEnv(t, t.TempDir(), config.SmartSearchConfig{InlineMaxChars: -1})
+	c, err := cache.New(filepath.Join(t.TempDir(), "cache.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	cacheInst, cacheNamespace = c, "literal-file-label"
+	want := "A documentation example contains **文件路径**: `example.md`, not a saved result."
+	searchapi = &resultDeliverySearch{&mockSearch{name: "fixture", results: []search.SearchResult{{Title: "Documentation", Url: "https://example.com", Content: want}}}}
+	client := &http.Client{Timeout: 5 * time.Second}
+	request := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"smartsearch","arguments":{"query":"literal label","intent":"","fetch_top_n":0}}}`
+	_, _, msg := mcpHTTPPost(t, client, srv.URL+"/mcp", request)
+	if !strings.Contains(jsonToolText(t, msg), want) {
+		t.Fatal("first search lost ordinary document content")
+	}
+	_, _, msg = mcpHTTPPost(t, client, srv.URL+"/mcp", request)
+	text := jsonToolText(t, msg)
+	if !strings.Contains(text, "cache_age_seconds") || strings.Count(text, want) != 1 {
+		t.Fatalf("ordinary document was mistaken for a temporary file: %s", text)
+	}
+	summarizerInst = llm.NewSummarizer(summary.URL, "fixture", "fixture")
+	request = `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"smartsearch","arguments":{"query":"summarized literal label","intent":"summarize","fetch_top_n":0}}}`
+	_, _, msg = mcpHTTPPost(t, client, srv.URL+"/mcp", request)
+	text = jsonToolText(t, msg)
+	if !strings.Contains(text, "FIXED_SUMMARY") || strings.Contains(text, want) {
+		t.Fatalf("ordinary document was appended as a saved-file notice: %s", text)
+	}
+}
+
+func TestSearchDoesNotReusePathOnlyCacheOverMCP(t *testing.T) {
+	srv := newMCPHTTPTestServer(t, config.Config{MCPStateless: true})
+	setDumpTestEnv(t, t.TempDir(), config.SmartSearchConfig{InlineMaxChars: -1})
+	c, err := cache.New(filepath.Join(t.TempDir(), "cache.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	cacheInst, cacheNamespace = c, "legacy-file-notice"
+	view, err := c.ForRequest(cacheNamespace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyKey := `web:v2:{"Query":"legacy path","Months":3,"FetchTopN":0}`
+	if err := view.Store(legacyKey, "", false, []search.SearchResult{{Content: "**文件路径**: `/deleted/fixture.md`"}}, "", time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	searchapi = &resultDeliverySearch{&mockSearch{name: "fixture", results: []search.SearchResult{{Content: "CURRENT_DOCUMENT"}}}}
+	_, _, msg := mcpHTTPPost(t, &http.Client{Timeout: 5 * time.Second}, srv.URL+"/mcp",
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"smartsearch","arguments":{"query":"legacy path","fetch_top_n":0}}}`)
+	text := jsonToolText(t, msg)
+	if !strings.Contains(text, "CURRENT_DOCUMENT") || strings.Contains(text, "/deleted/fixture.md") || strings.Contains(text, "cache_age_seconds") {
+		t.Fatalf("search reused an old file notice: %s", text)
+	}
+}
+
 func (s *resultDeliverySearch) MergeContent(_ string, results []search.SearchResult) (string, error) {
 	var body strings.Builder
 	for _, result := range results {

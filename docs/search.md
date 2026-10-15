@@ -142,7 +142,7 @@ smartsearch:
 
 **结果来源注记**：结果日期带 `date_source` 三态——`structured`（引擎 API 给出）/ `snippet`（摘要文本解析，弱）/ `undated`；学术结果同口径。响应头带 `retrieved_at`（检索时间，缓存命中时为原检索时间）与 `cache_age_seconds`（缓存年龄），并附固定 `usage_note`：snippet 日期仅用于定位来源，引用日期、金额、版本前请打开原页核对。
 
-**响应超限落盘**：渲染结果超 `smartsearch.inline_max_chars`（默认 32768，负数 = 禁用）时整体写入 `fetchdata/search-*.md`（惰性清理 7 天旧文件），响应保留溯源头、统计、每条候选的标题/URL/来源/最多 160 字符摘录、文件路径和 `result_ref`；完整正文用 `cleanfetch` 分段读取，失败清单保留在初始响应。实时与普通缓存命中路径共用，缓存命中生成新引用。含临时文件提示的补抓结果不进入持久缓存，也不复用旧记录。
+**响应超限落盘**：渲染结果超 `smartsearch.inline_max_chars`（默认 32768，负数 = 禁用）时整体写入 `fetchdata/search-*.md`（惰性清理 7 天旧文件），响应保留溯源头、统计、每条候选的标题/URL/来源/最多 160 字符摘录、文件路径和 `result_ref`；完整正文用 `cleanfetch` 分段读取，失败清单保留在初始响应。实时与普通缓存命中路径共用，缓存命中生成新引用。已落盘的补抓结果通过结构化状态识别，不进入持久缓存；普通正文包含文件路径文案不影响缓存。网页键采用 `web:v3:`，旧网页缓存不复用、按原 TTL 清理；首次查询可能冷缓存，学术缓存不变。
 
 **freshness 感知缓存 TTL**：smartsearch `time_range` ≤1 月 → 24h，其余默认 6h；学术 `time_range` 分桶 day → 1h / week → 6h（默认）/ month → 24h。时效敏感查询不再命中陈旧缓存。
 

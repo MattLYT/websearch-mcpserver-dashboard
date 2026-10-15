@@ -226,6 +226,7 @@ llm:
   base_url: "https://api.openai.com/v1"   # Env: LLM_BASE_URL
   api_key: ""                               # Env: LLM_API_KEY
   model_id: "gpt-4o-mini"
+  summary_progress_interval: 1              # Min interval (seconds) between summary progress notifications, default 1
 
 # Cache (disabled by default)
 cache:
@@ -486,6 +487,7 @@ dashboard:
 | `ASK_ECHO_SEARCH_INFINITY_API_KEY` | `doubao.api_key` | Official Volcengine MCP-compatible variable name |
 | `LLM_BASE_URL` | `llm.base_url` | |
 | `LLM_API_KEY` | `llm.api_key` | |
+| `LLM_SUMMARY_PROGRESS_INTERVAL` | `llm.summary_progress_interval` | |
 | `MINERU_TOKEN` | `pdf_parser.mineru_token` | MinerU Standard API Token |
 
 > Viper's `AutomaticEnv()` also supports `APP_` prefix for overriding any config field.

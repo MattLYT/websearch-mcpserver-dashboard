@@ -170,6 +170,9 @@ func Open(path string, retentionDays int) (*Store, error) {
 	if _, err = db.Exec(`
 		PRAGMA journal_mode=WAL;
 		PRAGMA busy_timeout=5000;
+		-- WAL 下 NORMAL 免去每次 commit 的 fsync（实测 ~8ms/事件），仅 checkpoint 落盘；
+		-- 遥测为可丢失观测数据，崩溃最多丢最近未 checkpoint 的事务。
+		PRAGMA synchronous=NORMAL;
 		CREATE TABLE IF NOT EXISTS usage_events (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			occurred_at INTEGER NOT NULL,

@@ -263,6 +263,7 @@ proxy:
 #   base_url: "https://api.openai.com/v1"
 #   api_key: "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 #   model_id: "gpt-4o-mini"
+#   summary_progress_interval: 1   # 摘要进度推送最小间隔（秒），默认 1
 
 # ==============================================
 # 缓存配置（可选，默认关闭）

@@ -1,8 +1,8 @@
 # Third-Party Notices
 
-`pkg/fetch/webfetch/pdf_text.go` adapts the CJK text normalization in
+PDF extraction in `pkg/fetch/webfetch/webfetch.go` delegates to
 `github.com/daidaiJ/go-webfetch/parse/pdf.go`, revision `85f5174c4851`.
-The adapted code is distributed under Apache-2.0; its license is reproduced below.
+This dependency is distributed under Apache-2.0; its license is reproduced below.
 
                                  Apache License
                            Version 2.0, January 2004

@@ -2,6 +2,27 @@
 
 [English](CHANGELOG.en.md) | [中文](CHANGELOG.md)
 
+## v3.8.1 — 2026-10-15 (Result delivery and source state fixes)
+
+> Branch `feat/absorb-pr20`: absorbs [PR #20](https://github.com/daidaiJ/websearch-mcpserver/pull/20) by [@MattLYT](https://github.com/MattLYT) (Matt.Li), a follow-up to v3.8.0. The original commit keeps its authorship (merge `1b12267`); a follow-up hardening commit adds race elimination, progress batching and read-hotspot optimizations.
+
+> Credits: the fixes in this release come from PR #20 by [@MattLYT](https://github.com/MattLYT) (structured saved-content state, summary buffer drain, provider-name normalization, cache-key bump, third-party notice correction); the commit keeps its original authorship.
+
+### Added
+- **`llm.summary_progress_interval`**: minimum interval (seconds) for streaming summary progress notifications, default 1; unset or non-positive values fall back to 1s — the zero value is the safe default
+
+### Changed
+- **Batched summary progress notifications** (post-absorb hardening): a progressBatcher pushes MCP progress notifications at most once per interval, removing the per-token notification hotspot (~270-450µs each in benchmarks, a bottleneck with fast providers)
+- **telemetry WAL synchronous=NORMAL** (post-absorb hardening): drops the per-commit fsync (single event 8.2ms→1.1ms); telemetry is lossy observational data, a crash may lose only the most recent un-checkpointed transactions
+- **cleanfetch continuation offset cache** (post-absorb hardening): paged reads cache the character/byte offset of the next page, sequential continuation seeks directly, removing the O(n²/limit) rune scan (128k-character full read 205ms→112ms)
+
+### Fixed
+- **Structured saved-content state** (PR #20, @MattLYT): `SearchResult` gains a `content_saved` flag replacing `**文件路径**:` label matching — ordinary documents that happen to contain that wording are no longer mistaken for transient file notices (cacheable again, no false saved-body notice appended to summaries); `fetch_top_n` delivery state travels with the flag, and `ContentSaved` is the single source of truth
+- **Empty/truncated summaries** (PR #20, @MattLYT; eliminated at the source by post-absorb hardening): LLM `ChatStream` now orders the producer as "close the token channel first, then send the completion", so tokens and the completion signal are strictly ordered and the consumer drains the buffer before blocking on the final result — before the fix a fixed fixture produced 14 empty summaries in 20 repetitions
+- **Web cache keys bumped to `web:v3:`** (PR #20, @MattLYT): legacy `web:v2` entries (possibly carrying file notices without structured state) are no longer reused and expire under their existing TTL; the first lookup after upgrade is a cold-cache request, time-window and config-generation isolation plus academic caching are unchanged, no database migration
+- **Provider-name normalization** (PR #20, @MattLYT): `apipool.engines` values are trimmed/lowercased once in `GetEngines` and returned as a copy, leaving configuration order and values untouched — fixes the "routable but reported inactive" dashboard mismatch
+- **Third-party notice correction** (PR #20, @MattLYT): PDF extraction delegates to go-webfetch (Apache-2.0); `THIRD_PARTY_NOTICES.md` corrected accordingly
+
 ## v3.8.0 — 2026-10-14 (Retrieval reliability and source control)
 
 > Branch `feat/absorb-pr18`: absorbs [PR #18](https://github.com/daidaiJ/websearch-mcpserver/pull/18) by [@MattLYT](https://github.com/MattLYT) (Matt.Li). His six feature commits keep their original authorship; a follow-up adaptation aligns the control-center frontend and pending-PDF semantics. Writes stay loopback-only by default; operators may allow any CIDR via `write_allowed_networks`.

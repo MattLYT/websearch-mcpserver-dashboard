@@ -79,6 +79,7 @@ func applySummarizer(conf config.Config) {
 		return
 	}
 	summarizerInst = llm.NewSummarizer(conf.LLM.BaseURL, conf.LLM.APIKey, conf.LLM.ModelId)
+	summaryProgressInterval = conf.LLM.GetSummaryProgressInterval()
 	log.Info("LLM 摘要功能已启用")
 }
 

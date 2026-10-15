@@ -94,10 +94,15 @@ func (c *Client) ChatWithContext(ctx context.Context, systemPrompt, userPrompt s
 }
 
 // ChatStream 以流式方式调用 LLM，通过 ch 逐 token 返回增量内容。
-// 流结束时关闭 ch，并在 errCh 发送一次结果（nil 表示成功）。
+// 完成契约：先关闭 ch，再向 errCh 发送一次结果（nil 表示成功），
+// 消费端排干 ch 后即可阻塞读取 errCh，token 与完成信号严格有序。
 // 调用方负责消费 ch；ctx 取消（如客户端断开）时中止并报告 ctx.Err()。
 func (c *Client) ChatStream(ctx context.Context, systemPrompt, userPrompt string, ch chan<- string, errCh chan<- error) {
-	defer close(ch)
+	var streamErr error
+	defer func() {
+		close(ch)
+		errCh <- streamErr
+	}()
 
 	reqBody := ChatRequest{
 		Model: c.model,
@@ -109,7 +114,7 @@ func (c *Client) ChatStream(ctx context.Context, systemPrompt, userPrompt string
 	}
 	body, err := json.Marshal(reqBody)
 	if err != nil {
-		errCh <- fmt.Errorf("llm request marshal 失败: %w", err)
+		streamErr = fmt.Errorf("llm request marshal 失败: %w", err)
 		return
 	}
 
@@ -123,13 +128,13 @@ func (c *Client) ChatStream(ctx context.Context, systemPrompt, userPrompt string
 		Post(url)
 	if err != nil {
 		log.Errf("llm stream req failed : %s", err.Error())
-		errCh <- fmt.Errorf("llm api 调用失败: %w", err)
+		streamErr = fmt.Errorf("llm api 调用失败: %w", err)
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode() != 200 {
-		errCh <- fmt.Errorf("llm api 返回错误状态码: %d", resp.StatusCode())
+		streamErr = fmt.Errorf("llm api 返回错误状态码: %d", resp.StatusCode())
 		return
 	}
 
@@ -138,7 +143,7 @@ func (c *Client) ChatStream(ctx context.Context, systemPrompt, userPrompt string
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
-			errCh <- ctx.Err()
+			streamErr = ctx.Err()
 			return
 		default:
 		}
@@ -158,15 +163,14 @@ func (c *Client) ChatStream(ctx context.Context, systemPrompt, userPrompt string
 			select {
 			case ch <- chunk.Choices[0].Delta.Content:
 			case <-ctx.Done():
-				errCh <- ctx.Err()
+				streamErr = ctx.Err()
 				return
 			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		log.Errf("llm stream read failed : %s", err.Error())
-		errCh <- fmt.Errorf("llm 流式读取失败: %w", err)
+		streamErr = fmt.Errorf("llm 流式读取失败: %w", err)
 		return
 	}
-	errCh <- nil
 }

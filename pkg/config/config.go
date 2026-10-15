@@ -548,6 +548,16 @@ type LLMConfig struct {
 	BaseURL string `mapstructure:"base_url"`
 	APIKey  string `mapstructure:"api_key"`
 	ModelId string `mapstructure:"model_id"`
+	// SummaryProgressInterval 摘要流式进度推送的最小间隔（秒），默认 1。
+	SummaryProgressInterval int `mapstructure:"summary_progress_interval"`
+}
+
+// GetSummaryProgressInterval 返回摘要进度推送最小间隔；未配置或非正值默认 1s。
+func (c LLMConfig) GetSummaryProgressInterval() time.Duration {
+	if c.SummaryProgressInterval <= 0 {
+		return time.Second
+	}
+	return time.Duration(c.SummaryProgressInterval) * time.Second
 }
 
 type CacheConfig struct {
@@ -892,7 +902,11 @@ func (c ApipoolConfig) GetStrategy() string {
 // GetEngines 返回供应商顺序，默认 anysearch → baidu → tavily → exa。
 func (c ApipoolConfig) GetEngines() []string {
 	if len(c.Engines) > 0 {
-		return c.Engines
+		engines := make([]string, len(c.Engines))
+		for i, name := range c.Engines {
+			engines[i] = strings.ToLower(strings.TrimSpace(name))
+		}
+		return engines
 	}
 	return []string{"anysearch", "baidu", "tavily", "exa"}
 }

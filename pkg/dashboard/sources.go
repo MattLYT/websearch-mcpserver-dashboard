@@ -346,7 +346,7 @@ func webSourceCatalog(conf config.Config) []SourceView {
 		activateEngines()
 	case config.ModeApipool:
 		for _, name := range conf.Apipool.GetEngines() {
-			activateAPI(strings.ToLower(name))
+			activateAPI(name)
 		}
 		if engineReady["baidu_web"] {
 			active["baidu_web"] = true

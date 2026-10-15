@@ -41,6 +41,11 @@ type resultFile struct {
 	path    string
 	info    os.FileInfo
 	expires time.Time
+	// cacheChar/cacheByte 记录一次成功分页读取的终点（下一页首字符的字符
+	// 偏移与字节偏移），顺序续读直接 Seek 跳过逐 rune 扫描。cacheByte<0 表示
+	// 缓存未建立。任意 (char,byte) 边界对都正确，并发读者最后写入者胜。
+	cacheChar int64
+	cacheByte int64
 }
 
 // References are process-local capabilities, independent of MCP sessions and project labels.
@@ -121,16 +126,27 @@ func readSavedResult(ctx context.Context, _ *mcp.CallToolRequest, params *ReadRe
 		return nil, nil, errResultUnavailable
 	}
 	reader := bufio.NewReader(f)
-	for i := int64(0); i < params.Offset; i++ {
-		if err := ctx.Err(); err != nil {
-			return nil, nil, err
-		}
-		_, _, err := reader.ReadRune()
-		if err == io.EOF {
-			return nil, nil, fmt.Errorf("offset 超过结果字符数")
-		}
-		if err != nil {
+	var base int64    // 计数起点字节偏移（缓存命中时为缓存点，扫描路径为 0）
+	var consumed int64 // 自 base 起累计消费的字节数
+	if params.Offset == file.cacheChar {
+		// 顺序续读命中缓存（含 offset 0）：直接按字节偏移定位，跳过逐 rune 扫描。
+		if _, err := f.Seek(file.cacheByte, io.SeekStart); err != nil {
 			return nil, nil, errResultUnavailable
+		}
+		base = file.cacheByte
+	} else {
+		for i := int64(0); i < params.Offset; i++ {
+			if err := ctx.Err(); err != nil {
+				return nil, nil, err
+			}
+			_, size, err := reader.ReadRune()
+			if err == io.EOF {
+				return nil, nil, fmt.Errorf("offset 超过结果字符数")
+			}
+			if err != nil {
+				return nil, nil, errResultUnavailable
+			}
+			consumed += int64(size)
 		}
 	}
 	var body strings.Builder
@@ -147,11 +163,22 @@ func readSavedResult(ctx context.Context, _ *mcp.CallToolRequest, params *ReadRe
 			return nil, nil, errResultUnavailable
 		}
 		body.WriteRune(r)
+		consumed += int64(size)
 		count++
 	}
 	_, err = reader.Peek(1)
 	if err != nil && err != io.EOF {
 		return nil, nil, errResultUnavailable
+	}
+	if err != io.EOF {
+		// 未到文件尾：记录下一页首字符的字符/字节偏移，供顺序续读 Seek 直达。
+		resultFiles.Lock()
+		if entry, ok := resultFiles.files[params.Ref]; ok && entry.expires.Equal(file.expires) {
+			entry.cacheChar = params.Offset + int64(count)
+			entry.cacheByte = base + consumed
+			resultFiles.files[params.Ref] = entry
+		}
+		resultFiles.Unlock()
 	}
 	return nil, &ReadResultOutput{Ref: params.Ref, Content: body.String(), Offset: params.Offset, NextOffset: params.Offset + int64(count), EOF: err == io.EOF}, nil
 }

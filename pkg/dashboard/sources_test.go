@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"encoding/json"
+	"net/http"
 	"slices"
 	"strings"
 	"testing"
@@ -9,6 +10,8 @@ import (
 
 	"websearch/pkg/antirobot"
 	"websearch/pkg/config"
+	"websearch/pkg/search/mode"
+	"websearch/pkg/search/provider"
 	"websearch/pkg/telemetry"
 )
 
@@ -46,6 +49,54 @@ func fullWebConfig() config.Config {
 		Bing:       config.BingConfig{Enabled: true},
 		Google:     config.GoogleConfig{Enabled: true},
 		DuckDuckGo: config.DuckDuckGoConfig{Enabled: true},
+	}
+}
+
+func TestOverviewApipoolProviderNamesMatchRouting(t *testing.T) {
+	off := false
+	for _, tc := range []struct {
+		name       string
+		engine     string
+		key        string
+		enabled    *bool
+		wantActive bool
+	}{
+		{name: "mixed case and spaces", engine: " TaViLy ", key: "test-key", wantActive: true},
+		{name: "canonical name", engine: "tavily", key: "test-key", wantActive: true},
+		{name: "disabled with key", engine: " TaViLy ", key: "test-key", enabled: &off},
+		{name: "missing key", engine: " TaViLy "},
+		{name: "unknown provider", engine: " unknown ", key: "test-key"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			conf := config.Config{
+				Mode:    config.ModeApipool,
+				Apipool: config.ApipoolConfig{Engines: []string{tc.engine}},
+				Tavily:  config.TavilyConfig{APIKey: tc.key, Enabled: tc.enabled},
+			}
+			var pool *provider.KeyPool
+			if tc.key != "" {
+				var err error
+				pool, err = provider.NewKeyPool([]string{tc.key})
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			route := mode.BuildApipoolMode(conf, nil, nil, pool, nil, nil, nil)
+			if (route != nil) != tc.wantActive {
+				t.Fatalf("actual apipool route exists = %v, want %v", route != nil, tc.wantActive)
+			}
+			handler, _ := newTestHandler(t)
+			mux := http.NewServeMux()
+			New(conf, handler.store, nil, nil).Register(mux, func(fn http.HandlerFunc) http.HandlerFunc { return fn })
+			var out dashboardOverview
+			if err := json.Unmarshal(getJSON(t, mux, "/__admin/api/overview"), &out); err != nil {
+				t.Fatal(err)
+			}
+			if source := sourceByID(t, out.Sources, "tavily"); source.Active != (route != nil) ||
+				source.Configured != (tc.key != "") || source.Enabled != (tc.enabled == nil) {
+				t.Fatalf("overview Tavily differs from routing or configuration: %+v; route exists = %v", source, route != nil)
+			}
+		})
 	}
 }
 
