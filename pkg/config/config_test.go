@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -484,6 +485,22 @@ func TestApipoolConfig_GetEngines_DefaultIncludesAnysearch(t *testing.T) {
 	// 显式配置优先
 	if got := (ApipoolConfig{Engines: []string{"tavily"}}).GetEngines(); len(got) != 1 || got[0] != "tavily" {
 		t.Errorf("explicit engines should win, got %v", got)
+	}
+}
+
+func TestApipoolConfig_GetEngines_NormalizesWithoutMutatingConfiguration(t *testing.T) {
+	original := []string{" TaViLy ", "EXA", " unknown ", "", "tavily"}
+	c := ApipoolConfig{Engines: slices.Clone(original)}
+	got := c.GetEngines()
+	if want := []string{"tavily", "exa", "unknown", "", "tavily"}; !slices.Equal(got, want) {
+		t.Fatalf("normalized engines = %v, want %v", got, want)
+	}
+	if !slices.Equal(c.Engines, original) {
+		t.Fatalf("GetEngines mutated configuration: %v", c.Engines)
+	}
+	got[0] = "changed"
+	if !slices.Equal(c.Engines, original) {
+		t.Fatalf("GetEngines returned configuration storage: %v", c.Engines)
 	}
 }
 

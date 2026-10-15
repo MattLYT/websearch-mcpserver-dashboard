@@ -234,11 +234,11 @@ func TestEnrichTopN(t *testing.T) {
 		{Title: "b", Url: "https://b.example/x", Content: "snip-b"},
 		{Title: "c", Url: "https://c.example/x", Content: "snip-c"},
 	}
-	fetch := func(_ context.Context, rawURL string) (string, error) {
+	fetch := func(_ context.Context, rawURL string) (pageContent, error) {
 		if strings.Contains(rawURL, "b.example") {
-			return "", fmt.Errorf("fail")
+			return pageContent{}, fmt.Errorf("fail")
 		}
-		return "BODY-" + rawURL, nil
+		return pageContent{text: "BODY-" + rawURL}, nil
 	}
 	out := enrichTopN(context.Background(), in, 2, fetch)
 	if out[0].Content != "BODY-https://a.example/x" {
@@ -273,8 +273,8 @@ func TestEnrichTopN_SkipsPrivate(t *testing.T) {
 // 拉不到全文是网站防护所致而非临时故障。
 func TestEnrichTopN_AntiBotAnnotated(t *testing.T) {
 	in := []search.SearchResult{{Title: "a", Url: "https://a.example/x", Content: "snip-a"}}
-	fetch := func(_ context.Context, rawURL string) (string, error) {
-		return "", fmt.Errorf("被网站反爬机制拦截(WAF)")
+	fetch := func(_ context.Context, rawURL string) (pageContent, error) {
+		return pageContent{}, fmt.Errorf("被网站反爬机制拦截(WAF)")
 	}
 	out := enrichTopN(context.Background(), in, 1, fetch)
 	if !strings.Contains(out[0].Content, "反爬防护拦截") {
@@ -287,9 +287,9 @@ func TestEnrichTopN_SkipsLongContent(t *testing.T) {
 	long := strings.Repeat("正文", 600) // > minContentLenForFetch
 	in := []search.SearchResult{{Title: "a", Url: "https://a.example/x", Content: long}}
 	called := false
-	fetch := func(_ context.Context, rawURL string) (string, error) {
+	fetch := func(_ context.Context, rawURL string) (pageContent, error) {
 		called = true
-		return "SHOULD-NOT-USE", nil
+		return pageContent{text: "SHOULD-NOT-USE"}, nil
 	}
 	out := enrichTopN(context.Background(), in, 1, fetch)
 	if called {
@@ -304,15 +304,15 @@ func TestEnrichTopN_SkipsLongContent(t *testing.T) {
 // 抓取函数返回文件路径与读取提示，条目内容应包含路径而非 ⚠️ 失败标注。
 func TestEnrichTopN_SavedToFileNotFailure(t *testing.T) {
 	in := []search.SearchResult{{Title: "a", Url: "https://a.example/x", Content: "snip"}}
-	fetch := func(_ context.Context, rawURL string) (string, error) {
-		return formatSavedToFileResult(&webfetch.Result{
+	fetch := func(_ context.Context, rawURL string) (pageContent, error) {
+		return pageContent{text: formatSavedToFileResult(&webfetch.Result{
 			Title:      "Big Doc",
 			Mode:       "saved_to_file",
 			FilePath:   `D:\data\webfetch\test.md`,
 			TotalLines: 500,
 			TotalChars: 50000,
 			AgentHint:  "Use read_file to read",
-		}), nil
+		}), savedToFile: true}, nil
 	}
 	out := enrichTopN(context.Background(), in, 1, fetch)
 	if strings.Contains(out[0].Content, "正文抓取失败") {

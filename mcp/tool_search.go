@@ -197,12 +197,12 @@ func effectiveFetchTopN(param *int) int {
 }
 
 func webSearchCacheQuery(query string, months, n int) string {
-	// Legacy keys have no reliable time window and must not be reused.
+	// Older keys may contain file notices without structured state; do not reuse them.
 	key, _ := json.Marshal(struct {
 		Query             string
 		Months, FetchTopN int
 	}{query, months, n})
-	return "web:v2:" + string(key)
+	return "web:v3:" + string(key)
 }
 
 func finishCachedWebSearch(_ context.Context, rec *cache.CacheRecord, hitType, query, intent, cacheQuery string, requestCache *cache.Cache) (*mcp.CallToolResult, bool) {
@@ -257,7 +257,7 @@ func asyncSummarize(query, cacheQuery, intent string, results []search.SearchRes
 // ttl 为本次缓存写入的存活时长（按查询时间范围分桶，见 cacheTTLForMonths）；
 // prov 为响应头溯源头（retrieved_at / cache_age_seconds / usage_note）。
 func finishWebSearch(ctx context.Context, req *mcp.CallToolRequest, query, intent, cacheQuery string, results []search.SearchResult, diag *searchcore.SearchDiagnostics, ttl time.Duration, prov provenance, requestCache *cache.Cache) (*mcp.CallToolResult, any, error) {
-	// File notices are transient, including legacy path-only notices; never persist them.
+	// File notices are transient; never persist them.
 	if hasTransientResultFiles(results) {
 		requestCache = nil
 	}
@@ -279,7 +279,7 @@ func finishWebSearch(ctx context.Context, req *mcp.CallToolRequest, query, inten
 				_ = requestCache.Store(cacheQuery, intent, false, results, output, ttl)
 			}
 			for i, result := range results {
-				if strings.Contains(result.Content, "**文件路径**:") {
+				if result.ContentSaved {
 					output += "\n\n" + searchcore.FormatMD(i+1, result.Title, result.Url, result.Content)
 				}
 			}
@@ -305,7 +305,7 @@ func finishWebSearch(ctx context.Context, req *mcp.CallToolRequest, query, inten
 
 func hasTransientResultFiles(results []search.SearchResult) bool {
 	for _, result := range results {
-		if strings.Contains(result.Content, "**文件路径**:") {
+		if result.ContentSaved {
 			return true
 		}
 	}
@@ -333,7 +333,12 @@ func appendDiagnostics(text string, diag *searchcore.SearchDiagnostics, resultCo
 	return appended
 }
 
-type pageFetcher func(ctx context.Context, rawURL string) (string, error)
+type pageContent struct {
+	text        string
+	savedToFile bool
+}
+
+type pageFetcher func(ctx context.Context, rawURL string) (pageContent, error)
 
 // minContentLenForFetch 结果已有足量正文（如 Tavily raw_content / Exa text）时
 // 跳过二次抓取：fetch_top_n 只补 HTML 引擎摘要条目的正文。
@@ -371,12 +376,12 @@ func enrichTopN(ctx context.Context, results []search.SearchResult, n int, fetch
 				out[i].Content = annotateFetchFailure(out[i].Content, err)
 				return
 			}
-			if strings.TrimSpace(body) == "" {
+			if strings.TrimSpace(body.text) == "" {
 				log.Warnf("fetch_top_n 抓取结果为空: %s", u)
 				out[i].Content = annotateFetchFailure(out[i].Content, errors.New("页面内容为空(可能被反爬)"))
 				return
 			}
-			out[i].Content = body
+			out[i].Content, out[i].ContentSaved = body.text, body.savedToFile
 		}(i, u)
 	}
 	wg.Wait()
@@ -410,32 +415,32 @@ func isAntiBotFailure(err error) bool {
 // fetchPageContent fetch_top_n 的单条抓取路径：SSRF 预检 + HEAD 体积预检 +
 // webfetch 抓取 + 字节上限截断，与 cleanfetch 的 fetchCleanPage 同一套防线（F4）。
 // webfetch 未就绪时惰性初始化，仍失败则报错（fail closed，F1）。
-func fetchPageContent(ctx context.Context, rawURL string) (string, error) {
+func fetchPageContent(ctx context.Context, rawURL string) (pageContent, error) {
 	if err := validateURLSecurity(rawURL); err != nil {
-		return "", err
+		return pageContent{}, err
 	}
 	if err := headCheck(ctx, rawURL); err != nil {
-		return "", err
+		return pageContent{}, err
 	}
 	if !ensureWebFetch() {
-		return "", fmt.Errorf("webfetch 未初始化，fetch_top_n 需要 cleanfetch/pdf_parser 至少启用其一")
+		return pageContent{}, fmt.Errorf("webfetch 未初始化，fetch_top_n 需要 cleanfetch/pdf_parser 至少启用其一")
 	}
 	res, err := webfetchInst.Fetch(ctx, rawURL)
 	if err != nil {
-		return "", err
+		return pageContent{}, err
 	}
 	if res == nil {
-		return "", fmt.Errorf("empty content")
+		return pageContent{}, fmt.Errorf("empty content")
 	}
 	// 大正文被 webfetch 落盘（超过 max_inline_lines）：Markdown 为空但抓取成功，
 	// 返回文件路径与读取提示，不能误判为抓取失败。
 	if res.Mode == "saved_to_file" && res.FilePath != "" {
-		return formatSavedToFileResult(res), nil
+		return pageContent{text: formatSavedToFileResult(res), savedToFile: true}, nil
 	}
 	if strings.TrimSpace(res.Markdown) == "" {
-		return "", fmt.Errorf("empty content")
+		return pageContent{}, fmt.Errorf("empty content")
 	}
-	return truncateFetchContent(res.Markdown), nil
+	return pageContent{text: truncateFetchContent(res.Markdown)}, nil
 }
 
 // formatSavedToFileResult 将 saved_to_file 模式结果格式化进搜索结果条目，
