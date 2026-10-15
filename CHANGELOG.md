@@ -2,6 +2,27 @@
 
 [English](CHANGELOG.en.md) | [中文](CHANGELOG.md)
 
+## v3.8.1 — 2026-10-15（正文交付与来源状态修复）
+
+> 分支 `feat/absorb-pr20`：吸收 [@MattLYT](https://github.com/MattLYT)（Matt.Li）的 [PR #20](https://github.com/daidaiJ/websearch-mcpserver/pull/20)，v3.8.0 的后续修复。原提交保留原作者署名（merge `1b12267`）；吸收后追加加固提交（竞态消除、进度通知攒批与读取热点优化）。
+
+> 致谢：本版修复来自 [@MattLYT](https://github.com/MattLYT) 的 PR #20（结构化正文交付状态、摘要缓冲消费、供应商名规范化、缓存键升级、第三方署名勘正）；其提交保留原作者署名进入本版。
+
+### 新增
+- **`llm.summary_progress_interval`**：摘要流式进度推送最小间隔（秒），默认 1；未配置或非正值回退 1s，零值即安全默认
+
+### 变更
+- **摘要进度通知攒批**（吸收后加固）：progressBatcher 按间隔攒批推送 MCP 进度通知，消除每 token 一次的通知热点（实测 ~270-450µs/次，快速供应商下成为瓶颈）
+- **telemetry WAL synchronous=NORMAL**（吸收后加固）：免去逐 commit fsync（单事件 8.2ms→1.1ms）；遥测为可丢失观测数据，崩溃最多丢最近未 checkpoint 的事务
+- **cleanfetch 续读偏移缓存**（吸收后加固）：分页读取缓存字符/字节偏移，顺序续读 Seek 直达，消除 O(n²/limit) 逐 rune 扫描（128k 字符完整读回 205ms→112ms）
+
+### 修复
+- **正文交付状态结构化**（PR #20，@MattLYT）：`SearchResult` 新增 `content_saved` 标记，替代正文 `**文件路径**:` 文案识别——普通文档恰好含该文案不再被误判为临时文件（不再错误跳过缓存、不再附加为落盘提示）；`fetch_top_n` 的落盘状态随结构化标记传递，`ContentSaved` 为唯一判据
+- **摘要空结果/丢尾段**（PR #20，@MattLYT；吸收后加固从源头消除）：LLM `ChatStream` 生产端定序「先关 token 通道后发完成信号」，token 与完成信号严格有序，消费端排干缓冲后阻塞读取最终结果——修复前固定夹具重复 20 次出现 14 次空摘要
+- **网页缓存键升级 `web:v3:`**（PR #20，@MattLYT）：旧 `web:v2` 记录（可能含无结构化状态的文件提示）不再复用，按原 TTL 清理；升级后首次查询为冷缓存，时间窗口与配置代次隔离、学术缓存均不变，无数据库迁移
+- **供应商名规范化**（PR #20，@MattLYT）：`apipool.engines` 值的大小写/首尾空白在 `GetEngines` 统一归一并返回副本，不改写配置原值与顺序——修复「可路由但控制中心显示未激活」的不一致
+- **第三方署名勘正**（PR #20，@MattLYT）：PDF 提取为 go-webfetch 委托（Apache-2.0），`THIRD_PARTY_NOTICES.md` 相应修正
+
 ## v3.8.0 — 2026-10-14（检索可靠性与来源控制）
 
 > 分支 `feat/absorb-pr18`：吸收 [@MattLYT](https://github.com/MattLYT)（Matt.Li）的 [PR #18](https://github.com/daidaiJ/websearch-mcpserver/pull/18)。六个功能提交保留原作者署名；其后适配提交对齐控制中心前端与 PDF pending 语义。写操作默认仅 loopback，用户可自行配置 `write_allowed_networks`。
