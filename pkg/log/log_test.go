@@ -5,10 +5,30 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"websearch/pkg/config"
 )
+
+// TestCallerPointsAtCallSite caller 字段必须指向真实调用点，而非 zerolog 内部帧。
+func TestCallerPointsAtCallSite(t *testing.T) {
+	dir := t.TempDir()
+	NewLoggerTo(io.Discard, dir, config.LogConfig{MaxSize: 1, MaxAge: 1})
+	defer func() { _ = CloseFile() }()
+	_, thisFile, _, _ := runtime.Caller(0)
+	Info("caller-check")
+	data, err := os.ReadFile(filepath.Join(dir, "websearch.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(data, []byte("zerolog")) {
+		t.Fatalf("caller points into zerolog internals: %s", data)
+	}
+	if !bytes.Contains(data, []byte(filepath.Base(thisFile))) {
+		t.Fatalf("caller does not point at the call site (%s): %s", thisFile, data)
+	}
+}
 
 func TestNewLoggerTo_DoesNotWriteStdout(t *testing.T) {
 	r, w, err := os.Pipe()

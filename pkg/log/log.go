@@ -52,7 +52,10 @@ func NewLoggerTo(console io.Writer, logDir string, logConf config.LogConfig) *ze
 	}
 
 	multiWriter := zerolog.MultiLevelWriter(writers...)
-	logger := zerolog.New(multiWriter).With().CallerWithSkipFrameCount(1).Timestamp().Logger()
+	// CallerWithSkipFrameCount(3)：zerolog caller hook 自带 2 层内部帧，
+	// 本仓库日志一律经包级 helper（Info/Infof/…）再进 zerolog，多 1 层；
+	// 3 才能让 caller 指向真实调用点，1 会落进 zerolog 内部（event.go）。
+	logger := zerolog.New(multiWriter).With().CallerWithSkipFrameCount(3).Timestamp().Logger()
 	defaultlog = &logger
 	return defaultlog
 }

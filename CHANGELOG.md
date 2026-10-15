@@ -2,6 +2,11 @@
 
 [English](CHANGELOG.en.md) | [中文](CHANGELOG.md)
 
+## Unreleased
+
+### 修复
+- **日志 caller 指向 zerolog 内部**：`pkg/log` 的 `CallerWithSkipFrameCount` 由 1 改为 3（zerolog caller hook 自带 2 层内部帧 + 包级 helper 1 层），caller 字段恢复指向真实调用点，不再出现 `github.com/rs/zerolog@…/event.go:131`
+
 ## v3.8.1 — 2026-10-15（正文交付与来源状态修复）
 
 > 分支 `feat/absorb-pr20`：吸收 [@MattLYT](https://github.com/MattLYT)（Matt.Li）的 [PR #20](https://github.com/daidaiJ/websearch-mcpserver/pull/20)，v3.8.0 的后续修复。原提交保留原作者署名（merge `1b12267`）；吸收后追加加固提交（竞态消除、进度通知攒批与读取热点优化）。
