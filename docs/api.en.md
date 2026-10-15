@@ -187,7 +187,7 @@ Pass the returned `result_ref` unchanged as `cleanfetch.result_ref`, starting at
 
 References are random process-local capabilities, independent of MCP sessions and `project`, subject to endpoint authentication. They grant access only to the referenced service-generated file. Search references last at most 7 days; ordinary fetches use `cleanfetch.file_ttl` (default 24 hours), with expiry in the notice. Restart, cleanup or detected identity/size/modification-time changes yield `result_unavailable`; repeat the original tool call. The output directory requires a trusted host; checks do not defend against writers deliberately preserving metadata. Temporary file notices are not persisted or reused from old caches. Ordinary long search cache hits generate fresh files and references. Successful summaries retain saved-body references. These are not permanent citations, paths, or MinerU `task_ref` values.
 
-Saved enriched content is identified by structured state, not by file-path wording in the body. Web cache keys use `web:v3:`; older entries are not reused and retain their existing TTL. The first lookup may be a cold-cache request; academic caching is unchanged.
+Saved enriched content is identified by structured state, not by file-path wording in the body. Web cache keys use `web:v3:`; older entries are not reused and retain their existing TTL. The first lookup may be a cold-cache request; academic caching is unchanged. Summary progress notifications are batched by `llm.summary_progress_interval` (default 1s); each message carries the text accumulated since the last push.
 
 #### Client Config Examples
 

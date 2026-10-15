@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 	"websearch/pkg/llm"
 	"websearch/pkg/log"
 	"websearch/pkg/search"
@@ -25,31 +26,59 @@ func streamSummarize(ctx context.Context, req *mcp.CallToolRequest, query, inten
 	go summarizerInst.SummarizeStream(ctx, query, intent, results, ch, errCh)
 
 	var sb strings.Builder
+	progress := newProgressBatcher(ctx, req)
 	for {
 		select {
 		case token, ok := <-ch:
 			if !ok {
-				// 流结束；errCh 可能已发送结果（缓冲 1，非阻塞读取）
-				select {
-				case err := <-errCh:
-					if err != nil {
-						return "", err
-					}
-				default:
-				}
-				return llm.FormatCitation(query, sb.String(), results), nil
+				// 完成契约（pkg/llm.ChatStream）：先关 ch 后发 errCh，
+				// token 排干后阻塞读取必然拿到最终结果（含错误）。
+				progress.flush()
+				return llm.FormatCitation(query, sb.String(), results), <-errCh
 			}
 			sb.WriteString(token)
-			notifyProgress(ctx, req, 2, 2, token)
-		case err := <-errCh:
-			if err != nil {
-				return "", err
-			}
-			// Successful completion can precede consumption of queued tokens.
+			progress.token(token)
 		case <-ctx.Done():
 			return "", ctx.Err()
 		}
 	}
+}
+
+// progressBatcher 累积摘要 token 文本，按可配置的最小间隔批量推送进度通知
+// （llm.summary_progress_interval，默认 1s）。实测每 token 一次 MCP 通知
+// 耗时 ~270-450µs（mock LLM 基准，BenchmarkStreamSummarizeProgressPerToken），
+// 快速供应商下成为瓶颈；攒批后通知频率封顶 1/interval。
+type progressBatcher struct {
+	ctx      context.Context
+	req      *mcp.CallToolRequest
+	interval time.Duration
+	sb       strings.Builder
+	last     time.Time
+}
+
+// summaryProgressInterval 进度推送最小间隔，启动时由 applySummarizer 注入。
+var summaryProgressInterval = time.Second
+
+func newProgressBatcher(ctx context.Context, req *mcp.CallToolRequest) *progressBatcher {
+	return &progressBatcher{ctx: ctx, req: req, interval: summaryProgressInterval}
+}
+
+// token 记录一个摘要 token，距上次推送超过 interval 时批量推送。
+func (p *progressBatcher) token(tok string) {
+	p.sb.WriteString(tok)
+	if time.Since(p.last) >= p.interval {
+		p.flush()
+	}
+}
+
+// flush 推送累积文本并重置计时；空批无副作用。
+func (p *progressBatcher) flush() {
+	if p.sb.Len() == 0 {
+		return
+	}
+	notifyProgress(p.ctx, p.req, 2, 2, p.sb.String())
+	p.last = time.Now()
+	p.sb.Reset()
 }
 
 // notifyProgress 向 MCP 客户端推送进度通知（StreamableHTTP 传输下实时到达）。

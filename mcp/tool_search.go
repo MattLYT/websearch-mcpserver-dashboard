@@ -303,6 +303,10 @@ func finishWebSearch(ctx context.Context, req *mcp.CallToolRequest, query, inten
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: searchcore.ProvenanceHeader(prov.retrievedAt, prov.cacheAge) + appendDiagnostics(ret, diag, len(results))}}}, nil, nil
 }
 
+// hasTransientResultFiles 判断结果中是否含临时文件提示（不持久缓存、不进摘要附加）。
+// 契约：ContentSaved 是唯一判据。任何往 result.Content 写入
+// formatSavedToFileResult 输出的代码必须同步设置 ContentSaved，
+// 否则临时提示会被当普通正文写进缓存并在命中时复用。
 func hasTransientResultFiles(results []search.SearchResult) bool {
 	for _, result := range results {
 		if result.ContentSaved {

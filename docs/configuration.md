@@ -223,6 +223,7 @@ llm:
   base_url: "https://api.openai.com/v1"   # 环境变量: LLM_BASE_URL
   api_key: ""                               # 环境变量: LLM_API_KEY
   model_id: "gpt-4o-mini"
+  summary_progress_interval: 1              # 摘要进度推送最小间隔（秒），默认 1
 
 # 缓存（默认关闭）
 cache:
@@ -482,6 +483,7 @@ dashboard:
 | `ASK_ECHO_SEARCH_INFINITY_API_KEY` | `doubao.api_key` | 火山官方 MCP 兼容变量名 |
 | `LLM_BASE_URL` | `llm.base_url` | |
 | `LLM_API_KEY` | `llm.api_key` | |
+| `LLM_SUMMARY_PROGRESS_INTERVAL` | `llm.summary_progress_interval` | |
 | `MINERU_TOKEN` | `pdf_parser.mineru_token` | MinerU 精准解析 API Token |
 
 > Viper 的 `AutomaticEnv()` 还支持 `APP_` 前缀覆盖任意配置项。
