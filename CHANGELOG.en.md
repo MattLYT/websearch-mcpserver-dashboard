@@ -2,6 +2,11 @@
 
 [English](CHANGELOG.en.md) | [中文](CHANGELOG.md)
 
+## Unreleased
+
+### Fixed
+- **Wikipedia engine returned zero hits for operator-bearing queries**: MediaWiki `list=search` does not understand `site:` / `lang:` / `after:` / `before:`. Upstream query syntax embeds these operators, and MediaWiki treats them as literal terms, so the whole query returned 0 results. The engine now strips them before searching (falling back to the original query when sanitizing would leave nothing), turning `site:go.dev/ref/spec Go language specification interface types` from 0 hits into normal matches. Adds `sanitizeWikiQuery` with unit tests.
+
 ## v3.8.1 — 2026-10-15 (Result delivery and source state fixes)
 
 > Branch `feat/absorb-pr20`: absorbs [PR #20](https://github.com/daidaiJ/websearch-mcpserver/pull/20) by [@MattLYT](https://github.com/MattLYT) (Matt.Li), a follow-up to v3.8.0. The original commit keeps its authorship (merge `1b12267`); a follow-up hardening commit adds race elimination, progress batching and read-hotspot optimizations.

@@ -2,6 +2,11 @@
 
 [English](CHANGELOG.en.md) | [中文](CHANGELOG.md)
 
+## Unreleased
+
+### 修复
+- **Wikipedia 引擎对带操作符的查询恒零命中**：MediaWiki `list=search` 不支持 `site:` / `lang:` / `after:` / `before:`，而上游检索语法会把它们拼进 query，MediaWiki 当成普通词面处理，整条查询返回 0 条。引擎现在检索前先剥离这些操作符（清洗后为空则回退原查询），`site:go.dev/ref/spec Go language specification interface types` 由 0 条恢复为正常命中。新增 `sanitizeWikiQuery` 及单测。
+
 ## v3.8.1 — 2026-10-15（正文交付与来源状态修复）
 
 > 分支 `feat/absorb-pr20`：吸收 [@MattLYT](https://github.com/MattLYT)（Matt.Li）的 [PR #20](https://github.com/daidaiJ/websearch-mcpserver/pull/20)，v3.8.0 的后续修复。原提交保留原作者署名（merge `1b12267`）；吸收后追加加固提交（竞态消除、进度通知攒批与读取热点优化）。
