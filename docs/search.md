@@ -375,6 +375,10 @@ mcp_hub:
 
 **单篇精确查询（DOI / arXiv id 短路）**：已持有 DOI 或 arXiv id 时直接将其作为 `query`，如 `10.1038/s41586-020-2649-2`、`doi:10.1038/s41586-020-2649-2`、`https://doi.org/10.1038/s41586-020-2649-2`，或 `2401.04085`、`arXiv:2401.04085`、`https://arxiv.org/abs/2401.04085`。此时走单篇精确查询并忽略 `time_range` / `page`，仍遵守已启用来源与指定 `engines`；拿到结果中的 `pdf_url` 后，可将该 URL 作为 `pdf_parser` 工具的 `path` 参数解析全文，不要再用标题做关键词搜索。
 
+**论文身份与全文入口**：精确查询先核对规范化 DOI / arXiv 标识（包括显式版本），不直接采信首条结果。`results[].paper` 分开记录请求、元数据与正文身份；`matched` / `mismatch` / `unverified` 不互相继承，搜索命中不表示已读正文。PDF 候选、OA/落地页与实际响应类型分开；`content_type` 只反映已观察到的内容，无法观察时为 `unknown`，不靠 URL 后缀断定。
+
+`oa_completion` 报告已有 OA 补全的状态：`not_configured`、`candidate_present`、`no_confirmed_doi`、`identity_unverified`、`shared_doi_lookup`、`completed`、`no_pdf_found` 或 `failed`。每个已确认 DOI 最多查一次；未找到 PDF 或查询失败不等于付费墙。
+
 结果按学术评分增强排序（默认开启）：RRF 融合排名 + 引用数 / 期刊权威 / PDF 全文 / 新鲜度信号，低分论文自动过滤（Top-1 + 每引擎保底）。配置项：`academic.enhance`（默认 true）、`academic.threshold`（默认 0.02）。
 
 无可用结果且存在引擎失败时，返回含逐引擎原因的失败提示，与正常空结果区分。DBLP 的已识别 Anubis HTML 挑战页报告人机验证，未识别的异常响应仍保留解析错误；不会自动绕过验证或变更启用配置。
@@ -387,6 +391,7 @@ mcp_hub:
 |------|------|------|------|
 | `url` | string | URL 模式与 `urls` 至少一者 | 网页 URL，与 `result_ref` 互斥 |
 | `urls` | string[] | URL 模式与 `url` 至少一者 | 批量抓取，与 `url` 合并去重后最多 5 个 |
+| `expected_paper` | string | 否 | 预期 DOI / arXiv 标识（可含版本），仅 URL 模式，独立核对正文身份 |
 | `result_ref` | string | 引用模式必填 | 原工具返回的引用，与 `url`/`urls` 互斥 |
 | `offset` | integer | 否 | 仅引用模式，Unicode 偏移，默认 0 |
 | `limit` | integer | 否 | 仅引用模式，默认/0 为 4096，上限 8192 |
@@ -399,6 +404,8 @@ URL 抓取需配置 `cleanfetch.enabled: true`；引用读取不受此开关限�
 
 **适用边界**：抓取已知 URL 的正文；发现新来源请先用 `smartsearch`（本工具不做检索）。
 
+**正文状态与身份**：结构化结果的 `body.status` 为 `available` / `empty` / `unavailable` / `unknown`，另有稳定 `body.reason`、来源及 `paper` 身份；批量结果逐条报告。`available` 只表示提取正文可用，不保证相关、真实或足够回答；标题/导航空壳不算正文，有效短正文仍保留。`expected_paper` 接受 DOI 或 arXiv（可含版本），独立核对取得的正文；未传时不声明指定论文匹配。它仅用于 URL 模式，不能与 `result_ref` 混用；引用续读沿用保存的身份。
+
 ### `pdf_parser` — PDF 解析
 
 **本地精准归档**：配置 MinerU Token 后，本地 PDF 直接走标准上传接口，识别表格、公式与多栏版式。省略 `pages` 时目标为整本，每次新增解析量受 `mineru_page_budget` 约束；已完成页及已提交任务会复用。结果长期保存在 PDF 旁的 `<文件名>.mineru/`，包含 Markdown、图片、原始 ZIP 和来源/页码/任务记录。再次传原 PDF 或包目录可接续或重新读取。可用 `output_dir` 显式指定可写的解析包目录；默认目录不可写时在上传前报错。该参数不能与 `task_ref` 或作为 `path` 的解析包目录混用。PDF 更新后，新结果成功保存再替换登记的自动生成文件，额外放入的用户资料保留。Agent 先抽查已有 Markdown，够用就复用；少量查阅可使用宿主阅读。本地精准归档不会静默降级成普通文本提取。
@@ -410,6 +417,9 @@ URL 抓取需配置 `cleanfetch.enabled: true`；引用读取不受此开关限�
 | `task_ref` | string | ❌ | 查询/取回已有 MinerU 任务：`standard:<task_id>`、`batch:<batch_id>` 或 `agent:<task_id>`。省略 `path/pages/output_dir`，保留原任务选页 |
 | `wait_seconds` | integer | ❌ | 0-1800 秒，每个 MinerU 任务的等待上限；新任务默认 300，续查默认 0（只查一次） |
 | `output_dir` | string | ❌ | 显式指定本地解析包目录，默认 PDF 旁同名 `.mineru/`；与 `task_ref` 或作为 `path` 的包目录互斥 |
+| `read_blocks` | bool | 否 | 只读既有解析包的原页与文本/表格块，默认 false |
+
+**只读原页与块**：`pdf_parser(path, read_blocks=true, pages="4,5")` 仅读取既有包中登记的已完成批次，优先使用 `work.json`，支持尚未整包完成的包；不上传、不续传、不新解析，不能与 `task_ref` 或 `output_dir` 混用。批次 `page_idx` 按登记的 `pages` 映射为原 PDF 的 1-based 页，不猜测印刷页码或 Markdown 行号。结果保留包/块版本身份、批次、顺序、原始文本/表体与已有注释；侧车缺失或不支持时明确降级到登记的 Markdown，非法路径直接拒绝。`selected_pages` / `remaining_pages` 描述本次选择，`requested_pages` / `covered_pages` 描述包历史，`total_pages` / `whole_document_complete` 描述整本解析覆盖，均不表示已读。长结果通过 `result_ref` 与 `cleanfetch` 分页；块引用只适用于该包版本。图片路径与图注不表示已读图像，未知几何位置不提供精确 bbox。
 
 需配置 `pdf_parser.enabled: true`。大文档自动存储到临时文件。远程 URL 走与 `cleanfetch` 相同的 SSRF 预检和 HEAD 预检（含重定向逐跳复查），不会被拼成 `file://`。
 
@@ -429,7 +439,7 @@ URL 抓取需配置 `cleanfetch.enabled: true`；引用读取不受此开关限�
 
 #### cleanfetch 引用读取
 
-始终注册，只接受本服务返回的 `result_ref`。调用 `cleanfetch(result_ref, offset=0, limit=4096)`，按 `next_offset` 续读到 `eof=true`；单次最多 8192 Unicode 字符，正文在 `content`。响应只返回一份 JSON 文本，不再把同一份正文重复放进 `structuredContent`。无需 Docker 或宿主文件权限，不重新请求来源；沿用 `/mcp` 鉴权。引用跨 MCP 会话有效，重启、过期/清理或检测到文件身份/大小/修改时间变化后失效。完整契约见 [API 文档](api.md#长结果读取)。
+始终注册，只接受本服务返回的 `result_ref`。调用 `cleanfetch(result_ref, offset=0, limit=4096)`，按 `next_offset` 续读到 `eof=true`；单次最多 8192 Unicode 字符，正文在 `content`，保存的正文/身份元数据在 `metadata`；旧引用缺少元数据时状态为 `unknown`。`eof` 仅表示交付结束，不表示证据充分或已读完整来源。响应只返回一份 JSON 文本，不再把同一份正文重复放进 `structuredContent`。无需 Docker 或宿主文件权限，不重新请求来源；沿用 `/mcp` 鉴权。引用跨 MCP 会话有效，重启、过期/清理或检测到文件身份/大小/修改时间变化后失效。完整契约见 [API 文档](api.md#长结果读取)。
 
 ### `file_search` — 本地文件快速检索
 

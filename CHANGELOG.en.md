@@ -2,6 +2,13 @@
 
 [English](CHANGELOG.en.md) | [中文](CHANGELOG.md)
 
+## Unreleased
+
+### Added
+
+- **Body and paper identity evidence**: `cleanfetch` returns separate body status, reason and identity, supports `expected_paper`, and retains metadata across saved-body paging. Exact academic lookup checks DOI/arXiv and versions while separating metadata/body identity, full-text candidate types and OA completion states.
+- **Read-only blocks from existing PDF packages**: `pdf_parser.read_blocks` reads registered batches with original pages, text/table blocks and package version identity, explicitly falling back to existing Markdown when sidecars are missing; no new upload or parsing is needed.
+
 ## v3.10.7 — 2026-11-14 (local PDF hardening + optional PDFium backend, search quality loop, CI/distribution)
 
 > Credits: the PDF changes in this batch come from PRs [#30](https://github.com/daidaiJ/websearch-mcpserver/pull/30) and [#31](https://github.com/daidaiJ/websearch-mcpserver/pull/31) by [@MattLYT](https://github.com/MattLYT) (Matt.Li); his commits keep their original authorship, and later commits are absorb adaptations only.

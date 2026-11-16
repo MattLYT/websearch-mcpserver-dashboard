@@ -2,6 +2,13 @@
 
 [English](CHANGELOG.en.md) | [中文](CHANGELOG.md)
 
+## Unreleased
+
+### 新增
+
+- **正文与论文身份取证**：`cleanfetch` 返回独立正文状态、原因与身份，支持 `expected_paper`；引用分页保留元数据。精确学术查询核对 DOI/arXiv 与版本，分开报告元数据/正文身份、全文候选类型与 OA 补全状态。
+- **既有 PDF 解析包只读块接口**：`pdf_parser.read_blocks` 读取登记批次的原页、文本/表格块与包版本身份，缺失侧车时明确降级为已有 Markdown；无需重新上传或解析。
+
 ## v3.10.7 — 2026-11-14（PDF 本地解析加固与可选 PDFium 后端、搜索质量闭环、CI/分发改进）
 
 > 致谢：本批 PDF 改动来自 [@MattLYT](https://github.com/MattLYT)（Matt.Li）的 PR [#30](https://github.com/daidaiJ/websearch-mcpserver/pull/30) 与 PR [#31](https://github.com/daidaiJ/websearch-mcpserver/pull/31)；原提交保留其署名，后续提交仅为吸收后的适配。

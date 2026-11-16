@@ -35,7 +35,7 @@ v3.6.2 起的结果消费：
 - `page` 传给每个引擎各自分页，再对本页结果融合。多数引擎每页 10 条，Crossref 为 20；总结果数不固定。跨页可能重复，使用 DOI、规范 URL 及题名/作者/年份识别同文。
 - 日期语义有差异：arXiv 按提交日期，Crossref/OpenAlex/Europe PMC 有日期范围；Semantic Scholar/DBLP/DOAJ/Google Scholar 退化到年份，当前 PubMed 适配未应用时间过滤。按任务核对发表与修订日期，不把提交日当出版日。
 - 排名包含 RRF、引用数、期刊、PDF 和新鲜度信号，不等于系统综述的完整覆盖或质量评价。元数据融合可能来自不同引擎，版本有疑问时回到原始页面核实。
-- `PDFURL` 来自引擎，或在配置了 Unpaywall 邮箱且 DOI 存在、PDFURL 为空时补全。OpenAlex 最后一层可能使用 `open_access.oa_url`，它可能是落地页；Unpaywall 不会修正已有非空错误链接。
+- `PDFURL` 是候选链接；OpenAlex 将 PDF、OA 与落地页分开保留，不把 `open_access.oa_url` 冒充 PDF。配置 Unpaywall 邮箱且论文身份/DOI 可确认时，缺少有效候选才补全，每个 DOI 最多一次；查看 `oa_completion`，未找到或失败不等于付费墙。
 - 主题部分失败附尾部警告，全失败/无结果报错。配置项 `academic.bing_fallback` 在此版本未接入调用链，不能期待自动网页回退。
 
 OpenAlex 匿名查询可能耗尽共享出口 IP 的每日预算而返回 429；缩小查询或短时重试不能恢复已耗尽的日额度。具体失败原因以当前响应与服务诊断为准。部署侧可选 `academic.openalex_api_key` / `OPENALEX_API_KEY`，不是工具参数，不在查询或对话中传凭证。DuckDuckGo 的验证挑战与真正无结果不同，成功的其他来源不证明它已恢复；查看失败诊断并按覆盖需要换来源。
@@ -77,6 +77,11 @@ PDF 细节：
 - PDF 内容更新后，新结果成功保存才替换原包中的自动生成文件；额外放入的笔记等资料保留。服务不保留自动结果的长期历史版本，别把个人批注直接写进自动生成的文件。
 - `result_ref` 是临时读取引用；包本身长期保留。引用过期或服务重启后，重新传原 PDF/包目录获得新引用，再用 `cleanfetch` 分段读，不重新解析。
 - 精准归档会把所选页面上传 MinerU；`mineru_ocr: false` 不禁止该上传。未获授权上传的私密资料使用宿主离线阅读。
+
+### 只读取证参数
+
+- URL 模式可传 `expected_paper`（DOI/arXiv，可含版本）独立核对正文；不能与 `result_ref` 混用，续读沿用保存身份。`body.status` 与稳定 `reason` 区分可用、空、不可用和未知；`available` 不证明相关、真实或充分。学术 `paper` 的元数据/正文身份独立，`oa_completion` 只表示补全状态，PDF 候选不等于已抓到 PDF。
+- `pdf_parser(path, read_blocks=true, pages="4,5")` 只读既有包登记的已完成批次，不上传、不续传、不新解析，不能传 `task_ref/output_dir`。优先 `work.json`；缺失或不支持时明确降级为已有 Markdown。核对原 PDF 页序、包/块版本、原始表体及未读范围；包解析覆盖与分页 `eof` 均不表示已读完。图片路径/图注不证明已读图像。
 
 ### MinerU 等待与原任务续查
 
@@ -143,7 +148,7 @@ if ($LASTEXITCODE -ne 0) { throw '临时文件清理失败，需完成清理' }
 
 ### 服务返回的正文文件
 
-本分支搜索、网页/PDF 落盘返回 `result_ref`。将引用原样传给当前发现的 `cleanfetch.result_ref`，从 `offset:0` 开始；读取 `content`，按 `next_offset` 续读到所需范围或 `eof:true`。偏移计 Unicode 码点，默认/0 页长 4096，上限 8192；JSON text 与 structured content 内容一致。保留来源 URL 与正文的关系；引用是凭据，不作为公开来源链接或永久引用。
+本分支搜索、网页/PDF 落盘返回 `result_ref`。将引用原样传给当前发现的 `cleanfetch.result_ref`，从 `offset:0` 开始；读取 `content`，按 `next_offset` 续读到所需范围或 `eof:true`。偏移计 Unicode 码点，默认/0 页长 4096，上限 8192；响应为单份 JSON text，`metadata` 与 `content` 分开；旧引用缺少元数据时状态为 unknown。保留来源 URL 与正文的关系；引用是凭据，不作为公开来源链接或永久引用。
 
 引用跨 MCP 会话有效，`project` 仅统计标签，鉴权沿用服务端认证。只接受服务生成文件的引用，不接受路径或 URL。搜索引用最多 7 天，普通抓取按 `cleanfetch.file_ttl`（默认 24 小时），以返回过期时间为准。重启、过期、清理或检测到文件身份/大小/修改时间变化时返回 `result_unavailable`，重新调用原工具获取新引用；与 MinerU 的 `task_ref` 不同。结果目录由可信宿主维护，校验不对抗已有文件写权限且刻意保留元数据的修改者。
 

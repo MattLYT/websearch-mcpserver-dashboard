@@ -72,6 +72,8 @@ Five retrieval tools feed into each other. Saved long search, webpage and PDF bo
 
 ---
 
+Evidence responses report body availability and paper identity separately. `cleanfetch.expected_paper` checks a specified DOI/arXiv, and `pdf_parser.read_blocks` reads original pages and text/table blocks from existing packages only. Body availability, parsing coverage and actual reading are separate judgments; see [tool and response contracts](docs/search.en.md).
+
 ## Key Features
 
 | Capability | Description |

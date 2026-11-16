@@ -162,8 +162,8 @@ MCP 客户端通过此端点完成协议握手、工具列表获取和工具调�
 |--------|------|------|
 | `smartsearch` | 网络检索 | `query`（与 `queries` 二选一）、`queries`（最多 5 条批量）、`intent`（可选，LLM 启用时可用）、`time_range`（可选，月；省略/null 为 3，显式 0 不发送时间筛选，负数拒绝；上游粒度不同）、`depth`（`fast`/`balanced`/`deep`）、`sources`（`web`/`academic`）、`max_chars`（共享正文预算）、`fetch_top_n`（可选：不传与旧版一致只返回自带内容（服务端默认 0 可配），传 0 只要标题摘要和 URL，传 1-5 获取前 N 条页面原文——API 引擎走快速路径、网页引擎内部抓取，反爬拦截会显式标注） |
 | `academicsearch` | 学术论文检索（arXiv / Crossref / OpenAlex / PubMed / Europe PMC / DBLP / DOAJ 等） | `query`（必填；也可直接传 DOI 或 arXiv id 走单篇精确查询，忽略 `time_range`/`page`，仍遵守已启用来源与指定 `engines`）、`engines`（可选）、`time_range`（可选：`year`/`month`/`week`/`day`）、`page`（可选） |
-| `cleanfetch` | URL 抓取返回 Markdown，或读取已保存正文；始终注册 | `url`/`urls`（抓取，合并去重最多 5 个，需 `cleanfetch.enabled=true`）；或 `result_ref`（引用读取）及 `offset`（默认 0）、`limit`（默认/0 为 4096，上限 8192）；两种模式互斥，分页字段仅用于引用模式 |
-| `pdf_parser` | PDF 解析与本地精准归档 | `path`（PDF 路径/URL 或已有本地解析包）、`pages`（原页码）、`task_ref`（续查；与 path/pages/output_dir 互斥）、`wait_seconds`（0–1800）、`output_dir`（可选本地包目录）。本地有 Token 默认整本归档，按每次页预算接续，结果在 PDF 旁同名 `.mineru/`，复用已有页和任务，持久保存 Markdown、图片及原始 ZIP。远程或无 Token 文本提取仍默认前 20 页。 |
+| `cleanfetch` | URL 抓取返回 Markdown，或读取已保存正文；始终注册 | `url`/`urls`（抓取，合并去重最多 5 个，需 `cleanfetch.enabled=true`）、`expected_paper`（可选 DOI / arXiv，仅 URL 模式）；或 `result_ref`（引用读取）及 `offset`（默认 0）、`limit`（默认/0 为 4096，上限 8192）；两种模式互斥，分页字段仅用于引用模式 |
+| `pdf_parser` | PDF 解析与本地精准归档 | `path`（PDF 路径/URL 或已有本地解析包）、`pages`（原页码）、`task_ref`（续查；与 path/pages/output_dir 互斥）、`wait_seconds`（0–1800）、`output_dir`（可选本地包目录）、`read_blocks`（默认 false，只读已有包，与 task_ref/output_dir 互斥）。本地有 Token 默认整本归档，按每次页预算接续，结果在 PDF 旁同名 `.mineru/`，复用已有页和任务，持久保存 Markdown、图片及原始 ZIP。远程或无 Token 文本提取仍默认前 20 页。 |
 | `file_search` | 本地文件快速检索（Everything 索引，只读，Windows 专属） | `query`（必填，Everything 语法）、`folder`（可选目录限定，接受 Git Bash `/d/code/ai` 风格）、`match_case`/`whole_word`/`match_regex`/`match_diacritics`（可选原生过滤）、`max_results`（默认 10，硬上限 20）、`page`（页码，默认 1）、`sort`/`descending`、`exclude`（可选 NOT 排除项）、`min_alignment`（可选，覆盖服务端对齐阈值）、`time_format`（`datetime`/`iso`/`filetime`） — 无 enabled 开关：首个 MCP 客户端接入时探测 `everything.url`，通过即注册，探测不过不暴露；仅 Windows，Linux 发行版不建议启用（除非 WSL 指向 Windows 宿主）；`everything.roots` 白名单强制限定检索范围，二次过滤（对齐重排/噪声降权/阈值）防止弱匹配打爆上下文 |
 
 本地精准归档会上传所选页面，关闭 OCR 回退不禁止精准上传。解析包不随临时 `result_ref` 过期，再次传 PDF/包路径可取得新读取引用；包目录不可写时在上传前报错。Agent 可先抽查并复用旧 Markdown，无需调用解析器。
@@ -175,6 +175,12 @@ MCP 客户端通过此端点完成协议握手、工具列表获取和工具调�
 `pdf_parser` 还接受 `wait_seconds`（0-1800，每任务新解析默认 300 秒）和 `task_ref`（`standard:<task_id>` / `batch:<batch_id>` / `agent:<task_id>`）。续查必须省略 `path/pages`，默认只查询一次；仍处理中返回状态与引用，完成后下载原任务结果，不提交新任务。超时保留最后状态与页进度；轮询间隔从 2 秒退避到最多 30 秒。Token 仍由服务端配置提供，参数不接收凭据。
 
 `cleanfetch` 拒绝仅标题/标准 skip 导航的空壳；允许回退时使用 Jina 正文模式，404/410、安全拦截和取消不回退。动态页面仍可能无法恢复正文，此时返回明确失败，不表示浏览器不可访问。
+
+**正文状态与身份**：结构化结果的 `body.status` 为 `available` / `empty` / `unavailable` / `unknown`，另有稳定 `body.reason`、来源及 `paper` 身份；批量结果逐条报告。`available` 只表示提取正文可用，不保证相关、真实或足够回答；标题/导航空壳不算正文，有效短正文仍保留。`expected_paper` 接受 DOI 或 arXiv（可含版本），独立核对取得的正文；未传时不声明指定论文匹配。它仅用于 URL 模式，不能与 `result_ref` 混用；引用续读沿用保存的身份。
+
+精确学术查询的 `results[].paper` 分开记录请求/元数据/正文身份；`oa_completion` 单列 OA 补全状态，PDF 候选不等于已验证 PDF。完整身份与 OA 状态说明见 [学术检索](search.md#academicsearch--学术论文检索)。
+
+**只读原页与块**：`pdf_parser(path, read_blocks=true, pages="4,5")` 仅读取既有包中登记的已完成批次，优先使用 `work.json`，支持尚未整包完成的包；不上传、不续传、不新解析，不能与 `task_ref` 或 `output_dir` 混用。批次 `page_idx` 按登记的 `pages` 映射为原 PDF 的 1-based 页，不猜测印刷页码或 Markdown 行号。结果保留包/块版本身份、批次、顺序、原始文本/表体与已有注释；侧车缺失或不支持时明确降级到登记的 Markdown，非法路径直接拒绝。`selected_pages` / `remaining_pages` 描述本次选择，`requested_pages` / `covered_pages` 描述包历史，`total_pages` / `whole_document_complete` 描述整本解析覆盖，均不表示已读。长结果通过 `result_ref` 与 `cleanfetch` 分页；块引用只适用于该包版本。图片路径与图注不表示已读图像，未知几何位置不提供精确 bbox。
 
 四个工具共用统一响应契约（完整说明见 [docs/search.md](search.md#响应行为与可靠性)）：
 
@@ -188,7 +194,7 @@ MCP 客户端通过此端点完成协议握手、工具列表获取和工具调�
 
 `cleanfetch` 始终注册；`cleanfetch.enabled=false` 只关闭 URL 抓取，引用读取仍可用。`result_ref` 与 `url`/`urls` 互斥；URL 模式拒绝 `offset`/`limit`，原 URL/批量调用保持兼容。
 
-将返回的 `result_ref` 原样作为 `cleanfetch.result_ref`，从 `offset=0` 开始。输出为 `ref`、`content`、`offset`、`next_offset`、`eof`，同时提供 JSON text content 与 structured content。继续使用 `next_offset`，直到 `eof=true`；偏移计 Unicode 码点，不是字节或行号。越界偏移、负数和 `limit>8192` 报错。
+将返回的 `result_ref` 原样作为 `cleanfetch.result_ref`，从 `offset=0` 开始。输出为 `ref`、`content`、`offset`、`next_offset`、`eof` 和独立的 `metadata`，仅提供一份 JSON text content。旧引用缺少元数据时，正文状态为 `unknown`。继续使用 `next_offset`，直到 `eof=true`；偏移计 Unicode 码点，不是字节或行号。越界偏移、负数和 `limit>8192` 报错。`offset` / `next_offset` / `eof` 只描述本次交付范围，不代表全部证据已读或足以回答。
 
 引用是进程内随机能力凭据，与 MCP 会话和 `project` 无关；沿用端点鉴权，仅授予所引用的服务生成文件。搜索引用最长 7 天，普通抓取沿用 `cleanfetch.file_ttl`（默认 24 小时），实际过期时间随提示返回。重启、清理或检测到文件身份/大小/修改时间变化时返回 `result_unavailable`，重新调用原工具取得新引用。结果目录需由可信宿主维护；校验不对抗已有文件写权限且刻意保留元数据的修改者。含临时文件提示的补抓结果不持久缓存，已有此类缓存也不复用；普通长搜索缓存命中时重新生成文件和引用。摘要成功时仍保留已保存正文的引用。引用不是永久引用或路径，与 MinerU 的 `task_ref` 不同。
 

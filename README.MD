@@ -72,6 +72,8 @@
 
 ---
 
+正文取证另行报告可用状态与论文身份；`cleanfetch.expected_paper` 可核对指定 DOI/arXiv，`pdf_parser.read_blocks` 可只读既有解析包的原页与文本/表格块。可用正文、解析覆盖与已读范围分别判断，详见 [工具与响应契约](docs/search.md)。
+
 ## 核心特性
 
 | 能力 | 说明 |

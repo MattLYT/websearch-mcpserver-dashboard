@@ -375,6 +375,10 @@ With `time_range`, each academic engine uses its official syntax (aligned in v3.
 
 **Single-paper lookup (DOI / arXiv id short-circuit)**: when you already have a DOI or arXiv id, pass it directly as `query`, e.g. `10.1038/s41586-020-2649-2`, `doi:10.1038/s41586-020-2649-2`, `https://doi.org/10.1038/s41586-020-2649-2`, or `2401.04085`, `arXiv:2401.04085`, `https://arxiv.org/abs/2401.04085`. This triggers a single-paper lookup that ignores `time_range` / `page` but respects enabled sources and requested `engines`; once you have the `pdf_url` from the result, pass that URL as the `path` parameter of the `pdf_parser` tool to parse the full text instead of searching by title.
 
+**Paper identity and full-text links**: exact lookup verifies normalized DOI / arXiv identifiers, including an explicit version, before accepting a result. `results[].paper` separates requested, metadata and body identity; `matched` / `mismatch` / `unverified` do not inherit from each other. A search hit does not mean the body has been read. PDF candidates, OA/landing pages and observed response types are separate; `content_type` reflects observed content only and is `unknown` when unavailable, rather than inferred from a URL suffix.
+
+`oa_completion` reports the existing OA lookup state: `not_configured`, `candidate_present`, `no_confirmed_doi`, `identity_unverified`, `shared_doi_lookup`, `completed`, `no_pdf_found` or `failed`. Each confirmed DOI is looked up at most once; a missing PDF or failed lookup does not establish a paywall.
+
 Results are ranked by the academic scoring enhancement (enabled by default): RRF fusion ranking + citation / journal authority / PDF availability / recency signals, with low-score papers auto-filtered (Top-1 + per-engine floor). Config: `academic.enhance` (default true), `academic.threshold` (default 0.02).
 
 When no usable results remain and engines have failed, the error retains each engine's reason rather than implying an ordinary empty search. Recognized DBLP Anubis HTML challenge pages report human verification; other malformed responses retain their parse errors. This does not bypass verification or change enabled sources.
@@ -387,6 +391,7 @@ When no usable results remain and engines have failed, the error retains each en
 |-----------|------|----------|-------------|
 | `url` | string | URL mode: one of `url`/`urls` | Web page URL; mutually exclusive with `result_ref` |
 | `urls` | string[] | URL mode: one of `url`/`urls` | Batch fetch; merged with `url`, deduplicated, up to 5 |
+| `expected_paper` | string | No | Expected DOI / arXiv identifier (optionally versioned); URL mode only, independently checks body identity |
 | `result_ref` | string | required in reference mode | Returned reference; mutually exclusive with `url`/`urls` |
 | `offset` | integer | no | Reference mode only: Unicode offset, default 0 |
 | `limit` | integer | no | Reference mode only: default/0 = 4096, maximum 8192 |
@@ -399,6 +404,8 @@ In batch mode (`urls`), each URL is pre-checked and fetched independently; one f
 
 **Scope boundary**: fetching body text of known URLs; to discover new sources, run `smartsearch` first (this tool does not search).
 
+**Body status and identity**: structured results carry `body.status` (`available` / `empty` / `unavailable` / `unknown`), a stable `body.reason`, source and `paper` identity; batch results report these per item. `available` means usable extracted body text, not relevance, truth or sufficient evidence. Title/navigation shells are rejected while valid short bodies are retained. `expected_paper` accepts a DOI or arXiv identifier, optionally versioned, and independently checks the retrieved body; without it, no specified-paper match is claimed. It is URL-mode only and cannot be combined with `result_ref`; continuation retains the saved identity.
+
 ### `pdf_parser` — PDF Parsing
 
 **Local precise archival**: with a MinerU token, local PDFs are uploaded through the Standard API, with table/formula recognition and layout processing. Omitting `pages` targets the entire document; each call remains bounded by `mineru_page_budget`. Completed pages and pending tasks are reused. Results persist beside the PDF in `<name>.mineru/`, including Markdown, image assets, original ZIPs and source/page/task metadata. Call again with the PDF or package directory to continue or reread. `output_dir` optionally selects an explicit writable package directory; an unwritable default fails before upload. This parameter cannot be combined with `task_ref` or a package directory passed as `path`. When the source changes, new results replace registered generated files only after successful saving; additional user files remain. Agents first inspect existing Markdown and may reuse it when sufficient; brief reading can use host tools. Local archival does not silently fall back to text extraction.
@@ -410,6 +417,9 @@ In batch mode (`urls`), each URL is pre-checked and fetched independently; one f
 | `task_ref` | string | ❌ | Retrieve an existing MinerU job: `standard:<task_id>`, `batch:<batch_id>` or `agent:<task_id>`. Omit `path/pages/output_dir`; the original selection is preserved |
 | `wait_seconds` | integer | ❌ | 0-1800 seconds per MinerU job; defaults to 300 for new tasks, 0 (query once) for resumption |
 | `output_dir` | string | No | Explicit local package directory; defaults to a same-name `.mineru/` beside the PDF. Omit with `task_ref` or a package directory passed as `path`. |
+| `read_blocks` | bool | No | Read original pages and text/table blocks from an existing package only; default false |
+
+**Read existing pages and blocks**: `pdf_parser(path, read_blocks=true, pages="4,5")` only reads registered completed batches in an existing package, preferring `work.json`; partially completed packages are supported. It does not upload, resume or parse, and cannot be combined with `task_ref` or `output_dir`. Batch `page_idx` values map through registered `pages` to original, 1-based PDF pages; printed page numbers and Markdown line mappings are not guessed. Results preserve package/block version identity, batch, order, raw text/table bodies and existing annotations. Missing or unsupported sidecars explicitly fall back to registered Markdown; invalid paths are rejected. `selected_pages` / `remaining_pages` describe this selection, `requested_pages` / `covered_pages` the package history, and `total_pages` / `whole_document_complete` whole-document parsing coverage; none means the content has been read. Long results use `result_ref` and `cleanfetch` paging; block references apply only to that package version. Image paths/captions do not mean image content was read, and unknown geometry does not produce an exact bbox.
 
 Requires `pdf_parser.enabled: true`. Large documents auto-stored to temp files. Remote URLs use the same SSRF and HEAD pre-checks as `cleanfetch` (including per-hop redirect re-checks) and are not prefixed with `file://`.
 
@@ -429,7 +439,7 @@ For remote PDFs or local text extraction without a token, omitting `pages` reque
 
 #### cleanfetch Saved Result Reading
 
-Always registered; accepts only this service's `result_ref`. Start with `cleanfetch(result_ref, offset=0, limit=4096)` and continue with `next_offset` until `eof=true`; each page returns up to 8192 Unicode code points in `content`. The response carries a single JSON text body and no longer duplicates it in `structuredContent`. No Docker or host file access is needed, and the source is not requested again. Existing `/mcp` authentication applies. References survive MCP session changes but not restart, expiry, cleanup or detected identity/size/modification-time changes. See the [API contract](api.en.md#reading-long-results).
+Always registered; accepts only this service's `result_ref`. Start with `cleanfetch(result_ref, offset=0, limit=4096)` and continue with `next_offset` until `eof=true`; each page returns up to 8192 Unicode code points in `content`, with saved body/identity metadata in `metadata`; older references without metadata have status `unknown`. `eof` marks delivery completion, not sufficient evidence or a fully read source. The response carries a single JSON text body and no longer duplicates it in `structuredContent`. No Docker or host file access is needed, and the source is not requested again. Existing `/mcp` authentication applies. References survive MCP session changes but not restart, expiry, cleanup or detected identity/size/modification-time changes. See the [API contract](api.en.md#reading-long-results).
 
 ### `file_search` — Local File Quick Search
 
