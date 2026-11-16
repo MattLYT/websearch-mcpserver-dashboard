@@ -99,5 +99,7 @@
   "mcp.param.history.limit": "Maximum number of history entries to return (default 10, hard cap 50)",
   "mcp.param.history.offset": "Paging offset (default 0)",
   "mcp.server.instructions": "Tool choice: use smartsearch to discover sources; use cleanfetch to read a page and follow result_ref offsets for long pages; use academicsearch for papers when registered; use file_search for local file names when registered; use search_history for past queries when registered. Keep defaults: queries compares several searches in one call, sources only for mixed web and academic retrieval; depth and max_chars shape web bodies only and are worth adjusting only to control body size, with an explicit fetch_top_n winning. Do not re-fetch bodies already inlined in search results.",
-  "mcp.param.pdf.output_dir": "Local precise archival only: explicitly selects the package directory. Defaults to a same-name .mineru folder beside the PDF. When that directory is unwritable, use a user-selected location. Mutually exclusive with task_ref or a package directory passed as path"
+  "mcp.param.pdf.output_dir": "Local precise archival only: explicitly selects the package directory. Defaults to a same-name .mineru folder beside the PDF. When that directory is unwritable, use a user-selected location. Mutually exclusive with task_ref or a package directory passed as path",
+  "mcp.param.cleanfetch.expected_paper": "Optional expected DOI or arXiv identifier (including version); fetched-body identity is verified independently of search metadata.",
+  "mcp.param.pdf.read_blocks": "Read completed batches from an existing local package without uploading or resuming; pages filters original PDF pages, with existing Markdown as fallback when sidecars are absent."
 }

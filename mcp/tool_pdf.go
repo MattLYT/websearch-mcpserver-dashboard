@@ -2,8 +2,10 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,6 +32,7 @@ type PDFParserParams struct {
 	TaskRef     string `json:"task_ref,omitempty" jsonschema:"mcp.param.pdf.task_ref"`
 	WaitSeconds *int   `json:"wait_seconds,omitempty" jsonschema:"mcp.param.pdf.wait_seconds"`
 	OutputDir   string `json:"output_dir,omitempty" jsonschema:"mcp.param.pdf.output_dir"`
+	ReadBlocks  bool   `json:"read_blocks,omitempty" jsonschema:"mcp.param.pdf.read_blocks"`
 }
 
 // CleanFetch 通过 go-webfetch 抓取网页，失败时回退到 Jina Reader。
@@ -93,7 +96,7 @@ func PDFParserHandler(ctx context.Context, req *mcp.CallToolRequest, params *PDF
 		notifyProgress(ctx, req, 0, 1, "MinerU: "+status)
 	})
 	if params.TaskRef != "" {
-		if params.Path != "" || params.Pages != "" || params.OutputDir != "" {
+		if params.Path != "" || params.Pages != "" || params.OutputDir != "" || params.ReadBlocks {
 			return nil, nil, errors.New(i18n.T("tool.pdf.taskref_page_hint"))
 		}
 		if webfetchInst == nil {
@@ -122,6 +125,44 @@ func PDFParserHandler(ctx context.Context, req *mcp.CallToolRequest, params *PDF
 	pages, err := parsePagesSpec(params.Pages, pageSpecWidthCap)
 	if err != nil {
 		return nil, nil, err
+	}
+	if params.ReadBlocks {
+		if params.OutputDir != "" || strings.Contains(params.Path, "://") {
+			return nil, nil, errors.New(i18n.T("tool.pdf.blocks_local_only"))
+		}
+		blocks, err := mineru.ReadLocalBlocks(ctx, params.Path, pages)
+		if err != nil {
+			return nil, nil, err
+		}
+		parseEngine = "mineru-local-blocks"
+		data, err := json.MarshalIndent(blocks, "", "  ")
+		if err != nil {
+			return nil, nil, err
+		}
+		text := string(data)
+		if chars := []rune(text); len(chars) > maxResultReadChars {
+			file, err := os.CreateTemp("", "websearch-pdf-blocks-*.json")
+			if err != nil {
+				return nil, nil, err
+			}
+			_, writeErr := file.Write(data)
+			closeErr := file.Close()
+			if err := errors.Join(writeErr, closeErr); err != nil {
+				_ = os.Remove(file.Name())
+				return nil, nil, err
+			}
+			notice, err := registerResultFileWithMetadata(file.Name(), 24*time.Hour, false, map[string]any{
+				"pdf_package_id": blocks.PackageID, "selected_pages": blocks.Selected,
+				"covered_pages": blocks.Covered, "total_pages": blocks.Total,
+			})
+			if err != nil {
+				_ = os.Remove(file.Name())
+				return nil, nil, err
+			}
+			time.AfterFunc(24*time.Hour, func() { _ = os.Remove(file.Name()) })
+			text = string(chars[:maxResultReadChars]) + "\n\n" + notice
+		}
+		return textResult(text), nil, nil
 	}
 	maxPages := pdfMaxPages
 	if maxPages <= 0 {

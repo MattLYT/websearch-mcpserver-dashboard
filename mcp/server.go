@@ -109,7 +109,11 @@ func registerTools(server *mcp.Server, conf config.Config) {
 		Description: i18n.T("mcp.tool.cleanfetch.desc"),
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, DestructiveHint: new(bool)},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, params *CleanFetchParams) (*mcp.CallToolResult, any, error) {
-		return cleanFetch(ctx, req, params, conf.CleanFetch.Enabled)
+		result, extra, err := cleanFetch(ctx, req, params, conf.CleanFetch.Enabled)
+		if err != nil && result != nil {
+			return result, extra, nil // Preserve structured extraction facts with the tool error.
+		}
+		return result, extra, err
 	})
 	log.InfoT("log.mcp.available_tool_cleanfetch")
 	setState("cleanfetch", "registered")

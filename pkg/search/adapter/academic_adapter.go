@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/url"
 	"slices"
 	"sort"
 	"strconv"
@@ -176,6 +177,7 @@ func (a *AcademicAdapter) SearchAcademicRawContext(ctx context.Context, query st
 		if len(results) == 0 {
 			return core.AcademicSearchResult{EngineErrors: engineErrors}, noResultError(engineErrors)
 		}
+		annotatePaperIdentity(query, results)
 		a.enrichOAPDF(ctx, results)
 		return core.AcademicSearchResult{Results: results, EngineErrors: engineErrors}, nil
 	}
@@ -188,6 +190,7 @@ func (a *AcademicAdapter) SearchAcademicRawContext(ctx context.Context, query st
 	}
 
 	results := toSearchResults(all)
+	annotatePaperIdentity(query, results)
 	a.enrichOAPDF(ctx, results)
 	return core.AcademicSearchResult{Results: results, EngineErrors: engineErrors}, nil
 }
@@ -229,6 +232,20 @@ func (a *AcademicAdapter) lookupPaper(ctx context.Context, kind, id string, engi
 	}
 	raw = antirobot.DeduplicateResults(raw)
 	results := toSearchResults(raw)
+	annotatePaperIdentity(id, results)
+	// Verify all candidates before selecting the first; provider order is not identity evidence.
+	slices.SortStableFunc(results, func(a, b core.SearchResult) int {
+		rank := func(status string) int {
+			if status == "matched" {
+				return 0
+			}
+			if status == "unverified" {
+				return 1
+			}
+			return 2
+		}
+		return rank(a.Paper.MetadataStatus) - rank(b.Paper.MetadataStatus)
+	})
 	if len(results) > 1 {
 		results = results[:1]
 	}
@@ -236,21 +253,63 @@ func (a *AcademicAdapter) lookupPaper(ctx context.Context, kind, id string, engi
 	return core.AcademicSearchResult{Results: results, EngineErrors: engineErrors, AttemptedEngines: attempted}, nil
 }
 
+func annotatePaperIdentity(query string, results []core.SearchResult) {
+	kind, id := academic.ParsePaperQuery(query)
+	if kind == "" {
+		return
+	}
+	for i := range results {
+		actual := results[i].DOI
+		if kind == "arxiv" {
+			actual = results[i].Url
+		}
+		identity := academic.MetadataIdentity(kind, id, actual)
+		results[i].Paper = &identity
+	}
+}
+
 func (a *AcademicAdapter) enrichOAPDF(ctx context.Context, results []core.SearchResult) {
-	if a.unpaywallEmail == "" || len(results) == 0 {
+	if len(results) == 0 {
 		return
 	}
 	var wg sync.WaitGroup
+	seen := make(map[string]bool)
 	for i := range results {
-		if results[i].DOI == "" || results[i].PDFURL != "" {
+		results[i].OACompletion = "not_configured"
+		if a.unpaywallEmail == "" {
 			continue
 		}
+		kind, id := academic.ParsePaperQuery(results[i].DOI)
+		doi := antirobot.NormalizeDOI(id)
+		if kind != "doi" {
+			results[i].OACompletion = "no_confirmed_doi"
+			continue
+		}
+		if seen[doi] {
+			results[i].OACompletion = "shared_doi_lookup"
+			continue
+		}
+		if results[i].Paper != nil && results[i].Paper.MetadataStatus != "matched" {
+			results[i].OACompletion = "identity_unverified"
+			continue
+		}
+		if candidate, err := url.Parse(results[i].PDFURL); err == nil && candidate.Host != "" && (candidate.Scheme == "http" || candidate.Scheme == "https") {
+			results[i].OACompletion = "candidate_present"
+			continue
+		}
+		results[i].PDFURL = ""
+		seen[doi] = true
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
 			pdf, err := academic.UnpaywallPDF(ctx, results[i].DOI, a.unpaywallEmail)
+			results[i].OACompletion = "no_pdf_found"
+			if err != nil {
+				results[i].OACompletion = "failed"
+			}
 			if err == nil && pdf != "" {
 				results[i].PDFURL = pdf
+				results[i].OACompletion = "completed"
 			}
 		}(i)
 	}

@@ -72,6 +72,17 @@ const (
 )
 
 // Result 统一搜索结果。
+type PaperIdentity struct {
+	RequestedKind  string `json:"requested_kind,omitempty"`
+	RequestedID    string `json:"requested_id,omitempty"`
+	MetadataStatus string `json:"metadata_status"`
+	MetadataID     string `json:"metadata_id,omitempty"`
+	BodyStatus     string `json:"body_status"`
+	BodyID         string `json:"body_id,omitempty"`
+	ContentType    string `json:"content_type"`
+	Reason         string `json:"reason,omitempty"`
+}
+
 type Result struct {
 	Type        ResultType `json:"type"`
 	Title       string     `json:"title"`

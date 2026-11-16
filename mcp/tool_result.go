@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	fetchcontent "websearch/pkg/fetch"
 	"websearch/pkg/fetch/webfetch"
 	"websearch/pkg/i18n"
 
@@ -31,17 +32,19 @@ type ReadResultParams struct {
 }
 
 type ReadResultOutput struct {
-	Ref        string `json:"ref"`
-	Content    string `json:"content"`
-	Offset     int64  `json:"offset"`
-	NextOffset int64  `json:"next_offset"`
-	EOF        bool   `json:"eof"`
+	Ref        string         `json:"ref"`
+	Content    string         `json:"content"`
+	Offset     int64          `json:"offset"`
+	NextOffset int64          `json:"next_offset"`
+	EOF        bool           `json:"eof"`
+	Metadata   map[string]any `json:"metadata"`
 }
 
 type resultFile struct {
-	path    string
-	info    os.FileInfo
-	expires time.Time
+	path     string
+	info     os.FileInfo
+	expires  time.Time
+	metadata map[string]any
 	// cacheChar/cacheByte 记录一次成功分页读取的终点（下一页首字符的字符
 	// 偏移与字节偏移），顺序续读直接 Seek 跳过逐 rune 扫描。cacheByte<0 表示
 	// 缓存未建立。任意 (char,byte) 边界对都正确，并发读者最后写入者胜。
@@ -63,11 +66,26 @@ func resultUnavailableErr() error {
 }
 
 func savedResultReadNotice(result *webfetch.Result) string {
+	if result.Metadata == nil {
+		result.Metadata = map[string]any{}
+	}
+	if result.Metadata["body"] == nil {
+		file, err := os.Open(result.FilePath)
+		if err != nil {
+			return i18n.T("tool.result.read_failed", "Err", err.Error())
+		}
+		status, err := fetchcontent.PageBodyStatusReader(file, result.Title)
+		file.Close()
+		if err != nil {
+			return i18n.T("tool.result.read_failed", "Err", err.Error())
+		}
+		result.Metadata["body"] = status
+	}
 	ttl := 24 * time.Hour
 	if webfetchLazyCfg != nil && webfetchLazyCfg.CleanFetch.FileTTL > 0 {
 		ttl = time.Duration(webfetchLazyCfg.CleanFetch.FileTTL) * time.Hour
 	}
-	notice, err := registerResultFile(result.FilePath, ttl, result.Persistent)
+	notice, err := registerResultFileWithMetadata(result.FilePath, ttl, result.Persistent, result.Metadata)
 	if err != nil {
 		return i18n.T("tool.result.read_failed", "Err", err.Error())
 	}
@@ -79,6 +97,10 @@ func resultFileNotice(path string, ttl time.Duration) (string, error) {
 }
 
 func registerResultFile(path string, ttl time.Duration, persistent bool) (string, error) {
+	return registerResultFileWithMetadata(path, ttl, persistent, nil)
+}
+
+func registerResultFileWithMetadata(path string, ttl time.Duration, persistent bool, metadata map[string]any) (string, error) {
 	path, err := filepath.Abs(path)
 	if err != nil {
 		return "", resultUnavailableErr()
@@ -105,7 +127,10 @@ func registerResultFile(path string, ttl time.Duration, persistent bool) (string
 			delete(resultFiles.files, key)
 		}
 	}
-	resultFiles.files[ref] = resultFile{path: path, info: info, expires: expires}
+	if metadata == nil {
+		metadata = map[string]any{"body": fetchcontent.BodyStatus{Status: "unknown", Reason: "metadata_not_recorded"}}
+	}
+	resultFiles.files[ref] = resultFile{path: path, info: info, expires: expires, metadata: metadata}
 	resultFiles.Unlock()
 	return i18n.T("tool.result.ref_notice", "Ref", ref, "Expires", expires.UTC().Format(time.RFC3339)), nil
 }
@@ -193,5 +218,9 @@ func readSavedResult(ctx context.Context, _ *mcp.CallToolRequest, params *ReadRe
 		}
 		resultFiles.Unlock()
 	}
-	return nil, &ReadResultOutput{Ref: params.Ref, Content: body.String(), Offset: params.Offset, NextOffset: params.Offset + int64(count), EOF: err == io.EOF}, nil
+	metadata := file.metadata
+	if metadata == nil {
+		metadata = map[string]any{"body": fetchcontent.BodyStatus{Status: "unknown", Reason: "metadata_not_recorded"}}
+	}
+	return nil, &ReadResultOutput{Ref: params.Ref, Content: body.String(), Offset: params.Offset, NextOffset: params.Offset + int64(count), EOF: err == io.EOF, Metadata: metadata}, nil
 }

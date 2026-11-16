@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"websearch/pkg/academic"
 	"websearch/pkg/cache"
 	"websearch/pkg/i18n"
 	"websearch/pkg/log"
@@ -72,7 +73,7 @@ func doAcademicSearch(ctx context.Context, query string, engines []string, timeR
 				if mergeErr == nil {
 					// 缓存命中：retrieved_at 为原检索时间，附带 cache_age_seconds
 					ret = searchcore.ProvenanceHeader(rec.CreatedAt, time.Since(rec.CreatedAt)) + ret
-					return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: ret}}}, nil, nil
+					return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: ret}}, StructuredContent: map[string]any{"results": results}}, nil, nil
 				}
 			}
 		}
@@ -128,7 +129,7 @@ func doAcademicSearch(ctx context.Context, query string, engines []string, timeR
 		}
 	}
 	ret = searchcore.ProvenanceHeader(time.Now(), 0) + ret
-	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: ret}}}, nil, nil
+	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: ret}}, StructuredContent: map[string]any{"results": res.Results}}, nil, nil
 }
 
 // academicCacheKey 学术搜索的缓存键：query|timeRange|engines|page。
@@ -253,6 +254,16 @@ func recordAcademicProviderEvents(ctx context.Context, query string, results []s
 // 同时累积全文，流结束后返回完整格式化摘要（含引用）。
 
 func formatAcademicResults(query string, res search.AcademicSearchResult) (string, error) {
+	if kind, id := academic.ParsePaperQuery(query); kind != "" {
+		for i := range res.Results {
+			actual := res.Results[i].DOI
+			if kind == "arxiv" {
+				actual = res.Results[i].Url
+			}
+			identity := academic.MetadataIdentity(kind, id, actual)
+			res.Results[i].Paper = &identity
+		}
+	}
 	if adapter, ok := academicSearcher.(*search.AcademicAdapter); ok {
 		return adapter.MergeContentWithErrors(query, res.Results, res.EngineErrors)
 	}

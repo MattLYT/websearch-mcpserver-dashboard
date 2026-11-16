@@ -99,5 +99,7 @@
   "mcp.param.history.limit": "返回的历史条数上限（默认 10，硬上限 50）",
   "mcp.param.history.offset": "翻页偏移量（默认 0）",
   "mcp.server.instructions": "工具选择：用 smartsearch 发现来源；需要正文时用 cleanfetch，按 result_ref 分段读取；论文检索用 academicsearch（若已注册）；本地文件名用 file_search（若已注册）；历史查询用 search_history（若已注册）。参数保持默认：queries 用于一次比较多个查询，sources 仅在网页与论文混合检索时使用；depth 与 max_chars 只作用于网页正文，且仅需控制正文长度时调整，显式 fetch_top_n 优先。搜索结果里已内联的正文不要重复抓取。",
-  "mcp.param.pdf.output_dir": "仅本地精准归档：显式指定解析包目录。默认 PDF 同目录的同名 .mineru 文件夹；默认目录不可写时，按用户指定的位置填写。与 task_ref 或作为 path 的解析包目录互斥"
+  "mcp.param.pdf.output_dir": "仅本地精准归档：显式指定解析包目录。默认 PDF 同目录的同名 .mineru 文件夹；默认目录不可写时，按用户指定的位置填写。与 task_ref 或作为 path 的解析包目录互斥",
+  "mcp.param.cleanfetch.expected_paper": "可选预期 DOI 或 arXiv 标识（含版本）；正文身份独立核对，不能由搜索元数据继承。",
+  "mcp.param.pdf.read_blocks": "只读既有本地解析包的已完成批次，不上传或续传；pages 按原 PDF 页筛选，缺少侧车时降级为已有 Markdown。"
 }

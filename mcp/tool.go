@@ -59,11 +59,12 @@ type AcademicSearchParams struct {
 // CleanFetchParams cleanfetch 工具参数。
 type CleanFetchParams struct {
 	projectParams
-	URL       string   `json:"url,omitempty" jsonschema:"mcp.param.cleanfetch.url"`
-	URLs      []string `json:"urls,omitempty" jsonschema:"mcp.param.cleanfetch.urls"`
-	ResultRef string   `json:"result_ref,omitempty" jsonschema:"mcp.param.cleanfetch.result_ref"`
-	Offset    *int64   `json:"offset,omitempty" jsonschema:"mcp.param.cleanfetch.offset"`
-	Limit     *int     `json:"limit,omitempty" jsonschema:"mcp.param.cleanfetch.limit"`
+	ExpectedPaper string   `json:"expected_paper,omitempty" jsonschema:"mcp.param.cleanfetch.expected_paper"`
+	URL           string   `json:"url,omitempty" jsonschema:"mcp.param.cleanfetch.url"`
+	URLs          []string `json:"urls,omitempty" jsonschema:"mcp.param.cleanfetch.urls"`
+	ResultRef     string   `json:"result_ref,omitempty" jsonschema:"mcp.param.cleanfetch.result_ref"`
+	Offset        *int64   `json:"offset,omitempty" jsonschema:"mcp.param.cleanfetch.offset"`
+	Limit         *int     `json:"limit,omitempty" jsonschema:"mcp.param.cleanfetch.limit"`
 }
 
 // maxBatchFetchURLs 单次批量抓取的 URL 上限。

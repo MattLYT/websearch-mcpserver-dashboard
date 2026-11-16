@@ -10,7 +10,10 @@ import (
 	"sync"
 	"time"
 
+	"io"
+	"os"
 	"websearch/pkg/config"
+	fetchcontent "websearch/pkg/fetch"
 	"websearch/pkg/fetch/jina"
 	"websearch/pkg/fetch/sitefetch"
 	"websearch/pkg/fetch/webfetch"
@@ -56,6 +59,9 @@ func cleanFetch(ctx context.Context, req *mcp.CallToolRequest, params *CleanFetc
 		telemetry.RecordEventContext(ctx, telemetry.Event{Kind: "tool", Tool: "cleanfetch", Query: query, Detail: mode, Success: err == nil, Duration: time.Since(started), ResultCount: count, Error: err, RequestID: requestID, AttemptChain: chain})
 	}()
 	if params.ResultRef != "" {
+		if params.ExpectedPaper != "" {
+			return nil, nil, errors.New(i18n.T("tool.cleanfetch.expected_requires_url"))
+		}
 		if params.URL != "" || len(params.URLs) != 0 {
 			return nil, nil, errors.New(i18n.T("tool.cleanfetch.ref_url_conflict"))
 		}
@@ -93,16 +99,22 @@ func cleanFetch(ctx context.Context, req *mcp.CallToolRequest, params *CleanFetc
 	}
 
 	if len(urls) == 1 {
-		text, err := fetchCleanPage(ctx, urls[0])
+		text, metadata, err := fetchCleanPageDelivery(ctx, urls[0], params.ExpectedPaper)
 		if err != nil {
-			return nil, nil, err
+			result := textResult(err.Error())
+			result.IsError = true
+			result.StructuredContent = metadata
+			return result, nil, err
 		}
-		return textResult(text), nil, nil
+		result := textResult(text)
+		result.StructuredContent = metadata
+		return result, nil, nil
 	}
 
 	type batchItem struct {
-		text string
-		err  error
+		text     string
+		metadata map[string]any
+		err      error
 	}
 	items := make([]batchItem, len(urls))
 	var wg sync.WaitGroup
@@ -110,15 +122,17 @@ func cleanFetch(ctx context.Context, req *mcp.CallToolRequest, params *CleanFetc
 		wg.Add(1)
 		go func(i int, u string) {
 			defer wg.Done()
-			text, err := fetchCleanPage(ctx, u)
-			items[i] = batchItem{text: text, err: err}
+			text, metadata, err := fetchCleanPageDelivery(ctx, u, params.ExpectedPaper)
+			items[i] = batchItem{text: text, metadata: metadata, err: err}
 		}(i, u)
 	}
 	wg.Wait()
 
 	var sb strings.Builder
 	okCount := 0
+	deliveries := make([]map[string]any, len(items))
 	for i, it := range items {
+		deliveries[i] = it.metadata
 		if i > 0 {
 			sb.WriteString("\n\n---\n\n")
 		}
@@ -131,7 +145,9 @@ func cleanFetch(ctx context.Context, req *mcp.CallToolRequest, params *CleanFetc
 		sb.WriteString(it.text)
 	}
 	log.InfoT("log.mcp.batch_fetch_finished_succeeded", "okCount", okCount, "len", len(urls))
-	return textResult(sb.String()), nil, nil
+	result = textResult(sb.String())
+	result.StructuredContent = map[string]any{"items": deliveries}
+	return result, nil, nil
 }
 
 // mergeFetchURLs 合并 url 与 urls：trim、去重、保持顺序。
@@ -173,26 +189,60 @@ func fetchViaGithubAPI(ctx context.Context, rawURL string) (text string, matched
 // 选择远端抓取链（供应商 fetch API → MCP 托管抓取）与本地 webfetch/Jina 的
 // 顺序，任一层失败自动降级。
 func fetchCleanPage(ctx context.Context, rawURL string) (string, error) {
+	text, _, err := fetchCleanPageDelivery(ctx, rawURL, "")
+	return text, err
+}
+
+func fetchCleanPageDelivery(ctx context.Context, rawURL, expectedPaper string) (text string, metadata map[string]any, err error) {
+	metadata = metadataForPaper("", expectedPaper, "")
+	metadata["source_url"] = rawURL
+	defer func() {
+		if err != nil {
+			status := fetchcontent.BodyStatus{Status: "unavailable", Reason: "fetch_failed"}
+			var empty *fetchengine.EmptyContentError
+			if errors.As(err, &empty) {
+				status = fetchcontent.BodyStatus{Status: "empty", Reason: "no_extracted_body"}
+			}
+			metadata["body"] = status
+			metadata["error"] = err.Error()
+		}
+	}()
 	if err := validateURLSecurity(rawURL); err != nil {
-		return "", err
+		return "", metadata, err
 	}
 	// 站点特判：HTML 抓不到的站点（github.com 为 JS 渲染）优先走官方 API，
 	// 不做 headCheck、不进远端/本地降级链；API 失败（限流/403/路径不接管）时
 	// 回落常规抓取链。
 	if text, matched, apiErr := fetchViaGithubAPI(ctx, rawURL); matched && apiErr == nil {
-		return text, nil
+		metadata["body"] = fetchcontent.PageBodyStatus(text, "")
+		for key, value := range metadataForPaper(text, expectedPaper, "") {
+			metadata[key] = value
+		}
+		return text, metadata, nil
 	}
 	if err := headCheck(ctx, rawURL); err != nil {
-		return "", err
+		return "", metadata, err
 	}
 	local := func(ctx context.Context, u string) (string, error) {
-		return fetchLocalPage(ctx, u)
+		localText, localMetadata, localErr := fetchLocalPageDelivery(ctx, u, expectedPaper)
+		if localErr == nil {
+			metadata = localMetadata
+		}
+		return localText, localErr
 	}
 	// MCP 抓取面向 HTML/文本；PDF 继续走本地解析与 MinerU 链路。
 	if isPDFURL(rawURL) {
-		return local(ctx, rawURL)
+		text, err = local(ctx, rawURL)
+		return text, metadata, err
 	}
-	return fetchPageWithFallback(ctx, rawURL, mcpHubFetchMode, remoteFetchChain(), local)
+	text, err = fetchPageWithFallback(ctx, rawURL, mcpHubFetchMode, remoteFetchChain(), local)
+	if err == nil && metadata["body"] == nil {
+		metadata["body"] = fetchcontent.PageBodyStatus(text, "")
+		for key, value := range metadataForPaper(text, expectedPaper, "") {
+			metadata[key] = value
+		}
+	}
+	return text, metadata, err
 }
 
 // remoteFetchChain 返回远端抓取链：mcphub 托管 MCP（服务端渲染，能拿到 JS 页面正文）
@@ -218,26 +268,34 @@ func remoteFetchChain() []mcpHubFetcher {
 // 两条链路都失败时同时保留两侧错误，便于归因。
 func fetchPageWithFallback(ctx context.Context, rawURL, mode string, remote []mcpHubFetcher,
 	local func(context.Context, string) (string, error)) (string, error) {
+	fetchLocal := local
+	local = func(ctx context.Context, rawURL string) (string, error) {
+		text, err := fetchLocal(ctx, rawURL)
+		if err == nil && !fetchcontent.HasPageBody(text, "") {
+			err = fmt.Errorf("%s: %w", i18n.T("tool.cleanfetch.empty_result"), &fetchengine.EmptyContentError{URL: rawURL})
+		}
+		return text, err
+	}
 	if len(remote) == 0 || mode == "" || mode == config.MCPHubFetchOff {
 		return local(ctx, rawURL)
 	}
 	// 逐个尝试远端 fetcher：供应商 fetch API → MCP 托管；失败级联到下一个。
 	tryRemote := func() (string, error) {
-		var errs []string
+		var errs []error
 		for _, f := range remote {
 			text, err := f.Fetch(ctx, rawURL)
-			if err == nil && strings.TrimSpace(text) != "" {
+			if err == nil && fetchcontent.HasPageBody(text, "") {
 				return text, nil
 			}
 			if ctx.Err() != nil {
 				return "", ctx.Err()
 			}
 			if err == nil {
-				err = errors.New(i18n.T("tool.cleanfetch.empty_result"))
+				err = fmt.Errorf("%s: %w", i18n.T("tool.cleanfetch.empty_result"), &fetchengine.EmptyContentError{URL: rawURL})
 			}
-			errs = append(errs, err.Error())
+			errs = append(errs, err)
 		}
-		return "", errors.New(strings.Join(errs, i18n.T("tool.cleanfetch.error_separator")))
+		return "", fmt.Errorf("%s: %w", i18n.T("tool.cleanfetch.error_separator"), errors.Join(errs...))
 	}
 	switch mode {
 	case config.MCPHubFetchPrefer:
@@ -283,6 +341,11 @@ func isPDFURL(rawURL string) bool {
 
 // fetchLocalPage 现有本地链路：webfetch（无需代理）→ Jina Reader（需代理）。
 func fetchLocalPage(ctx context.Context, rawURL string) (string, error) {
+	text, _, err := fetchLocalPageDelivery(ctx, rawURL, "")
+	return text, err
+}
+
+func fetchLocalPageDelivery(ctx context.Context, rawURL, expectedPaper string) (string, map[string]any, error) {
 	started := time.Now()
 	recordProvider := func(event telemetry.Event) {
 		event.Kind = "provider"
@@ -295,11 +358,38 @@ func fetchLocalPage(ctx context.Context, rawURL string) (string, error) {
 		result, err := webfetchInst.Fetch(ctx, rawURL)
 		if err == nil {
 			recordProvider(telemetry.Event{Provider: "webfetch", Success: true, Duration: time.Since(started), ResultCount: 1})
-			return formatWebFetchResult(result), nil
+			body := result.Markdown
+			if result.Mode != "inline" {
+				file, readErr := os.Open(result.FilePath)
+				if readErr != nil {
+					return "", nil, readErr
+				}
+				data, readErr := io.ReadAll(io.LimitReader(file, 65536))
+				file.Close()
+				if readErr != nil {
+					return "", nil, readErr
+				}
+				body = string(data)
+			}
+			if result.Metadata == nil {
+				result.Metadata = map[string]any{}
+			}
+			if result.Metadata["body"] == nil {
+				result.Metadata["body"] = fetchcontent.PageBodyStatus(body, result.Title)
+			}
+			result.Metadata["source_url"] = rawURL
+			observedType := result.ContentType
+			if result.PageCount > 0 {
+				observedType = "pdf"
+			}
+			for key, value := range metadataForPaper(body, expectedPaper, observedType) {
+				result.Metadata[key] = value
+			}
+			return formatWebFetchResult(result), result.Metadata, nil
 		}
 		recordProvider(telemetry.Event{Provider: "webfetch", Success: false, Duration: time.Since(started), Error: err})
 		if !allowFetchFallback(err) {
-			return "", err
+			return "", nil, err
 		}
 		log.InfoT("log.mcp.webfetch_fetch_failed_trying_fallback_to", "err", err)
 
@@ -308,12 +398,15 @@ func fetchLocalPage(ctx context.Context, rawURL string) (string, error) {
 			jinaResult, jinaErr := jinaInst.Fetch(rawURL)
 			if jinaErr == nil {
 				recordProvider(telemetry.Event{Provider: "jina", Success: true, Duration: time.Since(started), ResultCount: 1})
-				return formatJinaResult(jinaResult), nil
+				metadata := metadataForPaper(jinaResult.Content, expectedPaper, "")
+				metadata["body"] = fetchcontent.PageBodyStatus(jinaResult.Content, jinaResult.Title)
+				metadata["source_url"] = rawURL
+				return formatJinaResult(jinaResult), metadata, nil
 			}
 			recordProvider(telemetry.Event{Provider: "jina", Success: false, Duration: time.Since(started), Error: jinaErr})
-			return "", fmt.Errorf("webfetch: %w; %s: %w", err, i18n.T("tool.cleanfetch.jina_fallback"), jinaErr)
+			return "", nil, fmt.Errorf("webfetch: %w; %s: %w", err, i18n.T("tool.cleanfetch.jina_fallback"), jinaErr)
 		}
-		return "", fmt.Errorf("%s: %w", i18n.T("tool.cleanfetch.webfetch_failed"), err)
+		return "", nil, fmt.Errorf("%s: %w", i18n.T("tool.cleanfetch.webfetch_failed"), err)
 	}
 
 	// webfetch 未初始化，仅用 Jina（兼容旧模式：仅代理+Jina Key）
@@ -321,13 +414,16 @@ func fetchLocalPage(ctx context.Context, rawURL string) (string, error) {
 		jinaResult, jinaErr := jinaInst.Fetch(rawURL)
 		if jinaErr != nil {
 			recordProvider(telemetry.Event{Provider: "jina", Success: false, Duration: time.Since(started), Error: jinaErr})
-			return "", fmt.Errorf("%s: %w", i18n.T("tool.cleanfetch.jina_failed"), jinaErr)
+			return "", nil, fmt.Errorf("%s: %w", i18n.T("tool.cleanfetch.jina_failed"), jinaErr)
 		}
 		recordProvider(telemetry.Event{Provider: "jina", Success: true, Duration: time.Since(started), ResultCount: 1})
-		return formatJinaResult(jinaResult), nil
+		metadata := metadataForPaper(jinaResult.Content, expectedPaper, "")
+		metadata["body"] = fetchcontent.PageBodyStatus(jinaResult.Content, jinaResult.Title)
+		metadata["source_url"] = rawURL
+		return formatJinaResult(jinaResult), metadata, nil
 	}
 
-	return "", errors.New(i18n.T("tool.cleanfetch.no_fetcher_initialized"))
+	return "", nil, errors.New(i18n.T("tool.cleanfetch.no_fetcher_initialized"))
 }
 
 func allowFetchFallback(err error) bool {

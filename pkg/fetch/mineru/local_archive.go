@@ -316,6 +316,10 @@ func readLocalPackage(path string) (*localPackage, error) {
 	if err != nil {
 		return nil, err
 	}
+	return decodeLocalPackage(data)
+}
+
+func decodeLocalPackage(data []byte) (*localPackage, error) {
 	var record localPackage
 	if err := json.Unmarshal(data, &record); err != nil {
 		return nil, err

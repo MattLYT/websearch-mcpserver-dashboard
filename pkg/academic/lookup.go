@@ -180,6 +180,9 @@ func lookupCrossrefDOI(ctx context.Context, doi string) ([]antirobot.Result, err
 }
 
 func stringsTrimDOI(doi string) string {
+	if kind, id := ParsePaperQuery(doi); kind == "doi" {
+		return antirobot.NormalizeDOI(id)
+	}
 	s := strings.TrimSpace(doi)
 	s = strings.TrimPrefix(s, "https://doi.org/")
 	s = strings.TrimPrefix(s, "http://doi.org/")

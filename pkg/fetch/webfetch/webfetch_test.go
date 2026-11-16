@@ -248,7 +248,7 @@ func (s *spyMineru) HasToken() bool { return s.hasToken }
 func (s *spyMineru) PageLimit() int { return 600 }
 func (s *spyMineru) ParseURL(ctx context.Context, fileURL string) (string, error) {
 	s.parseURLCalls++
-	return "# MinerU", nil
+	return "# MinerU\nParsed body.", nil
 }
 func (s *spyMineru) ParseURLWithPages(ctx context.Context, fileURL string, pages []int, maxPages int) (string, error) {
 	s.parseURLCalls++

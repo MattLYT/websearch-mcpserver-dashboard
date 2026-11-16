@@ -149,9 +149,6 @@ func openalexPDFURL(w openalexWork) string {
 	if w.BestOALocation != nil && w.BestOALocation.PDFUrl != "" {
 		return w.BestOALocation.PDFUrl
 	}
-	if w.OpenAccess != nil && w.OpenAccess.OAURL != "" {
-		return w.OpenAccess.OAURL
-	}
 	return ""
 }
 
@@ -171,6 +168,9 @@ func openalexWorkToResult(w openalexWork) (antirobot.Result, bool) {
 	}
 	if resultURL == "" && w.DOI != "" {
 		resultURL = w.DOI
+	}
+	if resultURL == "" && w.OpenAccess != nil {
+		resultURL = w.OpenAccess.OAURL
 	}
 	if resultURL == "" {
 		resultURL = w.ID

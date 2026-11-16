@@ -26,17 +26,19 @@ import (
 // Result 封装 go-webfetch 的返回结果。
 type Result struct {
 	Title       string
+	ContentType string
 	Mode        string // "inline" 或 "saved_to_file"
 	Markdown    string
 	FilePath    string
 	TotalLines  int
 	TotalChars  int
 	AgentHint   string
-	PageCount   int    // PDF 内容：文档总页数（非 PDF 为 0）
-	Preamble    string // 页截断/选择说明，工具输出时置于正文前
-	ParseEngine string // PDF：实际解析器（pdf-lib / pdfium / mineru-remote / mineru-ocr）
-	ParsedPages int    // PDF：本次实际解析页数；0 表示解析器未返回页数
-	Persistent  bool   // Local PDF packages outlive temporary reading references.
+	PageCount   int            // PDF 内容：文档总页数（非 PDF 为 0）
+	Preamble    string         // 页截断/选择说明，工具输出时置于正文前
+	ParseEngine string         // PDF：实际解析器（pdf-lib / pdfium / mineru-remote / mineru-ocr）
+	ParsedPages int            // PDF：本次实际解析页数；0 表示解析器未返回页数
+	Persistent  bool           // Local PDF packages outlive temporary reading references.
+	Metadata    map[string]any // Extraction facts travel separately from paginated text.
 }
 
 // fetchEngine 抽象 go-webfetch 抓取引擎，便于测试注入替身。
@@ -190,7 +192,43 @@ func NewFromConfig(cfg config.CleanFetchConfig, pdfCfg config.PDFParserConfig, p
 }
 
 // Fetch 抓取网页或解析 PDF（自动检测 file:// 路径）。
-func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (*Result, error) {
+func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (result *Result, err error) {
+	defer func() {
+		if err != nil || result == nil {
+			return
+		}
+		status := fetchcontent.PageBodyStatus(result.Markdown, result.Title)
+		if result.Mode != "inline" {
+			file, readErr := os.Open(result.FilePath)
+			if readErr != nil {
+				result = nil
+				err = readErr
+				return
+			}
+			status, readErr = fetchcontent.PageBodyStatusReader(file, result.Title)
+			closeErr := file.Close()
+			if readErr != nil {
+				result = nil
+				err = readErr
+				return
+			}
+			if closeErr != nil {
+				result = nil
+				err = closeErr
+				return
+			}
+		}
+		if status.Status != "available" {
+			err = fmt.Errorf("%w: %w", errcode.New(errcode.Challenge, i18n.T("fetch.webfetch.empty_body_js")), &webfetch.EmptyContentError{URL: rawURL, Title: result.Title, CharCount: result.TotalChars})
+			result = nil
+			return
+		}
+		if result.Metadata == nil {
+			result.Metadata = map[string]any{}
+		}
+		result.Metadata["body"] = status
+		result.Metadata["source_url"] = rawURL
+	}()
 	f.beginActivity()
 	defer f.endActivity()
 
@@ -208,6 +246,7 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (*Result, error) {
 				Mode:        "inline",
 				Markdown:    md,
 				ParseEngine: "mineru-remote",
+				ContentType: "application/pdf",
 			}, nil
 		}
 		log.InfoT("log.fetch.webfetch.mineru_precise_api_parsing_failed_falling", "err", err)
@@ -217,11 +256,9 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (*Result, error) {
 	if err != nil {
 		return nil, wrapClassified(err)
 	}
-	if res.Mode == "inline" && !fetchcontent.HasPageBody(res.Markdown, res.Title) {
-		return nil, fmt.Errorf("%w: %w", errcode.New(errcode.Challenge, i18n.T("fetch.webfetch.empty_body_js")), &webfetch.EmptyContentError{URL: rawURL, Title: res.Title, CharCount: res.TotalChars})
-	}
 	return &Result{
 		Title:       res.Title,
+		ContentType: res.ContentType,
 		Mode:        res.Mode,
 		Markdown:    res.Markdown,
 		FilePath:    res.FilePath,
@@ -383,6 +420,7 @@ func (f *Fetcher) FetchPDFWithPages(ctx context.Context, rawURL string, pages []
 
 	out := &Result{
 		Title:       res.Title,
+		ContentType: res.ContentType,
 		Mode:        res.Mode,
 		Markdown:    res.Markdown,
 		FilePath:    res.FilePath,
@@ -600,6 +638,7 @@ func (f *Fetcher) parsePDFFileDirect(ctx context.Context, filePath string, opts 
 	}
 	return &Result{
 		Title:       res.Title,
+		ContentType: "application/pdf",
 		Mode:        mode,
 		Markdown:    res.Markdown,
 		FilePath:    res.FilePath,
